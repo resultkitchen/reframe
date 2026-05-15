@@ -1,0 +1,345 @@
+/**
+ * Shared contracts for the rebuild pipeline.
+ *
+ * Every module and every agent codes against THIS file. Keep it the single
+ * source of truth for cross-module shapes; do not redefine these elsewhere.
+ */
+
+/* ─────────────────────────── Config ─────────────────────────── */
+
+export type ApplyMode = 'pr' | 'propose';
+
+/** Gemini model IDs, one per pipeline role. Loaded from config/models.json. */
+export interface ModelConfig {
+  mapper: string;
+  agent1_audit: string;
+  agent2_ux: string;
+  agent3_design: string;
+  agent4_code: string;
+  agent5_verify: string;
+  agent6_compliance: string;
+  mechanical: string;
+}
+
+/** Fully-resolved configuration for one pipeline run. */
+export interface PipelineConfig {
+  /** GitHub URL or local filesystem path of the target project. */
+  target: string;
+  /** True when `target` is a local path (skip clone). */
+  isLocalPath: boolean;
+  /** Short slug derived from the target, used in dir names. */
+  projectSlug: string;
+  /** Scratch dir for clones — deleted on run end (success or failure). */
+  scratchDir: string;
+  /** Working copy of the target the pipeline operates on. */
+  workDir: string;
+  /** Structured run output directory (runs/<slug>-<stamp>/). */
+  runDir: string;
+  /** Capped number of concurrent page-workers. */
+  concurrency: number;
+  /** 'pr' = apply on a per-run branch + emit PR; 'propose' = diffs only. */
+  applyMode: ApplyMode;
+  /** Resolved Gemini model IDs. */
+  models: ModelConfig;
+  /** Path to the pinned brand spec (may be bootstrapped by Stage 0). */
+  brandPath: string;
+  /** Path to the pinned constraints spec. */
+  constraintsPath: string;
+  /** Gemini API key. */
+  geminiApiKey: string;
+  /** Per Gemini call timeout (ms). */
+  callTimeoutMs: number;
+  /** Max retries per Gemini call before surfacing failure. */
+  maxRetries: number;
+  /** When set, resume this existing run directory. */
+  resumeRunDir?: string;
+}
+
+/* ─────────────────────────── Brand & Constraints ─────────────────────────── */
+
+/** Pinned brand spec — INPUT to Agent 3, never invented per-run. */
+export interface BrandSpec {
+  name: string;
+  colors: Record<string, string>;        // token -> hex
+  typeScale: Record<string, string>;     // token -> size/lineheight
+  spacing: Record<string, string>;       // token -> value
+  radii?: Record<string, string>;
+  voice: string;                          // brand voice / tone description
+  componentStyle: string;                 // e.g. "flat, generous padding, subtle shadow"
+  /** True once an operator has reviewed + pinned it (vs. a raw bootstrap). */
+  pinned: boolean;
+}
+
+/** One compliance/correctness rule Agent 6 enforces. */
+export interface ConstraintRule {
+  id: string;
+  domain: string;                         // e.g. "TCPA", "HIPAA", "FTC"
+  description: string;
+  appliesTo: string;                      // routes/pages glob or "*"
+  severity: Severity;
+}
+
+/** Pinned constraints spec — INPUT to Agent 6. */
+export interface ConstraintsSpec {
+  project: string;
+  rules: ConstraintRule[];
+}
+
+/* ─────────────────────────── Stage 0 — Map ─────────────────────────── */
+
+export interface DbTable {
+  name: string;
+  columns: string[];
+  relationships: string[];                // free-text FK/relation notes
+}
+
+/** A DB query or API call mapped to the page that triggers it. */
+export interface DataCall {
+  page: string;                           // route/page slug
+  kind: 'query' | 'api' | 'rpc' | 'mutation';
+  target: string;                         // table / endpoint
+  description: string;
+}
+
+/**
+ * A code-vs-schema mismatch (adjustment #2): code referencing tables/columns
+ * that don't exist, dead code paths, types that don't match the DB.
+ */
+export interface BrokenContract {
+  kind: 'missing-table' | 'missing-column' | 'dead-path' | 'type-drift' | 'orphaned-feature';
+  location: string;                       // file:line
+  detail: string;
+  severity: Severity;
+}
+
+/** Per-page scope block. */
+export interface PageScope {
+  slug: string;                           // filesystem-safe id
+  route: string;                          // URL route
+  filePath: string;                       // primary source file
+  purpose: string;
+  userFunction: string;                   // user-facing function
+  dataDependencies: DataCall[];
+  libraries: string[];                    // libs in play for THIS page
+}
+
+/** Stage 0 output. */
+export interface ScopeDoc {
+  productGoal: string;
+  pages: PageScope[];
+  dbTables: DbTable[];
+  dataCalls: DataCall[];
+  componentInventory: string[];
+  libraryInventory: string[];
+  brokenContracts: BrokenContract[];
+  /** Candidate brand spec derived from the repo (operator pins it). */
+  bootstrappedBrand: BrandSpec;
+}
+
+/* ─────────────────────────── Stage 0.5 — Boot gate ─────────────────────────── */
+
+export type BootStatus = 'running' | 'wont-start' | 'no-server';
+
+export interface BootResult {
+  status: BootStatus;
+  /** Base URL the app serves on when status === 'running'. */
+  baseUrl?: string;
+  /** Command used to start the dev server. */
+  startCommand?: string;
+  /** PID of the running server (for teardown). */
+  pid?: number;
+  installLog: string;
+  bootLog: string;
+  /** Human-readable reason when status !== 'running'. */
+  reason?: string;
+  /** External integrations detected + how they were stubbed. */
+  stubbedIntegrations: string[];
+}
+
+/* ─────────────────────────── Agents ─────────────────────────── */
+
+export type Severity = 'critical' | 'high' | 'medium' | 'low';
+
+export type AgentName = 'audit' | 'ux' | 'design' | 'code' | 'verify' | 'compliance';
+
+/** A single functional/UX gap found by Agent 1. */
+export interface Gap {
+  id: string;                             // stable id, referenced by verify
+  category: 'functional' | 'ux';
+  severity: Severity;
+  description: string;
+  recommendation: string;
+  /** Console errors / evidence captured while driving the page. */
+  evidence?: string[];
+}
+
+/** Agent 1 — Audit. */
+export interface AuditResult {
+  page: string;
+  consoleErrors: string[];
+  interactionsExercised: string[];
+  gaps: Gap[];
+}
+
+/** Agent 2 — UX proposal. */
+export interface UxProposal {
+  page: string;
+  asciiWireframe: string;
+  functionalSpec: string;
+  /** Libraries used — MUST already be in the project. */
+  librariesUsed: string[];
+}
+
+/** Agent 3 — Design. */
+export interface DesignSpec {
+  page: string;
+  /** Concrete visual spec, expressed in pinned-brand tokens. */
+  spec: string;
+  brandTokensUsed: string[];
+}
+
+/** Agent 6 — Compliance. */
+export interface ComplianceFinding {
+  ruleId: string;
+  domain: string;
+  severity: Severity;
+  location: string;
+  problem: string;
+  requiredFix: string;
+}
+export interface ComplianceResult {
+  page: string;
+  findings: ComplianceFinding[];
+  /** True when no critical/high findings remain unaddressed in the spec. */
+  clean: boolean;
+}
+
+/** Agent 4 — Code. */
+export interface CodeResult {
+  page: string;
+  filesChanged: string[];
+  /** Unified diff of all changes for this page. */
+  diff: string;
+  applied: boolean;                       // true in 'pr' mode, false in 'propose'
+  notes: string;
+}
+
+/** Agent 5 — Verify. */
+export interface VerifyResult {
+  page: string;
+  /** Gap ids from Agent 1 confirmed closed. */
+  gapsClosed: string[];
+  /** Gap ids still open. */
+  gapsOpen: string[];
+  regressions: string[];
+  pass: boolean;
+}
+
+/* ─────────────────────────── State & Manifest ─────────────────────────── */
+
+export type StepStatus = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
+
+/** Per-page, per-agent checkpoint for resumability (adjustment #10). */
+export interface PageState {
+  slug: string;
+  agents: Record<AgentName, StepStatus>;
+  pass?: boolean;
+}
+
+/** Durable run ledger — written after every checkpoint. */
+export interface RunState {
+  runDir: string;
+  projectSlug: string;
+  startedAt: string;
+  stage0: StepStatus;
+  stage0_5: StepStatus;
+  pages: Record<string, PageState>;       // slug -> state
+  testScaffold: StepStatus;
+  finishedAt?: string;
+}
+
+/** Per-page summary in the manifest. */
+export interface PageManifestEntry {
+  slug: string;
+  route: string;
+  agentsRun: AgentName[];
+  pass: boolean;
+  gapsFound: number;
+  gapsClosed: number;
+  complianceFindings: number;
+}
+
+/** A seeded human-test user. */
+export interface TestUser {
+  role: string;
+  email: string;
+  password: string;
+  loginUrl: string;
+  scriptPath: string;                     // path to that role's test script
+}
+
+/** Final run manifest (adjustment: pass/fail per page + wall-clock). */
+export interface RunManifest {
+  project: string;
+  target: string;
+  startedAt: string;
+  finishedAt: string;
+  wallClockMs: number;
+  bootStatus: BootStatus;
+  pagesProcessed: PageManifestEntry[];
+  testUsers: TestUser[];
+  applyMode: ApplyMode;
+  prUrl?: string;
+  scratchCleaned: boolean;
+  /** Timeouts / alerts surfaced during the run (adjustment: timeout alerting). */
+  alerts: string[];
+}
+
+/* ─────────────────────────── Gemini ─────────────────────────── */
+
+export type ModelRole = keyof ModelConfig;
+
+export interface GeminiCallOptions {
+  role: ModelRole;
+  systemInstruction?: string;
+  prompt: string;
+  /** Request strict JSON output. */
+  json?: boolean;
+  /** Inline image parts (base64 PNG screenshots) for multimodal calls. */
+  images?: string[];
+  /** Override the default per-call timeout. */
+  timeoutMs?: number;
+}
+
+/** Public surface of the Gemini client (implemented in src/gemini.ts). */
+export interface IGeminiClient {
+  call(opts: GeminiCallOptions): Promise<string>;
+  callJson<T>(opts: GeminiCallOptions): Promise<T>;
+  /** Timeout/failure alerts accumulated during the run. */
+  readonly alerts: string[];
+}
+
+/* ─────────────────────────── Agent context ─────────────────────────── */
+
+/**
+ * Everything an agent receives. The orchestrator builds one per page and
+ * populates the upstream-result fields as the DAG progresses:
+ *   {audit, ux, design, compliance} run first → code → verify.
+ */
+export interface AgentContext {
+  config: PipelineConfig;
+  page: PageScope;
+  scope: ScopeDoc;
+  brand: BrandSpec;
+  constraints: ConstraintsSpec;
+  boot: BootResult;
+  gemini: IGeminiClient;
+  /** Absolute path to this page's run output dir (runs/.../pages/<slug>/). */
+  pageDir: string;
+  /** Upstream results — present when that agent has already run. */
+  audit?: AuditResult;
+  ux?: UxProposal;
+  design?: DesignSpec;
+  compliance?: ComplianceResult;
+  code?: CodeResult;
+}

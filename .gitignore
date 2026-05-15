@@ -11,3 +11,9 @@ out/
 .wolf/backups/
 .DS_Store
 Thumbs.db
+
+# rebuild-pipeline
+dist/
+runs/
+*.scratch/
+playwright-report/

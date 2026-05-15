@@ -1,0 +1,41 @@
+{
+  "$comment": "Brand spec TEMPLATE. Copy to brand.json and pin it. Stage 0 can BOOTSTRAP a candidate from the target repo (Tailwind config / CSS vars / components) — but Agent 3 only treats a brand as authoritative when pinned:true. A pinned brand is an INPUT, never invented per-run, so re-runs are deterministic. See docs/BRAND_SPEC.md.",
+  "name": "Example SaaS",
+  "colors": {
+    "primary": "#2563eb",
+    "primary-hover": "#1d4ed8",
+    "surface": "#ffffff",
+    "surface-muted": "#f8fafc",
+    "text": "#0f172a",
+    "text-muted": "#64748b",
+    "border": "#e2e8f0",
+    "success": "#16a34a",
+    "danger": "#dc2626"
+  },
+  "typeScale": {
+    "display": "2.25rem/2.5rem",
+    "h1": "1.875rem/2.25rem",
+    "h2": "1.5rem/2rem",
+    "h3": "1.25rem/1.75rem",
+    "body": "1rem/1.5rem",
+    "small": "0.875rem/1.25rem",
+    "caption": "0.75rem/1rem"
+  },
+  "spacing": {
+    "xs": "0.25rem",
+    "sm": "0.5rem",
+    "md": "1rem",
+    "lg": "1.5rem",
+    "xl": "2rem",
+    "2xl": "3rem"
+  },
+  "radii": {
+    "sm": "0.375rem",
+    "md": "0.5rem",
+    "lg": "0.75rem",
+    "full": "9999px"
+  },
+  "voice": "Clear, confident, plain-spoken. No hype, no jargon. Short sentences.",
+  "componentStyle": "Flat surfaces, generous padding, one subtle shadow level, light backgrounds. Single accent color used sparingly for primary actions only.",
+  "pinned": false
+}

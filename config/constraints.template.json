@@ -1,0 +1,27 @@
+{
+  "$comment": "Constraints spec TEMPLATE. Copy to constraints.json and pin it. This is the INPUT to Agent 6 (Compliance) — the domain/legal/correctness rules a working+pretty page can still violate. Without this, the pipeline rebuilds pages that look right and run clean but are non-compliant. Add the rules that matter for the target's vertical.",
+  "project": "Example SaaS",
+  "rules": [
+    {
+      "id": "tcpa-consent",
+      "domain": "TCPA",
+      "description": "Any lead-capture form collecting a phone number must show prior-express-written-consent language: names the contacting party, discloses autodialer + prerecorded/artificial-voice calls and SMS, states consent is not a condition of purchase, includes message frequency + STOP/HELP.",
+      "appliesTo": "*",
+      "severity": "critical"
+    },
+    {
+      "id": "no-fabricated-claims",
+      "domain": "FTC",
+      "description": "No fabricated reviews, ratings, testimonials, or statistics. Marketing claims must be substantiable.",
+      "appliesTo": "*",
+      "severity": "high"
+    },
+    {
+      "id": "privacy-disclosure",
+      "domain": "Privacy",
+      "description": "Forms collecting personal data must link a privacy policy and disclose how data is used/shared.",
+      "appliesTo": "*",
+      "severity": "high"
+    }
+  ]
+}
