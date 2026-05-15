@@ -17,3 +17,5 @@ dist/
 runs/
 *.scratch/
 playwright-report/
+
+*.log

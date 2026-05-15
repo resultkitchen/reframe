@@ -22,12 +22,45 @@ export async function isGitRepo(dir: string): Promise<boolean> {
   }
 }
 
-/** Clone `url` into `destDir`. The parent of `destDir` is created if needed. */
+/**
+ * Clone `url` into `destDir`. The parent of `destDir` is created if needed.
+ *
+ * Tries `git clone` first; on failure (private repo, proxied network, a
+ * transient connectivity blip) falls back to `gh repo clone`, which is
+ * authenticated and proxy-aware. A plain `git` failure is retried once.
+ */
 export async function cloneRepo(url: string, destDir: string): Promise<void> {
   const parent = path.dirname(destDir);
   fs.mkdirSync(parent, { recursive: true });
-  // simple-git clone: clone(repo, localPath).
-  await simpleGit().clone(url, destDir);
+
+  let gitErr: unknown;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await simpleGit().clone(url, destDir);
+      return;
+    } catch (err) {
+      gitErr = err;
+      // Clear a partial clone before retry / fallback.
+      try {
+        fs.rmSync(destDir, { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
+      if (attempt === 1) {
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+  }
+
+  // Fallback: gh repo clone (uses the gh token + gh's network stack).
+  const gh = await runGh(['repo', 'clone', url, destDir], parent);
+  if (gh.code === 0) {
+    return;
+  }
+  throw new Error(
+    `clone failed via git (${gitErr instanceof Error ? gitErr.message : String(gitErr)}) ` +
+      `and via gh (${gh.stderr.trim() || `exit ${gh.code}`})`,
+  );
 }
 
 /**
