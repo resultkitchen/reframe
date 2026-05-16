@@ -255,6 +255,9 @@ export async function runCode(ctx: AgentContext): Promise<CodeResult> {
       role: 'agent4_code',
       systemInstruction,
       prompt,
+      // The code agent rewrites whole files; on large pages the pro model
+      // routinely needs more than the default per-call timeout. Give it 5 min.
+      timeoutMs: 300_000,
     });
     newContent = unfence(raw ?? '');
   } catch (err) {
