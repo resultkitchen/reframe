@@ -455,6 +455,18 @@ async function bootServer(
   const startCommand = `${pm.pm} ${args.join(' ')}`;
 
   let logBuf = `$ ${startCommand}\n`;
+
+  // Do NOT pin PORT. A dev server should pick a free port and announce it on
+  // stdout (extractPortFromLog catches it). Pinning PORT makes Next.js
+  // hard-fail with EADDRINUSE when that port is already taken by another
+  // process; unsetting it lets Next/Vite/etc. auto-select a free port.
+  const childEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    BROWSER: 'none', // suppress auto-open
+    CI: '1',
+  };
+  delete childEnv.PORT;
+
   let child;
   try {
     child = spawn(pm.pm, args, {
@@ -462,13 +474,7 @@ async function bootServer(
       shell: IS_WINDOWS,
       detached: !IS_WINDOWS, // own process group on POSIX for clean teardown
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        // Pin a known port for predictability; many frameworks honor PORT.
-        PORT: '3000',
-        BROWSER: 'none', // suppress auto-open
-        CI: '1',
-      },
+      env: childEnv,
     });
   } catch (err) {
     return {
