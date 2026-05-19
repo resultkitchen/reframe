@@ -39,6 +39,12 @@ const DIGEST_CAP = 220_000;
 /** Max files walked before bailing (pathological repos). */
 const MAX_FILES = 6_000;
 
+/** Mapper model call timeout (ms) — big monorepo digests are slow. */
+const MAPPER_TIMEOUT_MS = 300_000;
+
+/** Above this page count, Stage 0 has almost certainly over-scoped. */
+const PAGE_COUNT_WARN_THRESHOLD = 80;
+
 /** Extensions whose contents are interesting to inline into the digest. */
 const SOURCE_EXT = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.vue', '.svelte', '.astro',
@@ -156,15 +162,21 @@ function appRouterRoute(rel: string): string | null {
   const m = rel.match(/(?:^|\/)app\/(.*)$/);
   if (!m) return null;
   let inner = m[1];
-  // Only page entrypoints map to routes.
-  if (!/(?:^|\/)(page|route)\.(t|j)sx?$/.test(inner)) return null;
-  inner = inner.replace(/\/(page|route)\.(t|j)sx?$/, '');
+  // Only `page` entrypoints are user-facing screens. `route.(t|j)s` files are
+  // API handlers, not pages — they must never become an auditable route.
+  if (!/(?:^|\/)page\.(t|j)sx?$/.test(inner)) return null;
+  // Anchor with (^|\/) so a repo-root `app/page.tsx` collapses to `/`
+  // (a bare `/page\.tsx$` would not match and leave the route as `/page.tsx`).
+  inner = inner.replace(/(^|\/)page\.(t|j)sx?$/, '');
   // Strip route groups (folder) and parallel/intercept segments.
   const segments = inner
     .split('/')
     .filter((s) => s.length > 0 && !s.startsWith('(') && !s.startsWith('@'));
   const route = `/${segments.join('/')}`;
-  return route === '/' ? '/' : route.replace(/\/$/, '');
+  const normalized = route === '/' ? '/' : route.replace(/\/$/, '');
+  // API handlers are not browser-auditable screens.
+  if (normalized === '/api' || normalized.startsWith('/api/')) return null;
+  return normalized;
 }
 
 /** Translate a Next.js pages-router file path into a URL route. */
@@ -410,6 +422,13 @@ function mapperSystemInstruction(): string {
     'You receive a compact digest of a code repository (file tree, DB schema',
     'sources, key file contents). Produce a precise, factual scope document.',
     'Rules:',
+    '- "pages" are user-facing UI SCREENS ONLY — routes a person navigates to',
+    '  in a browser and sees rendered UI. NEVER include API route handlers,',
+    '  server endpoints, any /api/* route, route.ts/route.js files, middleware,',
+    '  layouts, or non-visual files. If a route returns JSON/data rather than a',
+    '  rendered screen, exclude it. A typical SaaS app has ~20-50 real screens;',
+    '  if you are about to emit far more, you are almost certainly including',
+    '  non-screen routes — drop them.',
     '- Only describe things actually present in the digest. Do not invent.',
     '- For brokenContracts, actively diff CODE against SCHEMA: find code that',
     '  references DB tables or columns that do NOT exist in the schema',
@@ -433,7 +452,9 @@ function mapperPrompt(
     `Project slug: ${projectSlug}`,
     '',
     'Statically-detected page routes (use as the basis for "pages", but you',
-    'may add/refine if the digest shows more):',
+    'may add/refine if the digest shows more). These are UI screens only —',
+    'API endpoints and route handlers have already been filtered out and must',
+    'NOT be re-added:',
     routeHints || '(none detected statically)',
     '',
     clientRoutes.length > 0
@@ -747,6 +768,8 @@ export async function runStage0(
     raw = await gemini.callJson<MapperResponse>({
       role: 'mapper',
       json: true,
+      // Big monorepo digests take far longer than the default 120s.
+      timeoutMs: MAPPER_TIMEOUT_MS,
       systemInstruction: mapperSystemInstruction(),
       prompt: mapperPrompt(
         config.projectSlug,
@@ -794,6 +817,18 @@ export async function runStage0(
 
   // 6. Normalize into a strict ScopeDoc.
   const scope = normalizeScope(raw, config, detectedRoutes, depsInventory);
+
+  // 6b. Over-scope guard — a real app rarely has more than ~50 UI screens.
+  if (scope.pages.length > PAGE_COUNT_WARN_THRESHOLD) {
+    const warning =
+      `[stage0] WARNING: mapped ${scope.pages.length} pages ` +
+      `(> ${PAGE_COUNT_WARN_THRESHOLD}). This usually means over-scoping — ` +
+      `API routes, route handlers, or non-screen files leaking into "pages". ` +
+      `A typical app has ~30-40 real screens. Review scope.md before ` +
+      `proceeding; a full run over this many pages is slow and costly.`;
+    console.warn(warning);
+    gemini.alerts.push(warning);
+  }
 
   // 7. Persist.
   fs.writeFileSync(
