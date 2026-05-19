@@ -6,11 +6,19 @@ out/
 .env
 .env.local
 .env.*.local
-.wolf/token-ledger.json
-.wolf/memory.md
-.wolf/backups/
 .DS_Store
 Thumbs.db
+
+# Local-only — OpenWolf memory layer. Never push.
+.wolf/
+
+# Client-specific work + internal planning. Keep local, never publish —
+# these name real client projects / paths and must not ship in a public repo.
+OPTIMIZATION-PLAN.md
+RETROSPECTIVE.md
+RERUN-CASESDAILY-PROMPT.md
+FIX-MAPPER-PROMPT.md
+config/casesdaily-*
 
 # rebuild-pipeline
 dist/
