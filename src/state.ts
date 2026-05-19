@@ -74,31 +74,61 @@ export function loadState(runDir: string): RunState | null {
   }
 }
 
+/** Monotonic counter so concurrent saveState calls never collide on a tmp name. */
+let stateWriteCounter = 0;
+
+/** Brief synchronous sleep — used only for retry backoff on transient locks. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** Error codes that indicate a transient file lock worth retrying. */
+const TRANSIENT_FS_ERRORS = new Set([
+  'EPERM',
+  'EBUSY',
+  'EACCES',
+  'EEXIST',
+  'ENOENT',
+]);
+
 /**
- * Atomically write `runDir/state.json`: write a tmp file in the same dir,
- * then rename over the target (rename is atomic on the same volume).
+ * Atomically write `runDir/state.json`: write a uniquely-named tmp file in the
+ * same dir, then rename over the target (rename is atomic on the same volume).
+ *
+ * On Windows a virus scanner / search indexer can briefly lock the target and
+ * make `renameSync` throw EPERM/EBUSY — so the write+rename is retried a few
+ * times with short backoff. Callers should additionally treat a thrown error
+ * as non-fatal (a stale checkpoint must never abort real work).
  */
 export function saveState(runDir: string, state: RunState): void {
   fs.mkdirSync(runDir, { recursive: true });
 
   const target = path.join(runDir, 'state.json');
-  const tmp = path.join(
-    runDir,
-    `.state.${process.pid}.${Date.now()}.tmp`,
-  );
-
   const json = `${JSON.stringify(state, null, 2)}\n`;
 
-  try {
-    fs.writeFileSync(tmp, json, 'utf8');
-    fs.renameSync(tmp, target);
-  } catch (err) {
-    // Clean up the tmp file on failure so it never lingers.
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    // Fresh, unique tmp name per attempt (pid + time + monotonic counter).
+    const tmp = path.join(
+      runDir,
+      `.state.${process.pid}.${Date.now()}.${(stateWriteCounter += 1)}.tmp`,
+    );
     try {
-      if (fs.existsSync(tmp)) fs.rmSync(tmp, { force: true });
-    } catch {
-      // Ignore — best-effort cleanup.
+      fs.writeFileSync(tmp, json, 'utf8');
+      fs.renameSync(tmp, target);
+      return;
+    } catch (err) {
+      lastErr = err;
+      // Best-effort: never leave a tmp file lingering.
+      try {
+        if (fs.existsSync(tmp)) fs.rmSync(tmp, { force: true });
+      } catch {
+        /* ignore */
+      }
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (!code || !TRANSIENT_FS_ERRORS.has(code)) break;
+      sleepSync(4 * 2 ** attempt); // 4, 8, 16, 32, 64, 128 ms
     }
-    throw err;
   }
+  throw lastErr;
 }

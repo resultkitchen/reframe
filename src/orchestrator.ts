@@ -308,9 +308,18 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       };
 
       // Checkpoint helper — marks an agent's status and persists state.
+      // A failed checkpoint write must NEVER abort the page: resume just
+      // becomes slightly stale. Swallow + log; do not throw.
       const mark = (agent: AgentName, status: StepStatus): void => {
         pageState.agents[agent] = status;
-        saveState(config.runDir, state!);
+        try {
+          saveState(config.runDir, state!);
+        } catch (err) {
+          console.error(
+            `[${page.slug}] checkpoint save failed (${agent}=${status}) — ` +
+              `continuing: ${errMsg(err)}`,
+          );
+        }
       };
       // Run one agent unless already 'done' on a resumed run.
       const runAgent = async <T>(

@@ -114,9 +114,18 @@ export class PageDriver {
       return { ok: false, detail: `could not open login page ${loginUrl}: ${errText(err)}` };
     }
 
+    // Fill with real keystrokes (pressSequentially), not page.fill's bulk
+    // value-set: many login forms keep the submit button `disabled` until
+    // React / react-hook-form validation fires on keystrokes, and validate
+    // on blur. A bulk value-set can leave the button stuck disabled.
     try {
-      await this.page.fill(auth.emailSelector, role.email, { timeout: 8000 });
-      await this.page.fill(auth.passwordSelector, role.password, { timeout: 8000 });
+      const emailEl = this.page.locator(auth.emailSelector).first();
+      await emailEl.fill('', { timeout: 8000 });
+      await emailEl.pressSequentially(role.email, { delay: 15 });
+      const pwEl = this.page.locator(auth.passwordSelector).first();
+      await pwEl.fill('', { timeout: 8000 });
+      await pwEl.pressSequentially(role.password, { delay: 15 });
+      await pwEl.blur().catch(() => {});
     } catch (err) {
       return {
         ok: false,
@@ -126,32 +135,70 @@ export class PageDriver {
       };
     }
 
+    // Submit. Try the button; if it stays disabled, fall back to pressing
+    // Enter in the password field, then to the form's requestSubmit().
+    let submitted = false;
     try {
-      await this.page.click(auth.submitSelector, { timeout: 8000 });
-    } catch (err) {
-      return {
-        ok: false,
-        detail: `could not click submit (${auth.submitSelector}) for role "${role.role}": ${errText(err)}`,
-      };
-    }
-
-    // Let the post-login redirect settle.
-    try {
-      await this.page.waitForTimeout(Math.max(0, auth.postLoginWaitMs || 0));
+      await this.page
+        .locator(auth.submitSelector)
+        .first()
+        .click({ timeout: 6000 });
+      submitted = true;
     } catch {
-      /* timeout wait failing is non-fatal */
+      /* button likely still disabled — try the fallbacks */
     }
-
-    // Heuristic success check: a successful login redirects away from the
-    // login page. Still on it ⇒ bad credentials or the app never reached its
-    // auth backend.
-    if (this.page.url().includes(loginPath)) {
+    if (!submitted) {
+      try {
+        await this.page
+          .locator(auth.passwordSelector)
+          .first()
+          .press('Enter', { timeout: 4000 });
+        submitted = true;
+      } catch {
+        /* fall through to requestSubmit */
+      }
+    }
+    if (!submitted) {
+      try {
+        await this.page
+          .locator(auth.submitSelector)
+          .first()
+          .evaluate((btn) => {
+            const form = (btn as HTMLElement).closest('form');
+            if (form) form.requestSubmit();
+          });
+        submitted = true;
+      } catch {
+        /* all submit strategies exhausted */
+      }
+    }
+    if (!submitted) {
       return {
         ok: false,
         detail:
-          `still on the login page after submitting as "${role.role}" — login ` +
-          `likely failed (check credentials, selectors, or that the app reaches ` +
-          `its real auth backend; auth-aware runs need --real-env).`,
+          `could not submit the login form for role "${role.role}" — the ` +
+          `submit button (${auth.submitSelector}) stayed disabled and the ` +
+          `Enter-key and requestSubmit() fallbacks also failed.`,
+      };
+    }
+
+    // Wait for the post-login redirect AWAY from the login page. A successful
+    // login navigates off it; a fixed wait races the redirect under load, so
+    // wait on the URL itself with a generous timeout. Still on the login page
+    // when it elapses ⇒ login genuinely failed.
+    const settleMs = Math.max(auth.postLoginWaitMs || 0, 15000);
+    try {
+      await this.page.waitForURL((u) => !u.pathname.includes(loginPath), {
+        timeout: settleMs,
+      });
+    } catch {
+      return {
+        ok: false,
+        detail:
+          `submitted the login form as "${role.role}" but never left the ` +
+          `login page within ${Math.round(settleMs / 1000)}s — login failed ` +
+          `(verify the test account exists and the password is correct, the ` +
+          `selectors are right, and the app reaches its real auth backend).`,
       };
     }
 

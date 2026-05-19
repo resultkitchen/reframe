@@ -260,10 +260,17 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
   const isLocalPath = detectLocalPath(args.target);
   const projectSlug = deriveSlug(args.target, isLocalPath);
 
+  // ISO stamp (: replaced by -) — used for both the run dir and the default
+  // scratch dir so each is unique per run.
+  const stamp = new Date().toISOString().replace(/:/g, '-');
+
   const scratchDir =
     args.scratch ??
     process.env.PIPELINE_SCRATCH ??
-    path.join(os.tmpdir(), `rebuild-${projectSlug}`);
+    // Unique per run: a STABLE scratch path means a single locked leftover
+    // (e.g. a dev-server file handle Windows has not released) would block
+    // every future run. A run-scoped path sidesteps that entirely.
+    path.join(os.tmpdir(), `rebuild-${projectSlug}-${stamp}`);
 
   // For a local-path target, the pipeline works on a COPY inside scratchDir so
   // the original is never mutated. For a clone, the clone IS the working copy.
@@ -271,8 +278,7 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     ? path.join(scratchDir, projectSlug)
     : path.join(scratchDir, projectSlug);
 
-  // Run dir: runs/<slug>-<ISO stamp, : replaced by ->.
-  const stamp = new Date().toISOString().replace(/:/g, '-');
+  // Run dir: runs/<slug>-<ISO stamp>.
   const runDir = args.resume
     ? path.resolve(args.resume)
     : path.join(process.cwd(), 'runs', `${projectSlug}-${stamp}`);

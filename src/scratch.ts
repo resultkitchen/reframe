@@ -53,6 +53,44 @@ function copyTree(src: string, dest: string): void {
 }
 
 /**
+ * Best-effort delete of leftover scratch dirs from earlier runs of this
+ * project (`rebuild-<slug>` and `rebuild-<slug>-<stamp>` siblings). A run that
+ * could not clean up — a Windows file lock the dev server left behind —
+ * leaves one behind; it has usually freed up by the next run. Never throws,
+ * never touches the current run's own scratch dir.
+ *
+ * Skipped entirely when scratchDir is not a default run-scoped path (i.e. the
+ * operator passed an explicit --scratch / PIPELINE_SCRATCH).
+ */
+function sweepStaleScratch(config: PipelineConfig): void {
+  try {
+    const parent = path.dirname(config.scratchDir);
+    const self = path.basename(config.scratchDir);
+    const exact = `rebuild-${config.projectSlug}`;
+    const prefix = `${exact}-`;
+    // Only sweep when our own scratch is a default run-scoped dir.
+    if (!self.startsWith(prefix)) return;
+
+    for (const name of fs.readdirSync(parent)) {
+      if (name === self) continue;
+      if (name !== exact && !name.startsWith(prefix)) continue;
+      try {
+        fs.rmSync(path.join(parent, name), {
+          recursive: true,
+          force: true,
+          maxRetries: 3,
+          retryDelay: 300,
+        });
+      } catch {
+        // Still locked — leave it; a later run will retry. Not fatal.
+      }
+    }
+  } catch {
+    // readdir failed (parent missing, etc.) — nothing to sweep.
+  }
+}
+
+/**
  * Prepare the scratch directory + working copy.
  *
  * - Local-path target → copy the project into `config.workDir`.
@@ -71,9 +109,27 @@ export async function prepareScratch(config: PipelineConfig): Promise<void> {
     );
   }
 
-  // Fresh working copy every time.
+  // Clear leftover scratch dirs from prior runs (best-effort).
+  sweepStaleScratch(config);
+
+  // Fresh working copy. With a unique-per-run scratch dir workDir normally
+  // does not exist; tolerate (retry, then fail with a clear message) a locked
+  // leftover rather than crashing with a raw EPERM.
   if (fs.existsSync(config.workDir)) {
-    fs.rmSync(config.workDir, { recursive: true, force: true });
+    try {
+      fs.rmSync(config.workDir, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 300,
+      });
+    } catch (err) {
+      throw new Error(
+        `scratch work dir "${config.workDir}" exists and could not be ` +
+          `cleared (locked): ${err instanceof Error ? err.message : String(err)}. ` +
+          `Pass --scratch <fresh-path> or remove it manually.`,
+      );
+    }
   }
 
   if (config.isLocalPath) {
