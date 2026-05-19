@@ -7,7 +7,10 @@
  *
  * Flags (parsed by resolveConfig):
  *   --concurrency <n>        cap on concurrent page-workers (default 8)
- *   --apply-mode <pr|propose>  pr = branch + PR, propose = diffs only (default pr)
+ *   --apply-mode <pr|propose|review>  pr = branch + PR, propose = diffs only,
+ *                            review = review agents only + proposed-changes.md
+ *   --real-env               preserve the target's real .env.local (no stubs)
+ *   --read-only              skip destructive browser clicks (implied by --real-env)
  *   --brand <path>           pinned brand spec (else Stage 0 bootstraps one)
  *   --constraints <path>     pinned constraints spec for Agent 6
  *   --scratch <path>         scratch dir for the clone (else os tmp)
@@ -29,8 +32,17 @@ USAGE
 
 FLAGS
   --concurrency <n>           Max concurrent page-workers        (default: 8)
-  --apply-mode <pr|propose>   pr: per-run branch + PR
-                              propose: write diffs only          (default: pr)
+  --apply-mode <mode>         pr:      per-run branch + PR        (default)
+                              propose: write diffs only
+                              review:  run audit/ux/design/compliance on every
+                                       screen, skip code+verify, emit one
+                                       proposed-changes.md for approval. Resume
+                                       with --apply-mode pr to apply.
+  --real-env                  Preserve the target's real .env.local instead of
+                              writing safe stubs — point at a live install.
+                              Implies --read-only.
+  --read-only                 Browser exercise skips destructive clicks
+                              (delete/send/pay/submit/…) — no real mutations.
   --brand <path>              Pinned brand spec (JSON). If omitted or not
                               pinned, Stage 0 bootstraps a candidate and the
                               run is non-deterministic — see docs/BRAND_SPEC.md.
@@ -49,6 +61,11 @@ EXAMPLES
   pipeline rebuild ./local/project --apply-mode propose --concurrency 4
   pipeline rebuild https://github.com/acme/app --brand config/brand.json
   pipeline rebuild ./project --resume runs/project-2026-05-15T10-00-00-000Z
+
+  # Two-pass review gate against a live install:
+  pipeline rebuild ./project --apply-mode review --real-env
+  #   ...review runs/project-<stamp>/proposed-changes.md, then:
+  pipeline rebuild ./project --resume runs/project-<stamp> --apply-mode pr
 
 EXIT CODES
   0  every processed page passed verification

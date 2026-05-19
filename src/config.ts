@@ -141,6 +141,8 @@ interface ParsedArgs {
   constraints?: string;
   scratch?: string;
   resume?: string;
+  realEnv?: boolean;
+  readOnly?: boolean;
 }
 
 /**
@@ -172,10 +174,16 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.concurrency = n;
     } else if (tok === '--apply-mode') {
       const v = next();
-      if (v !== 'pr' && v !== 'propose') {
-        throw new Error(`--apply-mode must be 'pr' or 'propose' (got "${v}")`);
+      if (v !== 'pr' && v !== 'propose' && v !== 'review') {
+        throw new Error(
+          `--apply-mode must be 'pr', 'propose', or 'review' (got "${v}")`,
+        );
       }
       out.applyMode = v;
+    } else if (tok === '--real-env') {
+      out.realEnv = true;
+    } else if (tok === '--read-only') {
+      out.readOnly = true;
     } else if (tok === '--brand') {
       out.brand = next();
     } else if (tok === '--constraints') {
@@ -284,6 +292,9 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     runDir,
     concurrency: args.concurrency ?? 8,
     applyMode: args.applyMode ?? 'pr',
+    realEnv: args.realEnv ?? false,
+    // --real-env always drives read-only so a live backend takes no mutations.
+    readOnlyExercise: (args.readOnly ?? false) || (args.realEnv ?? false),
     models: loadModels(),
     brandPath,
     constraintsPath,

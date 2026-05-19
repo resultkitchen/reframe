@@ -8,17 +8,28 @@
 
 import type { Browser, ConsoleMessage, Page } from 'playwright';
 
+/**
+ * Labels matching this pattern indicate a click that could mutate data, send
+ * a message, or charge money. In read-only mode they are skipped, not clicked.
+ */
+const DESTRUCTIVE_LABEL =
+  /\b(delete|remove|destroy|drop|send|submit|pay|payment|purchase|buy|checkout|charge|order|subscribe|unsubscribe|confirm|save|update|publish|deactivate|disable|archive|cancel|approve|reject|decline|invite|sign\s*out|log\s*out|logout)\b/i;
+
 export class PageDriver {
   private readonly browser: Browser;
 
   private readonly page: Page;
 
+  /** When true, exercise() skips destructive clicks (see DESTRUCTIVE_LABEL). */
+  private readonly readOnly: boolean;
+
   /** Console errors + uncaught page errors collected since launch. */
   private readonly consoleErrors: string[] = [];
 
-  private constructor(browser: Browser, page: Page) {
+  private constructor(browser: Browser, page: Page, readOnly: boolean) {
     this.browser = browser;
     this.page = page;
+    this.readOnly = readOnly;
 
     // Capture console errors.
     this.page.on('console', (msg: ConsoleMessage) => {
@@ -33,13 +44,18 @@ export class PageDriver {
     });
   }
 
-  /** Launch headless Chromium and open a fresh page. */
-  static async launch(): Promise<PageDriver> {
+  /**
+   * Launch headless Chromium and open a fresh page.
+   *
+   * `opts.readOnly` makes exercise() skip destructive clicks — set it when
+   * driving a live backend so no real mutation/email/charge fires.
+   */
+  static async launch(opts?: { readOnly?: boolean }): Promise<PageDriver> {
     const { chromium } = await import('playwright');
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();
     const page = await context.newPage();
-    return new PageDriver(browser, page);
+    return new PageDriver(browser, page, opts?.readOnly ?? false);
   }
 
   /** Navigate to `url` and wait for the network to settle. */
@@ -121,6 +137,19 @@ export class PageDriver {
           const text = (await el.innerText().catch(() => '')) || '';
           const aria = await el.getAttribute('aria-label').catch(() => null);
           label = (text.trim() || aria || `clickable#${i}`).slice(0, 80);
+
+          // Read-only mode: never click anything that could mutate data, send
+          // a message, charge money, or end the session. Record the skip so
+          // the audit still knows the element exists.
+          if (this.readOnly) {
+            const type = (
+              await el.getAttribute('type').catch(() => null)
+            )?.toLowerCase();
+            if (type === 'submit' || DESTRUCTIVE_LABEL.test(label)) {
+              interactions.push(`skipped (read-only): ${label}`);
+              continue;
+            }
+          }
 
           // Skip elements that navigate away destructively where possible:
           // still click, but trial-click with a short timeout + no-wait so a

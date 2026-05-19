@@ -7,7 +7,7 @@
 
 /* ─────────────────────────── Config ─────────────────────────── */
 
-export type ApplyMode = 'pr' | 'propose';
+export type ApplyMode = 'pr' | 'propose' | 'review';
 
 /** Gemini model IDs, one per pipeline role. Loaded from config/models.json. */
 export interface ModelConfig {
@@ -37,8 +37,23 @@ export interface PipelineConfig {
   runDir: string;
   /** Capped number of concurrent page-workers. */
   concurrency: number;
-  /** 'pr' = apply on a per-run branch + emit PR; 'propose' = diffs only. */
+  /**
+   * 'pr' = apply on a per-run branch + emit PR; 'propose' = diffs only;
+   * 'review' = run the four review agents on every page, skip code/verify,
+   * and emit a consolidated proposed-changes.md for approval.
+   */
   applyMode: ApplyMode;
+  /**
+   * When true, the boot gate preserves the target's real `.env.local` instead
+   * of writing safe stub values. Use to point at a fully-configured install.
+   */
+  realEnv: boolean;
+  /**
+   * When true, `PageDriver.exercise()` skips destructive clicks (delete, send,
+   * pay, submit, …) so driving a live backend fires no real mutations.
+   * Implied by `realEnv`.
+   */
+  readOnlyExercise: boolean;
   /** Resolved Gemini model IDs. */
   models: ModelConfig;
   /** Path to the pinned brand spec (may be bootstrapped by Stage 0). */

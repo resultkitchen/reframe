@@ -292,6 +292,31 @@ function stubIntegrations(workDir: string): StubResult {
   return { stubbedIntegrations, envFileWritten };
 }
 
+/**
+ * `--real-env` path: do NOT stub. The target's real `.env.local` (copied into
+ * the work dir by the orchestrator for local-path targets) is left untouched
+ * so the booted app reaches its real backend. Caller is responsible for the
+ * safety side — read-only browser exercise — see PipelineConfig.readOnlyExercise.
+ */
+function preserveRealEnv(workDir: string): StubResult {
+  const hasEnv = fs.existsSync(path.join(workDir, '.env.local'));
+  if (!hasEnv) {
+    console.error(
+      '[stage0.5] warning: --real-env set but no .env.local found in the ' +
+        'work dir — the app will boot with whatever env it ships with.',
+    );
+  }
+  return {
+    stubbedIntegrations: [
+      hasEnv
+        ? 'NONE — real .env.local preserved (--real-env): app reaches its real backend'
+        : 'NONE — --real-env set but no .env.local found in the work dir',
+    ],
+    // We did not write a file; the real one (if any) is already in place.
+    envFileWritten: hasEnv,
+  };
+}
+
 /* ───────────────────────── dev script discovery ───────────────────────── */
 
 interface DevScript {
@@ -612,11 +637,18 @@ export async function runBootGate(
     // 1. Detect package manager.
     const pm = detectPackageManager(config.workDir);
 
-    // 2. Stub integrations + write .env.local BEFORE install/boot so the app
-    //    never sees real credentials.
-    const stub = stubIntegrations(config.workDir);
-    if (!stub.envFileWritten) {
+    // 2. Env: stub all integrations BEFORE install/boot so the app never sees
+    //    real credentials — UNLESS --real-env, which preserves the real
+    //    .env.local so the app reaches its real backend (paired with
+    //    read-only browser exercise for safety).
+    const stub = config.realEnv
+      ? preserveRealEnv(config.workDir)
+      : stubIntegrations(config.workDir);
+    if (!config.realEnv && !stub.envFileWritten) {
       console.error('[stage0.5] warning: could not write .env.local stub file');
+    }
+    if (config.realEnv) {
+      console.log('[stage0.5] --real-env: real .env.local preserved (NOT stubbed).');
     }
 
     // 3. Install dependencies.

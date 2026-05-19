@@ -150,7 +150,7 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
   let snapshot = '';
 
   try {
-    driver = await PageDriver.launch();
+    driver = await PageDriver.launch({ readOnly: ctx.config.readOnlyExercise });
     await driver.open(url);
     const exercised = await driver.exercise();
     interactions = exercised.interactions ?? [];

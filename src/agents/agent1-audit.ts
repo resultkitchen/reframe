@@ -200,7 +200,7 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
   let driveError: string | undefined;
 
   try {
-    driver = await PageDriver.launch();
+    driver = await PageDriver.launch({ readOnly: ctx.config.readOnlyExercise });
     const url = `${ctx.boot.baseUrl}${ctx.page.route}`;
     await driver.open(url);
 

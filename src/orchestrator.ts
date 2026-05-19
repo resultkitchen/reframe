@@ -21,6 +21,7 @@ import { cloneRepo, createRunBranch, commitAll, openPr } from './git';
 import { prepareScratch, cleanupScratch, checkDisk } from './scratch';
 import { newRunState, loadState, saveState } from './state';
 import { writeManifest } from './manifest';
+import { writeProposedChanges } from './proposed-changes';
 import { loadBrand, loadConstraints } from './config';
 
 import { runStage0 } from './stages/stage0-map';
@@ -49,6 +50,7 @@ import type {
   StepStatus,
   PageManifestEntry,
   TestUser,
+  VerifyResult,
 } from './types';
 
 /* ───────────────────────────── helpers ───────────────────────────── */
@@ -108,6 +110,20 @@ async function runPool<T>(
     }
   };
   await Promise.all(Array.from({ length: cap }, () => next()));
+}
+
+/**
+ * Reload a completed agent's result JSON from a page dir. Used on resume: a
+ * `done` agent is not re-run, but its result must still be loaded so the
+ * downstream agents (code, verify) and the proposed-changes report see it.
+ */
+function loadAgentResult<T>(pageDir: string, agent: AgentName): T | undefined {
+  try {
+    const file = path.join(pageDir, `${agent}.json`);
+    return JSON.parse(fs.readFileSync(file, 'utf8')) as T;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Empty per-agent status map for a fresh page. */
@@ -224,26 +240,21 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
     const brand = resolveBrand(config, scope, extraAlerts);
     const constraints = resolveConstraints(config, scope.productGoal);
 
-    /* (7) Stage 0.5 — boot gate. */
-    let boot: BootResult;
-    if (resuming && state.stage0_5 === 'done' && bootJsonExists(config.runDir)) {
-      console.log(`[pipeline] Stage 0.5 already done — loading boot.json`);
-      boot = JSON.parse(
-        fs.readFileSync(path.join(config.runDir, 'boot.json'), 'utf8'),
-      ) as BootResult;
-    } else {
-      console.log(`[pipeline] Stage 0.5 — boot gate...`);
-      boot = await runBootGate(config);
-      console.log(
-        `[pipeline] boot status: ${boot.status}` +
-          (boot.baseUrl ? ` @ ${boot.baseUrl}` : ''),
+    /* (7) Stage 0.5 — boot gate. Always re-run, even on resume: scratch (with
+       node_modules AND the running dev server) is deleted at the end of every
+       run, so a cached boot.json baseUrl from a prior run points at a server
+       that no longer exists. */
+    console.log(`[pipeline] Stage 0.5 — boot gate...`);
+    const boot = await runBootGate(config);
+    console.log(
+      `[pipeline] boot status: ${boot.status}` +
+        (boot.baseUrl ? ` @ ${boot.baseUrl}` : ''),
+    );
+    if (boot.status !== 'running') {
+      extraAlerts.push(
+        `Boot gate: app did not start (${boot.status}) — ` +
+          `${boot.reason ?? 'no reason given'}. Audit/verify run degraded.`,
       );
-      if (boot.status !== 'running') {
-        extraAlerts.push(
-          `Boot gate: app did not start (${boot.status}) — ` +
-            `${boot.reason ?? 'no reason given'}. Audit/verify run degraded.`,
-        );
-      }
     }
     devServerPid = boot.pid;
     state.stage0_5 = 'done';
@@ -301,8 +312,10 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
         fn: () => Promise<T>,
       ): Promise<T | undefined> => {
         if (pageState.agents[agent] === 'done') {
-          console.log(`[${page.slug}] ${agent}: skipped (already done).`);
-          return undefined;
+          console.log(
+            `[${page.slug}] ${agent}: skipped (already done) — reloading result.`,
+          );
+          return loadAgentResult<T>(pageDir, agent);
         }
         mark(agent, 'running');
         try {
@@ -334,10 +347,26 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       })();
       await Promise.all([auditChain, complianceChain]);
 
-      ctx.code = (await runAgent('code', () => runCode(ctx))) ?? ctx.code;
-      const verify = await runAgent('verify', () => runVerify(ctx));
+      // 'review' mode stops at the four review agents: no code, no verify —
+      // the operator approves proposed-changes.md before any apply pass.
+      let verify: VerifyResult | undefined;
+      if (config.applyMode !== 'review') {
+        ctx.code = (await runAgent('code', () => runCode(ctx))) ?? ctx.code;
+        verify = await runAgent('verify', () => runVerify(ctx));
+      } else {
+        mark('code', 'skipped');
+        mark('verify', 'skipped');
+      }
 
-      const pass = verify ? verify.pass : pageState.pass ?? false;
+      // Pass: in review mode = all four review agents completed; otherwise =
+      // Agent 5's verdict (or the resumed checkpoint).
+      const reviewAgents: AgentName[] = ['audit', 'ux', 'design', 'compliance'];
+      const pass =
+        config.applyMode === 'review'
+          ? reviewAgents.every((a) => pageState.agents[a] === 'done')
+          : verify
+            ? verify.pass
+            : pageState.pass ?? false;
       pageState.pass = pass;
       saveState(config.runDir, state!);
 
@@ -417,13 +446,26 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
         extraAlerts.push(`Commit/PR step failed: ${errMsg(err)}`);
         console.error(`[pipeline] commit/PR failed: ${errMsg(err)}`);
       }
+    } else if (config.applyMode === 'review') {
+      console.log(
+        `[pipeline] review mode — no code generated; proposed-changes.md only.`,
+      );
     } else {
       console.log(`[pipeline] propose mode — diffs only, no commit/PR.`);
     }
 
-    /* (11) Test scaffold. */
+    /* (11) Test scaffold. Skipped in review mode — a review pass applies no
+       code and (under --real-env) must not seed accounts into a real backend. */
     let testUsers: TestUser[] = [];
-    if (resuming && state.testScaffold === 'done' && usersJsonExists(config.runDir)) {
+    if (config.applyMode === 'review') {
+      state.testScaffold = 'skipped';
+      saveState(config.runDir, state);
+      console.log(`[pipeline] review mode — test scaffold skipped.`);
+    } else if (
+      resuming &&
+      state.testScaffold === 'done' &&
+      usersJsonExists(config.runDir)
+    ) {
       console.log(`[pipeline] test scaffold already done — loading users.json`);
       testUsers = JSON.parse(
         fs.readFileSync(
@@ -445,6 +487,21 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
         console.error(`[pipeline] test scaffold failed: ${errMsg(err)}`);
       }
       saveState(config.runDir, state);
+    }
+
+    /* (11.5) Review mode — write the consolidated proposed-changes.md gate. */
+    if (config.applyMode === 'review') {
+      try {
+        const pcPath = writeProposedChanges(config, scope);
+        console.log(`[pipeline] proposed changes written: ${pcPath}`);
+        extraAlerts.push(
+          `Review pass complete — read & approve ${pcPath}, then apply with: ` +
+            `rebuild ${config.target} --resume ${config.runDir} --apply-mode pr`,
+        );
+      } catch (err) {
+        extraAlerts.push(`Failed to write proposed-changes.md: ${errMsg(err)}`);
+        console.error(`[pipeline] proposed-changes.md failed: ${errMsg(err)}`);
+      }
     }
 
     /* (12) Build + write the manifest. */
@@ -620,10 +677,6 @@ async function safeCleanup(config: PipelineConfig): Promise<boolean> {
     console.error(`[pipeline] scratch cleanup failed: ${errMsg(err)}`);
     return false;
   }
-}
-
-function bootJsonExists(runDir: string): boolean {
-  return fs.existsSync(path.join(runDir, 'boot.json'));
 }
 
 function usersJsonExists(runDir: string): boolean {
