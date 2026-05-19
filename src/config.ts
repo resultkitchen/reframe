@@ -133,6 +133,18 @@ export function loadConstraints(constraintsPath: string): ConstraintsSpec {
   };
 }
 
+/** Load dynamic route sample parameters from `path`. */
+export function loadSampleParams(paramsPath?: string): Record<string, string> {
+  if (!paramsPath) return {};
+  const raw = fs.readFileSync(path.resolve(paramsPath), 'utf8');
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(parsed)) {
+    out[k] = String(v);
+  }
+  return out;
+}
+
 /* ─────────────────────────── argv parsing ─────────────────────────── */
 
 interface ParsedArgs {
@@ -146,6 +158,9 @@ interface ParsedArgs {
   realEnv?: boolean;
   readOnly?: boolean;
   auth?: string;
+  maxPages?: number;
+  quickScan?: boolean;
+  params?: string;
 }
 
 /**
@@ -197,6 +212,14 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.scratch = next();
     } else if (tok === '--resume') {
       out.resume = next();
+    } else if (tok === '--max-pages') {
+      const n = Number.parseInt(next(), 10);
+      if (Number.isNaN(n) || n < 1) throw new Error('--max-pages must be a positive integer');
+      out.maxPages = n;
+    } else if (tok === '--quick-scan') {
+      out.quickScan = true;
+    } else if (tok === '--params') {
+      out.params = next();
     } else if (tok.startsWith('--')) {
       throw new Error(`Unknown flag "${tok}"`);
     } else if (target === undefined) {
@@ -303,6 +326,14 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
   }
   const realEnv = (args.realEnv ?? false) || auth !== undefined;
 
+  const models = loadModels();
+  if (args.quickScan) {
+    models.agent1_audit = models.mechanical;
+    models.agent2_ux = models.mechanical;
+    models.agent3_design = models.mechanical;
+    models.agent5_verify = models.mechanical;
+  }
+
   const config: PipelineConfig = {
     target: args.target,
     isLocalPath,
@@ -317,13 +348,16 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     // mutations (loginAs is exempt — it is a separate, deliberate action).
     readOnlyExercise: (args.readOnly ?? false) || realEnv,
     ...(auth ? { auth } : {}),
-    models: loadModels(),
+    models,
     brandPath,
     constraintsPath,
     geminiApiKey,
     callTimeoutMs: 120000,
     maxRetries: 2,
     ...(args.resume ? { resumeRunDir: path.resolve(args.resume) } : {}),
+    maxPages: args.maxPages,
+    quickScan: args.quickScan ?? false,
+    sampleParams: loadSampleParams(args.params),
   };
 
   return config;

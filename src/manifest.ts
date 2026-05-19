@@ -59,21 +59,29 @@ export function renderManifestMd(manifest: RunManifest): string {
     lines.push('_No pages processed._');
   } else {
     const passCount = manifest.pagesProcessed.filter((p) => p.pass).length;
+    const auditedCount = manifest.pagesProcessed.filter((p) => p.status === 'audited').length;
+    const redirectedCount = manifest.pagesProcessed.filter((p) => p.status === 'redirected').length;
+    const erroredCount = manifest.pagesProcessed.filter((p) => p.status === 'errored').length;
+    const failedCount = manifest.pagesProcessed.filter((p) => p.status === 'boot-failed' || p.status === 'drive-failed').length;
+
     lines.push(
       `${passCount} / ${manifest.pagesProcessed.length} pages passed.`,
     );
+    lines.push(
+      `${auditedCount} audited · ${redirectedCount} redirected · ${erroredCount} errored · ${failedCount} failed.`,
+    );
     lines.push('');
     lines.push(
-      '| Page | Route | Result | Agents | Gaps found | Gaps closed | Compliance findings |',
+      '| Page | Route | Result | Status | Agents | Gaps found | Gaps closed | Compliance findings |',
     );
     lines.push(
-      '| --- | --- | --- | --- | --- | --- | --- |',
+      '| --- | --- | --- | --- | --- | --- | --- | --- |',
     );
     for (const p of manifest.pagesProcessed) {
       lines.push(
         `| ${cell(p.slug)} | ${cell(p.route)} | ${
           p.pass ? 'PASS' : 'FAIL'
-        } | ${cell(p.agentsRun.join(', '))} | ${p.gapsFound} | ${
+        } | ${p.status} | ${cell(p.agentsRun.join(', '))} | ${p.gapsFound} | ${
           p.gapsClosed
         } | ${p.complianceFindings} |`,
       );

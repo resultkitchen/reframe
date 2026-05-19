@@ -12,6 +12,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx src/cli.ts",
     "pipeline": "tsx src/cli.ts",
+    "test": "node --import tsx --test src/test/*.test.ts",
+    "test:login": "node scripts/test-login.mjs",
     "postinstall": "playwright install chromium"
   },
   "dependencies": {

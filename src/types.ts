@@ -108,6 +108,25 @@ export interface PipelineConfig {
   maxRetries: number;
   /** When set, resume this existing run directory. */
   resumeRunDir?: string;
+  /**
+   * Cost/speed control: cap the number of pages processed in the fan-out.
+   * Stage 0 still maps every screen; only the first `maxPages` are audited.
+   * Undefined = no cap.
+   */
+  maxPages?: number;
+  /**
+   * Quick-scan tier: route the per-page review agents (audit/ux/design/verify)
+   * to the cheap `mechanical` model for a faster, cheaper, lower-fidelity pass.
+   * Resolved in config.ts by overriding the model ids. Default false.
+   */
+  quickScan: boolean;
+  /**
+   * Sample values for dynamic route segments, keyed by param name
+   * (e.g. `{ id: "1", slug: "demo" }`). A route like `/leads/[id]` is driven
+   * as `/leads/1`. Params with no entry fall back to DEFAULT_SAMPLE_PARAM.
+   * Always present (defaults to `{}`).
+   */
+  sampleParams: Record<string, string>;
 }
 
 /* ─────────────────────────── Brand & Constraints ─────────────────────────── */
@@ -211,6 +230,40 @@ export interface BootResult {
   stubbedIntegrations: string[];
 }
 
+/* ─────────────────────────── Page health ─────────────────────────── */
+
+/**
+ * Honest health of a page as actually driven — kept DISTINCT from UX gaps.
+ * A meaningful "pass" requires the audit to have seen the INTENDED page in a
+ * healthy state, not an auth redirect or a framework error overlay.
+ */
+export type PageHealthStatus =
+  | 'ok'                  // intended page rendered; no overlay; HTTP < 400
+  | 'auth-redirect'       // bounced to a login/auth page — not what was asked
+  | 'error-overlay'       // a Next.js/Vite/React framework error overlay shows
+  | 'http-error'          // the document responded 4xx/5xx
+  | 'navigation-failed';  // the browser could not navigate to the route
+
+export interface PageHealth {
+  status: PageHealthStatus;
+  /** True only when status === 'ok'. */
+  healthy: boolean;
+  /** URL actually landed on, after any redirects. */
+  finalUrl: string;
+  /** HTTP status of the main document response, when known. */
+  httpStatus?: number;
+  /** Human-readable explanation — always populated. */
+  detail: string;
+}
+
+/** The honest outcome of a page in the manifest (P1 — meaningful pass/fail). */
+export type PageOutcome =
+  | 'audited'       // driven healthy and audited as the intended page
+  | 'redirected'    // bounced to auth — audit did not see the intended page
+  | 'errored'       // framework error overlay or HTTP 4xx/5xx
+  | 'boot-failed'   // the app never booted
+  | 'drive-failed'; // the browser could not drive the route
+
 /* ─────────────────────────── Agents ─────────────────────────── */
 
 export type Severity = 'critical' | 'high' | 'medium' | 'low';
@@ -237,6 +290,9 @@ export interface AuditResult {
   /** Role the page was driven logged in as (auth-aware audit); omitted for
    * public pages or when login failed. */
   authRole?: string;
+  /** Honest health of the page as driven (auth-redirect / error-overlay /
+   * HTTP-error detection). Present whenever the page was driven. */
+  health?: PageHealth;
 }
 
 /** Agent 2 — UX proposal. */
@@ -291,6 +347,9 @@ export interface VerifyResult {
   gapsOpen: string[];
   regressions: string[];
   pass: boolean;
+  /** Honest health of the page on the verify re-drive. A page that is not
+   * `ok` (auth-redirect / error overlay / HTTP error) can never pass. */
+  health?: PageHealth;
 }
 
 /* ─────────────────────────── State & Manifest ─────────────────────────── */
@@ -322,6 +381,10 @@ export interface PageManifestEntry {
   route: string;
   agentsRun: AgentName[];
   pass: boolean;
+  /** Honest outcome — audited vs redirected vs errored vs failed (P1). */
+  status: PageOutcome;
+  /** Page-health detail behind `status`, when the page was driven. */
+  health?: PageHealth;
   gapsFound: number;
   gapsClosed: number;
   complianceFindings: number;

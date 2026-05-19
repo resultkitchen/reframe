@@ -12,9 +12,10 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { AgentContext, Gap, VerifyResult } from '../types';
+import type { AgentContext, Gap, VerifyResult, PageHealth } from '../types';
 import { PageDriver } from '../browser';
 import { matchAuthRole } from '../auth';
+import { resolveRoutePath } from '../sample-params';
 
 /** Render the human-readable verify report. */
 function renderMd(
@@ -98,7 +99,8 @@ function joinUrl(base: string, route: string): string {
  * Compute pass/fail: every non-low gap must be closed and no regressions.
  * A gap is "non-low" when its declared severity is critical/high/medium.
  */
-function computePass(gaps: Gap[], gapsClosed: string[], regressions: string[]): boolean {
+function computePass(gaps: Gap[], gapsClosed: string[], regressions: string[], health?: PageHealth): boolean {
+  if (health && health.status !== 'ok') return false;
   if (regressions.length > 0) return false;
   const closed = new Set(gapsClosed);
   for (const g of gaps) {
@@ -124,6 +126,7 @@ function toStringArray(value: unknown): string[] {
 export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
   const pageId = ctx.page.route || ctx.page.slug;
   const gaps = ctx.audit?.gaps ?? [];
+  const routePath = resolveRoutePath(ctx.page.route, ctx.config.sampleParams);
 
   // Boot gate: if the app isn't running we cannot verify anything.
   if (ctx.boot?.status !== 'running' || !ctx.boot.baseUrl) {
@@ -132,6 +135,12 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
       `${ctx.boot?.reason ? ` — ${ctx.boot.reason}` : ''}); page could not be verified.`;
     const result: VerifyResult = {
       page: pageId,
+      health: {
+        status: 'navigation-failed',
+        healthy: false,
+        finalUrl: ctx.boot?.baseUrl ?? '',
+        detail: reason,
+      },
       gapsClosed: [],
       gapsOpen: gaps.map((g) => g.id),
       regressions: [],
@@ -142,7 +151,7 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
     return result;
   }
 
-  const url = joinUrl(ctx.boot.baseUrl, ctx.page.route);
+  const url = joinUrl(ctx.boot.baseUrl, routePath);
 
   let driver: PageDriver | null = null;
   let consoleErrors: string[] = [];
@@ -150,6 +159,7 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
   let screenshot = '';
   let snapshot = '';
   let loginNote: string | undefined;
+  let health: PageHealth | undefined;
 
   try {
     driver = await PageDriver.launch({ readOnly: ctx.config.readOnlyExercise });
@@ -183,11 +193,19 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
     } catch (err) {
       console.error(`[agent5-verify] snapshot failed: ${String(err)}`);
     }
+
+    health = await driver.health(routePath, ctx.config.auth?.loginUrl);
   } catch (err) {
     // Could not drive the page at all — treat as unverifiable / fail.
     const reason = `Failed to drive ${url}: ${String(err)}.`;
     const result: VerifyResult = {
       page: pageId,
+      health: {
+        status: 'navigation-failed',
+        healthy: false,
+        finalUrl: url,
+        detail: reason,
+      },
       gapsClosed: [],
       gapsOpen: gaps.map((g) => g.id),
       regressions: [],
@@ -208,17 +226,21 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
 
   // No gaps to verify → trivially pass once the page drives without crashing.
   if (gaps.length === 0) {
+    const pass = !health || health.status === 'ok';
     const result: VerifyResult = {
       page: pageId,
+      health,
       gapsClosed: [],
       gapsOpen: [],
       regressions: [],
-      pass: true,
+      pass,
     };
     writeArtifacts(
       ctx,
       result,
-      'No audit gaps to verify; page drove successfully.',
+      pass
+        ? 'No audit gaps to verify; page drove successfully.'
+        : `Page is unhealthy: ${health?.status} — ${health?.detail}`,
       consoleErrors,
       interactions,
     );
@@ -299,6 +321,7 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
     console.error(`[agent5-verify] Gemini call failed for ${pageId}: ${String(err)}`);
     const result: VerifyResult = {
       page: pageId,
+      health,
       gapsClosed: [],
       gapsOpen: gaps.map((g) => g.id),
       regressions: [],
@@ -314,10 +337,11 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
     return result;
   }
 
-  const pass = computePass(gaps, gapsClosed, regressions);
+  const pass = computePass(gaps, gapsClosed, regressions, health);
 
   const result: VerifyResult = {
     page: pageId,
+    health,
     gapsClosed,
     gapsOpen,
     regressions,

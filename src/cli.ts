@@ -39,6 +39,10 @@ FLAGS
                                        screen, skip code+verify, emit one
                                        proposed-changes.md for approval. Resume
                                        with --apply-mode pr to apply.
+  --max-pages <n>             Cap pages processed in the fan-out (cost/speed control).
+  --quick-scan                Route per-page review agents to the cheap model tier.
+  --params <path>             JSON map of dynamic-route sample values, e.g.
+                              { "id": "1", "slug": "demo" } — so /leads/[id] is driven.
   --real-env                  Preserve the target's real .env.local instead of
                               writing safe stubs — point at a live install.
                               Implies --read-only.
@@ -65,6 +69,7 @@ ENV
 
 EXAMPLES
   pipeline rebuild https://github.com/acme/todo-saas
+  pipeline rebuild https://github.com/acme/todo-saas --max-pages 10 --quick-scan
   pipeline rebuild ./local/project --apply-mode propose --concurrency 4
   pipeline rebuild https://github.com/acme/app --brand config/brand.json
   pipeline rebuild ./project --resume runs/project-2026-05-15T10-00-00-000Z

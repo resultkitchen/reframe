@@ -51,6 +51,8 @@ import type {
   PageManifestEntry,
   TestUser,
   VerifyResult,
+  PageOutcome,
+  AuditResult,
 } from './types';
 
 /* ───────────────────────────── helpers ───────────────────────────── */
@@ -138,6 +140,24 @@ function freshAgentMap(): Record<AgentName, StepStatus> {
   };
 }
 
+function deriveOutcome(boot: BootResult, audit: AuditResult | undefined): PageOutcome {
+  if (boot.status !== 'running') return 'boot-failed';
+  if (!audit || !audit.health) return 'drive-failed';
+  switch (audit.health.status) {
+    case 'ok':
+      return 'audited';
+    case 'auth-redirect':
+      return 'redirected';
+    case 'http-error':
+    case 'error-overlay':
+      return 'errored';
+    case 'navigation-failed':
+      return 'drive-failed';
+    default:
+      return 'drive-failed';
+  }
+}
+
 /* ───────────────────────────── main ───────────────────────────── */
 
 export async function runPipeline(config: PipelineConfig): Promise<RunManifest> {
@@ -221,6 +241,14 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       );
     }
 
+    if (config.maxPages !== undefined && scope.pages.length > config.maxPages) {
+      const originalLength = scope.pages.length;
+      scope.pages = scope.pages.slice(0, config.maxPages);
+      const msg = `Page cap: processing ${config.maxPages} of ${originalLength} mapped pages (--max-pages ${config.maxPages}). Re-run without --max-pages for full coverage.`;
+      extraAlerts.push(msg);
+      console.log(`[pipeline] ${msg}`);
+    }
+
     /* If we had no state yet (fresh run, or resume without file), build it
        now that we know the page slugs. */
     if (!state) {
@@ -282,6 +310,9 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
     }
 
     /* (9) PER-PAGE FAN-OUT. */
+    if (config.quickScan) {
+      console.log(`[pipeline] quick-scan tier: per-page review agents on the cheap model.`);
+    }
     console.log(
       `[pipeline] fan-out: ${scope.pages.length} page(s), ` +
         `concurrency ${config.concurrency}.`,
@@ -378,7 +409,7 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       const reviewAgents: AgentName[] = ['audit', 'ux', 'design', 'compliance'];
       const pass =
         config.applyMode === 'review'
-          ? reviewAgents.every((a) => pageState.agents[a] === 'done')
+          ? reviewAgents.every((a) => pageState.agents[a] === 'done') && deriveOutcome(boot, ctx.audit) === 'audited'
           : verify
             ? verify.pass
             : pageState.pass ?? false;
@@ -391,6 +422,8 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       pageEntries.push({
         slug: page.slug,
         route: page.route,
+        status: deriveOutcome(boot, ctx.audit),
+        health: ctx.audit?.health,
         agentsRun,
         pass,
         gapsFound: ctx.audit ? ctx.audit.gaps.length : 0,
@@ -416,6 +449,7 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
           pageEntries.push({
             slug: page.slug,
             route: page.route,
+            status: boot.status !== 'running' ? 'boot-failed' : 'drive-failed',
             agentsRun: ps
               ? (Object.keys(ps.agents) as AgentName[]).filter(
                   (a) => ps.agents[a] === 'done',
@@ -679,7 +713,8 @@ function stopDevServer(pid: number | undefined): void {
         process.kill(pid, 'SIGTERM');
       }
     }
-  } catch {
+  }
+  catch {
     /* best-effort — a dead pid is fine */
   }
 }

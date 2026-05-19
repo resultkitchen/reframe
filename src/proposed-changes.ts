@@ -40,6 +40,14 @@ const SEVERITY_RANK: Record<Severity, number> = {
   low: 0,
 };
 
+/** Effort estimate minutes per gap/finding by severity. */
+const SEVERITY_MINUTES: Record<Severity, number> = {
+  critical: 45,
+  high: 25,
+  medium: 12,
+  low: 5,
+};
+
 interface PageReview {
   slug: string;
   route: string;
@@ -127,14 +135,49 @@ export function writeProposedChanges(
   lines.push(`- **Compliance findings:** ${totalCompliance}`);
   lines.push('');
 
+  /* Effort estimate. */
+  const severityCounts: Record<Severity, number> = {
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+  };
+  for (const r of reviews) {
+    for (const g of r.audit?.gaps ?? []) severityCounts[g.severity]++;
+    for (const f of r.compliance?.findings ?? []) severityCounts[f.severity]++;
+  }
+
+  let totalMinutes = 0;
+  const severities: Severity[] = ['critical', 'high', 'medium', 'low'];
+  for (const s of severities) {
+    totalMinutes += severityCounts[s] * SEVERITY_MINUTES[s];
+  }
+
+  lines.push('## Effort estimate');
+  lines.push('');
+  if (totalMinutes < 90) {
+    lines.push(`**≈ ${totalMinutes}-minute optimization plan**`);
+  } else {
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    lines.push(`**≈ ${hours}h ${mins}m optimization plan**`);
+  }
+  lines.push('');
+  lines.push('| Severity | Count | Subtotal minutes |');
+  lines.push('| --- | --- | --- |');
+  for (const s of severities) {
+    lines.push(`| ${s} | ${severityCounts[s]} | ${severityCounts[s] * SEVERITY_MINUTES[s]} |`);
+  }
+  lines.push('');
+
   /* Summary table. */
   lines.push('## Summary');
   lines.push('');
-  lines.push('| Screen | Route | Audit gaps | Compliance | Top severity |');
-  lines.push('| --- | --- | --- | --- | --- |');
+  lines.push('| Screen | Route | Health | Audit gaps | Compliance | Top severity |');
+  lines.push('| --- | --- | --- | --- | --- | --- |');
   for (const r of reviews) {
     lines.push(
-      `| ${cell(r.slug)} | ${cell(r.route)} | ${r.audit?.gaps.length ?? 0} | ` +
+      `| ${cell(r.slug)} | ${cell(r.route)} | ${r.audit?.health?.status ?? '—'} | ${r.audit?.gaps.length ?? 0} | ` +
         `${r.compliance?.findings.length ?? 0} | ${topSeverity(r)} |`,
     );
   }
@@ -148,6 +191,13 @@ export function writeProposedChanges(
     lines.push('');
 
     /* Audit. */
+    if (r.audit?.health && r.audit.health.status !== 'ok') {
+      lines.push(
+        `> ⚠ Page health: **${r.audit.health.status}** — ${r.audit.health.detail}. Findings below may not reflect the intended screen.`,
+      );
+      lines.push('');
+    }
+
     const gaps = r.audit?.gaps ?? [];
     if (r.audit?.authRole) {
       lines.push(`_Audited logged in as **${r.audit.authRole}**._`);

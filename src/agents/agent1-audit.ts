@@ -12,7 +12,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { PageDriver } from '../browser';
 import { matchAuthRole } from '../auth';
-import type { AgentContext, AuditResult, Gap, Severity } from '../types';
+import { resolveRoutePath } from '../sample-params';
+import type { AgentContext, AuditResult, Gap, Severity, PageHealth } from '../types';
 
 /** Shape the model must return — kept narrow so parsing is robust. */
 interface AuditModelResponse {
@@ -65,6 +66,9 @@ function renderMd(result: AuditResult): string {
   const lines: string[] = [];
   lines.push(`# Audit — ${result.page}`);
   lines.push('');
+  if (result.health) {
+    lines.push(`Page health: ${result.health.status} — ${result.health.detail}`);
+  }
   if (result.authRole) {
     lines.push(`Audited logged in as: **${result.authRole}**`);
   }
@@ -129,6 +133,7 @@ function buildPrompt(
   snapshot: string,
   interactions: string[],
   consoleErrors: string[],
+  health?: PageHealth,
 ): string {
   return `Audit this page and return a JSON gap list.
 
@@ -138,6 +143,9 @@ PAGE
   purpose: ${ctx.page.purpose}
   userFunction: ${ctx.page.userFunction}
   sourceFile: ${ctx.page.filePath}
+
+PAGE HEALTH
+${health ? `  status: ${health.status}\n  healthy: ${health.healthy}\n  detail: ${health.detail}` : '  (unknown)'}
 
 DATA DEPENDENCIES
 ${JSON.stringify(ctx.page.dataDependencies, null, 2)}
@@ -196,6 +204,9 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
     return result;
   }
 
+  const routePath = resolveRoutePath(ctx.page.route, ctx.config.sampleParams);
+  const url = `${ctx.boot.baseUrl}${routePath}`;
+
   let driver: PageDriver | undefined;
   let interactions: string[] = [];
   let consoleErrors: string[] = [];
@@ -204,6 +215,7 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
   let driveError: string | undefined;
   let authRole: string | undefined;
   let loginNote: string | undefined;
+  let health: PageHealth | undefined;
 
   try {
     driver = await PageDriver.launch({ readOnly: ctx.config.readOnlyExercise });
@@ -224,7 +236,6 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
       }
     }
 
-    const url = `${ctx.boot.baseUrl}${ctx.page.route}`;
     await driver.open(url);
 
     const exercised = await driver.exercise();
@@ -246,6 +257,8 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
       screenshot = '';
       driveError = `screenshot failed: ${String(err)}`;
     }
+
+    health = await driver.health(routePath, ctx.config.auth?.loginUrl);
   } catch (err) {
     driveError = `Failed to drive page: ${String(err)}`;
   } finally {
@@ -262,6 +275,12 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
   if (driveError && !snapshot && !screenshot && interactions.length === 0) {
     const result: AuditResult = {
       page: pageId,
+      health: {
+        status: 'navigation-failed',
+        healthy: false,
+        finalUrl: url,
+        detail: driveError ?? 'page could not be driven',
+      },
       consoleErrors,
       interactionsExercised: interactions,
       gaps: [
@@ -286,7 +305,7 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
     const response = await ctx.gemini.callJson<AuditModelResponse>({
       role: 'agent1_audit',
       systemInstruction: SYSTEM_INSTRUCTION,
-      prompt: buildPrompt(ctx, snapshot, interactions, consoleErrors),
+      prompt: buildPrompt(ctx, snapshot, interactions, consoleErrors, health),
       json: true,
       images: screenshot ? [screenshot] : undefined,
     });
@@ -312,6 +331,7 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
 
   const result: AuditResult = {
     page: pageId,
+    health,
     consoleErrors,
     interactionsExercised: interactions,
     gaps,

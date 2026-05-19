@@ -7,7 +7,7 @@
  */
 
 import type { Browser, ConsoleMessage, Page } from 'playwright';
-import type { AuthConfig, AuthRole } from './types';
+import type { AuthConfig, AuthRole, PageHealth } from './types';
 
 /**
  * Labels matching this pattern indicate a click that could mutate data, send
@@ -26,6 +26,10 @@ export class PageDriver {
 
   /** Console errors + uncaught page errors collected since launch. */
   private readonly consoleErrors: string[] = [];
+
+  private lastNavStatus: number | undefined;
+
+  private navFailed = false;
 
   private constructor(browser: Browser, page: Page, readOnly: boolean) {
     this.browser = browser;
@@ -61,25 +65,105 @@ export class PageDriver {
 
   /** Navigate to `url` and wait for the network to settle. */
   async open(url: string): Promise<void> {
+    this.navFailed = false;
+    this.lastNavStatus = undefined;
     try {
-      await this.page.goto(url, {
+      const resp = await this.page.goto(url, {
         waitUntil: 'networkidle',
         timeout: 30000,
       });
+      this.lastNavStatus = resp?.status();
     } catch {
       // networkidle can stall on long-polling apps — fall back to domcontentloaded.
       try {
-        await this.page.goto(url, {
+        const resp = await this.page.goto(url, {
           waitUntil: 'domcontentloaded',
           timeout: 30000,
         });
+        this.lastNavStatus = resp?.status();
       } catch (err) {
+        this.navFailed = true;
         this.consoleErrors.push(
           `[navigation] failed to open ${url}: ` +
             (err instanceof Error ? err.message : String(err)),
         );
       }
     }
+  }
+
+  async health(expectedRoute: string, loginPath?: string): Promise<PageHealth> {
+    const finalUrl = this.page.url();
+    let finalPathname = '';
+    try {
+      finalPathname = new URL(finalUrl).pathname;
+    } catch {
+      finalPathname = finalUrl;
+    }
+
+    let hasErrorOverlay = false;
+    try {
+      hasErrorOverlay = await this.page.evaluate(() => {
+        const nextPortal = document.querySelector('nextjs-portal');
+        if (nextPortal && nextPortal.shadowRoot) {
+          const sr = nextPortal.shadowRoot;
+          if (
+            sr.querySelector('[data-nextjs-dialog]') ||
+            sr.querySelector('[data-nextjs-dialog-overlay]') ||
+            sr.querySelector('#nextjs__container_errors_label')
+          ) {
+            return true;
+          }
+        }
+        if (document.querySelector('vite-error-overlay')) {
+          return true;
+        }
+        const text = document.body?.innerText || '';
+        return /Unhandled Runtime Error|Build Error|Failed to compile|Application error: a (server|client)-side exception/i.test(
+          text,
+        );
+      });
+    } catch {
+      // ignore
+    }
+
+    const isLoginRegex = /(^|\/)(login|sign-?in|signin|auth)(\/|$)/i;
+    const normLoginPath = loginPath
+      ? loginPath.startsWith('/')
+        ? loginPath
+        : `/${loginPath}`
+      : undefined;
+
+    let status: PageHealth['status'] = 'ok';
+    let detail = 'Page loaded successfully.';
+
+    if (this.navFailed) {
+      status = 'navigation-failed';
+      detail = 'The browser failed to navigate to the page.';
+    } else if (this.lastNavStatus !== undefined && this.lastNavStatus >= 400) {
+      status = 'http-error';
+      detail = `The page returned an HTTP ${this.lastNavStatus} error status.`;
+    } else if (hasErrorOverlay) {
+      status = 'error-overlay';
+      detail = 'A framework error overlay or unhandled runtime exception was detected.';
+    } else if (!isLoginRegex.test(expectedRoute)) {
+      const looksLikeLogin =
+        (normLoginPath &&
+          (finalPathname === normLoginPath || finalPathname.startsWith(normLoginPath))) ||
+        isLoginRegex.test(finalPathname);
+
+      if (looksLikeLogin) {
+        status = 'auth-redirect';
+        detail = 'The page redirected to an authentication or login route.';
+      }
+    }
+
+    return {
+      status,
+      healthy: status === 'ok',
+      finalUrl,
+      httpStatus: this.lastNavStatus,
+      detail,
+    };
   }
 
   /**
