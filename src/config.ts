@@ -11,11 +11,13 @@ import * as os from 'node:os';
 
 import type {
   ApplyMode,
+  AuthConfig,
   BrandSpec,
   ConstraintsSpec,
   ModelConfig,
   PipelineConfig,
 } from './types';
+import { loadAuthConfig } from './auth';
 
 /** Repo root — config.ts lives in src/, so root is one level up. */
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -143,6 +145,7 @@ interface ParsedArgs {
   resume?: string;
   realEnv?: boolean;
   readOnly?: boolean;
+  auth?: string;
 }
 
 /**
@@ -184,6 +187,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.realEnv = true;
     } else if (tok === '--read-only') {
       out.readOnly = true;
+    } else if (tok === '--auth') {
+      out.auth = next();
     } else if (tok === '--brand') {
       out.brand = next();
     } else if (tok === '--constraints') {
@@ -283,6 +288,15 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     ? path.resolve(args.constraints)
     : path.join(REPO_ROOT, 'config', 'constraints.template.json');
 
+  // --auth: load the auth config now so a malformed file fails fast. Setting
+  // it implies --real-env (the app must reach its real auth backend to log in)
+  // and therefore --read-only.
+  let auth: AuthConfig | undefined;
+  if (args.auth) {
+    auth = loadAuthConfig(path.resolve(args.auth));
+  }
+  const realEnv = (args.realEnv ?? false) || auth !== undefined;
+
   const config: PipelineConfig = {
     target: args.target,
     isLocalPath,
@@ -292,9 +306,11 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     runDir,
     concurrency: args.concurrency ?? 8,
     applyMode: args.applyMode ?? 'pr',
-    realEnv: args.realEnv ?? false,
-    // --real-env always drives read-only so a live backend takes no mutations.
-    readOnlyExercise: (args.readOnly ?? false) || (args.realEnv ?? false),
+    realEnv,
+    // --real-env / --auth always drive read-only so a live backend takes no
+    // mutations (loginAs is exempt — it is a separate, deliberate action).
+    readOnlyExercise: (args.readOnly ?? false) || realEnv,
+    ...(auth ? { auth } : {}),
     models: loadModels(),
     brandPath,
     constraintsPath,

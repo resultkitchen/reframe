@@ -41,7 +41,33 @@ mutations/emails/charges when driving a live backend.
 - Boot gate always re-runs on resume — scratch is deleted at run end, so a
   cached `boot.json` baseUrl points at a dead server.
 
-## Not yet built — auth login (`loginAs`)
+## `--auth <path>` — auth-aware auditing
 
-Auth-gated screens still audit as anonymous. Real-env makes login *possible*;
-the `loginAs` form-fill (per `RERUN-CASESDAILY-PROMPT.md`) is the next step.
+Audits gated routes (`/dashboard/*`, `/admin/*`, …) **logged in** instead of
+as an anonymous visitor that redirects to the landing page.
+
+```
+node dist/cli.js rebuild <target> --apply-mode review --auth config/myapp-auth.json
+```
+
+- Auth config (JSON): `{ loginUrl, emailSelector, passwordSelector,
+  submitSelector, postLoginWaitMs, roles: [{ role, email, password,
+  routePatterns }] }`. Copy `config/auth.template.json`; `config/*-auth.json`
+  is gitignored (it holds credentials — use dedicated TEST accounts).
+- `--auth` implies `--real-env` (the app must reach its real auth backend) and
+  therefore `--read-only`.
+- Agents 1 & 5: before driving a page, `matchAuthRole` checks the route
+  against each role's `routePatterns`; a match triggers `PageDriver.loginAs`
+  (form-fill in the same browser context, so the session cookie carries to the
+  target page). Public routes: no login, as before.
+- `loginAs` is exempt from read-only mode — it is a deliberate, known-safe
+  action. The audit report records `Audited logged in as: <role>`.
+
+### Implementation
+
+- `src/auth.ts` — `loadAuthConfig` (load + validate) and `matchAuthRole`
+  (route → role, `*` globs supported).
+- `PageDriver.loginAs(baseUrl, auth, role)` — navigate to the login page, fill
+  email + password, submit, wait `postLoginWaitMs`; returns `{ ok, detail }`.
+- `AuthConfig` type on `PipelineConfig.auth`; `AuditResult.authRole` records
+  the role a page was driven as.

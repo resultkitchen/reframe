@@ -21,6 +21,40 @@ export interface ModelConfig {
   mechanical: string;
 }
 
+/* ─────────────────────────── Auth ─────────────────────────── */
+
+/** One test account + the routes it should be logged in to audit. */
+export interface AuthRole {
+  /** Human label, e.g. "admin", "attorney". */
+  role: string;
+  email: string;
+  password: string;
+  /**
+   * Route patterns ('/admin', '/admin/*') — a page whose route matches any
+   * of these is driven logged in as this role. First matching role wins.
+   */
+  routePatterns: string[];
+}
+
+/**
+ * Auth config for auth-aware auditing — INPUT, loaded from `--auth <path>`.
+ * Lets Agents 1 & 5 log in before driving gated routes so they audit real
+ * authenticated content instead of a redirect to the public landing page.
+ */
+export interface AuthConfig {
+  /** Login page path, appended to the booted app's baseUrl. */
+  loginUrl: string;
+  /** Playwright selector for the email/username input. */
+  emailSelector: string;
+  /** Playwright selector for the password input. */
+  passwordSelector: string;
+  /** Playwright selector for the submit button. */
+  submitSelector: string;
+  /** Wait after submitting, to let the post-login redirect settle. */
+  postLoginWaitMs: number;
+  roles: AuthRole[];
+}
+
 /** Fully-resolved configuration for one pipeline run. */
 export interface PipelineConfig {
   /** GitHub URL or local filesystem path of the target project. */
@@ -54,6 +88,12 @@ export interface PipelineConfig {
    * Implied by `realEnv`.
    */
   readOnlyExercise: boolean;
+  /**
+   * Auth-aware auditing config. When set, Agents 1 & 5 log in before driving
+   * routes that match a role's patterns. Loaded from `--auth <path>`; setting
+   * it implies `realEnv` (the app must reach its real auth backend).
+   */
+  auth?: AuthConfig;
   /** Resolved Gemini model IDs. */
   models: ModelConfig;
   /** Path to the pinned brand spec (may be bootstrapped by Stage 0). */
@@ -194,6 +234,9 @@ export interface AuditResult {
   consoleErrors: string[];
   interactionsExercised: string[];
   gaps: Gap[];
+  /** Role the page was driven logged in as (auth-aware audit); omitted for
+   * public pages or when login failed. */
+  authRole?: string;
 }
 
 /** Agent 2 — UX proposal. */

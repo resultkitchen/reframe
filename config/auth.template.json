@@ -1,0 +1,22 @@
+{
+  "$comment": "Auth config TEMPLATE for auth-aware auditing. Copy to <project>-auth.json, fill in TEST-account credentials, and pass with --auth <path>. config/*-auth.json is already gitignored — keep it that way, it holds credentials. Agents 1 & 5 log in (in a real browser, same context) before driving any route that matches a role's routePatterns, so gated pages are audited as a real authenticated user instead of a redirect to the public landing page. --auth implies --real-env (the app must reach its real auth backend) and --read-only (no destructive clicks). Use dedicated throwaway TEST accounts, never real user accounts.",
+  "loginUrl": "/login",
+  "emailSelector": "input[type=\"email\"]",
+  "passwordSelector": "input[type=\"password\"]",
+  "submitSelector": "button[type=\"submit\"]",
+  "postLoginWaitMs": 5000,
+  "roles": [
+    {
+      "role": "admin",
+      "email": "test-admin@example.com",
+      "password": "REPLACE_ME",
+      "routePatterns": ["/admin", "/admin/*"]
+    },
+    {
+      "role": "user",
+      "email": "test-user@example.com",
+      "password": "REPLACE_ME",
+      "routePatterns": ["/dashboard", "/dashboard/*", "/account", "/account/*"]
+    }
+  ]
+}

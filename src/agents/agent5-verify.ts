@@ -14,6 +14,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { AgentContext, Gap, VerifyResult } from '../types';
 import { PageDriver } from '../browser';
+import { matchAuthRole } from '../auth';
 
 /** Render the human-readable verify report. */
 function renderMd(
@@ -148,12 +149,29 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
   let interactions: string[] = [];
   let screenshot = '';
   let snapshot = '';
+  let loginNote: string | undefined;
 
   try {
     driver = await PageDriver.launch({ readOnly: ctx.config.readOnlyExercise });
+
+    // Auth-aware: re-verify gated routes logged in, matching the audit pass.
+    if (ctx.config.auth) {
+      const role = matchAuthRole(ctx.page.route, ctx.config.auth);
+      if (role) {
+        const login = await driver.loginAs(
+          ctx.boot.baseUrl,
+          ctx.config.auth,
+          role,
+        );
+        loginNote = login.detail;
+      }
+    }
+
     await driver.open(url);
     const exercised = await driver.exercise();
-    interactions = exercised.interactions ?? [];
+    interactions = loginNote
+      ? [`login: ${loginNote}`, ...(exercised.interactions ?? [])]
+      : exercised.interactions ?? [];
     consoleErrors = exercised.consoleErrors ?? [];
     try {
       screenshot = await driver.screenshot();

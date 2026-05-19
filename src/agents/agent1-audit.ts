@@ -11,6 +11,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { PageDriver } from '../browser';
+import { matchAuthRole } from '../auth';
 import type { AgentContext, AuditResult, Gap, Severity } from '../types';
 
 /** Shape the model must return — kept narrow so parsing is robust. */
@@ -64,6 +65,9 @@ function renderMd(result: AuditResult): string {
   const lines: string[] = [];
   lines.push(`# Audit — ${result.page}`);
   lines.push('');
+  if (result.authRole) {
+    lines.push(`Audited logged in as: **${result.authRole}**`);
+  }
   lines.push(`Interactions exercised: ${result.interactionsExercised.length}`);
   lines.push(`Console errors: ${result.consoleErrors.length}`);
   lines.push(`Gaps found: ${result.gaps.length}`);
@@ -198,14 +202,35 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
   let snapshot = '';
   let screenshot = '';
   let driveError: string | undefined;
+  let authRole: string | undefined;
+  let loginNote: string | undefined;
 
   try {
     driver = await PageDriver.launch({ readOnly: ctx.config.readOnlyExercise });
+
+    // Auth-aware: if this route belongs to a role, log in FIRST so the page
+    // is audited as a real authenticated user. Login happens in the same
+    // browser context, so the session cookie carries to the target page.
+    if (ctx.config.auth) {
+      const role = matchAuthRole(ctx.page.route, ctx.config.auth);
+      if (role) {
+        const login = await driver.loginAs(
+          ctx.boot.baseUrl ?? '',
+          ctx.config.auth,
+          role,
+        );
+        loginNote = login.detail;
+        if (login.ok) authRole = role.role;
+      }
+    }
+
     const url = `${ctx.boot.baseUrl}${ctx.page.route}`;
     await driver.open(url);
 
     const exercised = await driver.exercise();
-    interactions = exercised.interactions;
+    interactions = loginNote
+      ? [`login: ${loginNote}`, ...exercised.interactions]
+      : exercised.interactions;
     consoleErrors = exercised.consoleErrors;
 
     try {
@@ -247,7 +272,7 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
           description: `The page could not be driven in a browser. ${driveError}`,
           recommendation:
             'Verify the route serves correctly and the browser driver can reach it before re-running the audit.',
-          evidence: [driveError],
+          evidence: loginNote ? [driveError, `login: ${loginNote}`] : [driveError],
         },
       ],
     };
@@ -290,6 +315,7 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
     consoleErrors,
     interactionsExercised: interactions,
     gaps,
+    ...(authRole ? { authRole } : {}),
   };
 
   writeOutputs(ctx, result);

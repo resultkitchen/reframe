@@ -74,11 +74,23 @@ export function renderManifestMd(manifest: RunManifest): string;
 ```
 Writes `runDir/manifest.json` and `runDir/manifest.md`.
 
+## src/auth.ts
+```ts
+export function loadAuthConfig(authPath: string): AuthConfig;            // load + validate
+export function matchAuthRole(route: string, auth: AuthConfig): AuthRole | undefined;
+```
+`loadAuthConfig` throws a clear error on a missing/malformed `--auth` file.
+`matchAuthRole` returns the first role whose `routePatterns` match `route`
+(`*` globs; `/x/*` also matches the bare `/x`), or `undefined` for a public
+page. Used by Agents 1 & 5 to decide when to call `PageDriver.loginAs`.
+
 ## src/browser.ts
 ```ts
 export class PageDriver {
-  static launch(): Promise<PageDriver>;
+  static launch(opts?: { readOnly?: boolean }): Promise<PageDriver>;
   open(url: string): Promise<void>;
+  loginAs(baseUrl: string, auth: AuthConfig, role: AuthRole):
+    Promise<{ ok: boolean; detail: string }>;
   exercise(): Promise<{ interactions: string[]; consoleErrors: string[] }>;
   screenshot(): Promise<string>;   // base64 PNG, no data: prefix
   snapshot(): Promise<string>;     // accessibility/DOM text snapshot
@@ -87,7 +99,10 @@ export class PageDriver {
 ```
 `exercise` clicks every visible button/link, focuses inputs, and collects
 `console` errors + page errors. Must be resilient: never throw on a single
-failed interaction — record it and continue.
+failed interaction — record it and continue. With `launch({ readOnly: true })`
+it skips destructive clicks (delete/send/pay/submit, `type=submit`).
+`loginAs` form-fills the app's login page in THIS browser context so the
+session cookie carries to pages opened afterward; resilient, never throws.
 
 ## src/stages/stage0-map.ts
 ```ts

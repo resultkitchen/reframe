@@ -256,6 +256,12 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
           `${boot.reason ?? 'no reason given'}. Audit/verify run degraded.`,
       );
     }
+    if (config.auth) {
+      console.log(
+        `[pipeline] auth-aware auditing enabled — ${config.auth.roles.length} ` +
+          `role(s); gated routes audited logged in.`,
+      );
+    }
     devServerPid = boot.pid;
     state.stage0_5 = 'done';
     saveState(config.runDir, state);

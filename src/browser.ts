@@ -7,6 +7,7 @@
  */
 
 import type { Browser, ConsoleMessage, Page } from 'playwright';
+import type { AuthConfig, AuthRole } from './types';
 
 /**
  * Labels matching this pattern indicate a click that could mutate data, send
@@ -79,6 +80,82 @@ export class PageDriver {
         );
       }
     }
+  }
+
+  /**
+   * Log in via the app's own login form, in THIS browser context, so the
+   * session cookie carries to every page subsequently opened on this driver.
+   *
+   * This is how auth-gated routes get audited as a real authenticated user
+   * instead of a redirect to the public landing page. Deliberate and exempt
+   * from read-only mode (read-only only governs `exercise()`).
+   *
+   * Resilient — never throws; returns `{ ok, detail }` for the caller to log.
+   */
+  async loginAs(
+    baseUrl: string,
+    auth: AuthConfig,
+    role: AuthRole,
+  ): Promise<{ ok: boolean; detail: string }> {
+    const errText = (err: unknown): string =>
+      err instanceof Error ? err.message : String(err);
+
+    const loginPath = auth.loginUrl.startsWith('/')
+      ? auth.loginUrl
+      : `/${auth.loginUrl}`;
+    const loginUrl = baseUrl.replace(/\/+$/, '') + loginPath;
+
+    try {
+      await this.page.goto(loginUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+      });
+    } catch (err) {
+      return { ok: false, detail: `could not open login page ${loginUrl}: ${errText(err)}` };
+    }
+
+    try {
+      await this.page.fill(auth.emailSelector, role.email, { timeout: 8000 });
+      await this.page.fill(auth.passwordSelector, role.password, { timeout: 8000 });
+    } catch (err) {
+      return {
+        ok: false,
+        detail:
+          `could not fill the login form for role "${role.role}" ` +
+          `(selectors: ${auth.emailSelector} / ${auth.passwordSelector}): ${errText(err)}`,
+      };
+    }
+
+    try {
+      await this.page.click(auth.submitSelector, { timeout: 8000 });
+    } catch (err) {
+      return {
+        ok: false,
+        detail: `could not click submit (${auth.submitSelector}) for role "${role.role}": ${errText(err)}`,
+      };
+    }
+
+    // Let the post-login redirect settle.
+    try {
+      await this.page.waitForTimeout(Math.max(0, auth.postLoginWaitMs || 0));
+    } catch {
+      /* timeout wait failing is non-fatal */
+    }
+
+    // Heuristic success check: a successful login redirects away from the
+    // login page. Still on it ⇒ bad credentials or the app never reached its
+    // auth backend.
+    if (this.page.url().includes(loginPath)) {
+      return {
+        ok: false,
+        detail:
+          `still on the login page after submitting as "${role.role}" — login ` +
+          `likely failed (check credentials, selectors, or that the app reaches ` +
+          `its real auth backend; auth-aware runs need --real-env).`,
+      };
+    }
+
+    return { ok: true, detail: `logged in as "${role.role}" (${role.email})` };
   }
 
   /**

@@ -149,6 +149,10 @@ export function writeProposedChanges(
 
     /* Audit. */
     const gaps = r.audit?.gaps ?? [];
+    if (r.audit?.authRole) {
+      lines.push(`_Audited logged in as **${r.audit.authRole}**._`);
+      lines.push('');
+    }
     lines.push(`### Audit gaps (${gaps.length})`);
     lines.push('');
     if (!r.audit) {

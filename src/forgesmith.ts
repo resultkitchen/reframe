@@ -19,12 +19,19 @@ export interface ForgesmithRebuildInput {
   target: string;
   /** Max concurrent page-workers. */
   concurrency?: number;
-  /** 'pr' = branch + PR, 'propose' = diffs only. */
+  /** 'pr' = branch + PR, 'propose' = diffs only, 'review' = review agents +
+   * proposed-changes.md (no code). */
   applyMode?: ApplyMode;
   /** Path to a pinned brand spec. */
   brand?: string;
   /** Path to a pinned constraints spec. */
   constraints?: string;
+  /** Path to an auth config — enables auth-aware auditing (implies realEnv). */
+  auth?: string;
+  /** Preserve the target's real .env.local instead of stubbing integrations. */
+  realEnv?: boolean;
+  /** Skip destructive browser clicks (implied by realEnv / auth). */
+  readOnly?: boolean;
   /** Scratch dir for the clone. */
   scratch?: string;
   /** Resume an existing run directory. */
@@ -58,6 +65,15 @@ export async function forgesmithRebuild(
   }
   if (input.constraints) {
     argv.push('--constraints', input.constraints);
+  }
+  if (input.auth) {
+    argv.push('--auth', input.auth);
+  }
+  if (input.realEnv) {
+    argv.push('--real-env');
+  }
+  if (input.readOnly) {
+    argv.push('--read-only');
   }
   if (input.scratch) {
     argv.push('--scratch', input.scratch);
