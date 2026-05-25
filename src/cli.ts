@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * CLI entrypoint for rebuild-pipeline.
+ * CLI entrypoint for Reframe.
  *
- *   pipeline rebuild <github-url|local-path> [flags]
- *   pipeline --help
+ *   reframe rebuild <github-url|local-path> [flags]
+ *   reframe init [target-path]
+ *   reframe --help
  *
  * Flags (parsed by resolveConfig):
  *   --concurrency <n>        cap on concurrent page-workers (default 8)
@@ -23,13 +24,15 @@
 import { resolveConfig } from './config';
 import { runPipeline } from './orchestrator';
 import { renderManifestMd } from './manifest';
+import { runInitScaffold } from './stages/init-scaffold';
 
 const HELP = `
-rebuild-pipeline — portable SaaS rebuild pipeline (1 mapper + 6-agent fan-out)
+Reframe — portable SaaS architectural refactoring engine (1 mapper + 6-agent fan-out)
 
 USAGE
-  pipeline rebuild <github-url|local-path> [flags]
-  pipeline --help
+  reframe rebuild <github-url|local-path> [flags]
+  reframe init [target-path]
+  reframe --help
 
 FLAGS
   --concurrency <n>           Max concurrent page-workers        (default: 8)
@@ -64,20 +67,20 @@ FLAGS
                               checkpoints are skipped.
 
 ENV
-  GEMINI_API_KEY / GOOGLE_API_KEY   Gemini API key (required).
+  GEMINI_API_KEY / GOOGLE_API_KEY   Gemini API key (required for Gemini runs).
   PIPELINE_SCRATCH                  Default scratch dir.
 
 EXAMPLES
-  pipeline rebuild https://github.com/acme/todo-saas
-  pipeline rebuild https://github.com/acme/todo-saas --max-pages 10 --quick-scan
-  pipeline rebuild ./local/project --apply-mode propose --concurrency 4
-  pipeline rebuild https://github.com/acme/app --brand config/brand.json
-  pipeline rebuild ./project --resume runs/project-2026-05-15T10-00-00-000Z
+  reframe init ./my-new-saas
+  reframe rebuild https://github.com/acme/todo-saas
+  reframe rebuild https://github.com/acme/todo-saas --max-pages 10 --quick-scan
+  reframe rebuild ./local/project --apply-mode propose --concurrency 4
+  reframe rebuild ./project --resume runs/project-2026-05-15T10-00-00-000Z
 
   # Two-pass review gate against a live install, gated screens included:
-  pipeline rebuild ./project --apply-mode review --auth config/myapp-auth.json
+  reframe rebuild ./project --apply-mode review --auth config/myapp-auth.json
   #   ...review runs/project-<stamp>/proposed-changes.md, then:
-  pipeline rebuild ./project --resume runs/project-<stamp> --apply-mode pr
+  reframe rebuild ./project --resume runs/project-<stamp> --apply-mode pr
 
 EXIT CODES
   0  every processed page passed verification
@@ -98,9 +101,15 @@ async function main(): Promise<number> {
     return argv.length === 0 ? 1 : 0;
   }
 
+  // Handle 'init' command.
+  if (argv[0] === 'init') {
+    await runInitScaffold(argv[1]);
+    return 0;
+  }
+
   if (argv[0] !== 'rebuild') {
-    console.error(`Unknown command: "${argv[0]}". Expected "rebuild".`);
-    console.error(`Run "pipeline --help" for usage.`);
+    console.error(`Unknown command: "${argv[0]}". Expected "rebuild" or "init".`);
+    console.error(`Run "reframe --help" for usage.`);
     return 1;
   }
 
@@ -123,6 +132,6 @@ main()
   .then((code) => process.exit(code))
   .catch((err: unknown) => {
     const message = err instanceof Error ? (err.stack ?? err.message) : String(err);
-    console.error('\n[pipeline] FATAL: ' + message);
+    console.error('\n[reframe] FATAL: ' + message);
     process.exit(1);
   });

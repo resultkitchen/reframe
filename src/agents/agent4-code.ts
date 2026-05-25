@@ -224,7 +224,7 @@ export async function runCode(ctx: AgentContext): Promise<CodeResult> {
     'and exports. Output ONLY the file content — no explanation, no markdown ' +
     'fences, no commentary.';
 
-  const prompt = [
+  const promptParts = [
     `Target file: ${relPath}`,
     `Page: ${pageId}  —  ${ctx.page.purpose}`,
     `User function: ${ctx.page.userFunction}`,
@@ -245,9 +245,27 @@ export async function runCode(ctx: AgentContext): Promise<CodeResult> {
     '',
     '=== COMPLIANCE FINDINGS TO FIX (all must be resolved) ===',
     complianceBlock,
-    '',
-    'Now output the complete rewritten content of the file, and nothing else.',
-  ].join('\n');
+  ];
+
+  if (ctx.approval) {
+    const reviewDetails: string[] = [];
+    if (ctx.approval.note) {
+      reviewDetails.push(`Overall Reviewer Note:\n${ctx.approval.note}`);
+    }
+    if (ctx.approval.comments && ctx.approval.comments.length > 0) {
+      reviewDetails.push(`Threaded Collaborator Comments:\n${ctx.approval.comments.map(c => `- ${c}`).join('\n')}`);
+    }
+    if (reviewDetails.length > 0) {
+      promptParts.push('');
+      promptParts.push('=== HUMAN REVIEW COMMENTS & SPECIFIC DESIGN REFINEMENTS (MUST OBEY) ===');
+      promptParts.push(reviewDetails.join('\n\n'));
+    }
+  }
+
+  promptParts.push('');
+  promptParts.push('Now output the complete rewritten content of the file, and nothing else.');
+  const prompt = promptParts.join('\n');
+
 
   let newContent = '';
   try {

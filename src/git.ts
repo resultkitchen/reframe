@@ -89,10 +89,10 @@ export async function createRunBranch(
       /* best-effort */
     }
     // A commit needs an identity; set it locally (no global config required).
-    await git.addConfig('user.email', 'pipeline@rebuild.local');
-    await git.addConfig('user.name', 'rebuild-pipeline');
+    await git.addConfig('user.email', 'pipeline@reframe.local');
+    await git.addConfig('user.name', 'reframe');
     await git.add(['-A']);
-    await git.commit('chore: rebuild-pipeline baseline snapshot');
+    await git.commit('chore: reframe baseline snapshot');
   }
 
   await git.checkoutLocalBranch(branch);

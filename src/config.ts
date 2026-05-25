@@ -161,6 +161,7 @@ interface ParsedArgs {
   maxPages?: number;
   quickScan?: boolean;
   params?: string;
+  llmProvider?: string;
 }
 
 /**
@@ -220,6 +221,14 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.quickScan = true;
     } else if (tok === '--params') {
       out.params = next();
+    } else if (tok === '--llm-provider') {
+      const v = next();
+      if (v !== 'gemini' && v !== 'openai' && v !== 'anthropic' && v !== 'openai-compatible') {
+        throw new Error(
+          `--llm-provider must be 'gemini', 'openai', 'anthropic', or 'openai-compatible' (got "${v}")`,
+        );
+      }
+      out.llmProvider = v;
     } else if (tok.startsWith('--')) {
       throw new Error(`Unknown flag "${tok}"`);
     } else if (target === undefined) {
@@ -358,6 +367,7 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     maxPages: args.maxPages,
     quickScan: args.quickScan ?? false,
     sampleParams: loadSampleParams(args.params),
+    llmProvider: args.llmProvider ?? 'gemini',
   };
 
   return config;

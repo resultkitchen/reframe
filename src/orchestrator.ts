@@ -19,7 +19,7 @@ import { spawnSync } from 'node:child_process';
 import { GeminiClient } from './gemini';
 import { cloneRepo, createRunBranch, commitAll, openPr } from './git';
 import { prepareScratch, cleanupScratch, checkDisk } from './scratch';
-import { newRunState, loadState, saveState } from './state';
+import { newRunState, loadState, saveState, loadApprovals } from './state';
 import { writeManifest } from './manifest';
 import { writeProposedChanges } from './proposed-changes';
 import { loadBrand, loadConstraints } from './config';
@@ -87,7 +87,7 @@ function ensureDir(dir: string): void {
   fs.mkdirSync(dir, { recursive: true });
 }
 
-/** A run-stamp suitable for branch names: rebuild-pipeline/<stamp>. */
+/** A run-stamp suitable for branch names: reframe/<stamp>. */
 function runStamp(): string {
   return new Date().toISOString().replace(/[:.]/g, '-');
 }
@@ -164,6 +164,11 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
 
+  if (config.llmProvider !== 'gemini') {
+    config.concurrency = Math.min(config.concurrency, 2);
+    console.log(`[reframe] low-RPM provider '${config.llmProvider}' selected. Concurrency capped at ${config.concurrency} with backoff delays.`);
+  }
+
   // Manifest is built incrementally; even an aborted run gets one written
   // by the caller via the value returned / thrown — but we own scratch
   // cleanup unconditionally in `finally`.
@@ -180,24 +185,24 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
 
   try {
     /* (1) Scratch + disk guard. */
-    console.log(`\n[pipeline] starting run for ${config.target}`);
-    console.log(`[pipeline] run dir: ${config.runDir}`);
+    console.log(`\n[reframe] starting run for ${config.target}`);
+    console.log(`[reframe] run dir: ${config.runDir}`);
     await prepareScratch(config);
     const disk = await checkDisk(config.scratchDir);
-    console.log(`[pipeline] scratch disk: ${disk.freeMb} MB free (ok=${disk.ok})`);
+    console.log(`[reframe] scratch disk: ${disk.freeMb} MB free (ok=${disk.ok})`);
     if (!disk.ok) {
       extraAlerts.push(
         `Low scratch disk: only ${disk.freeMb} MB free at ${config.scratchDir}. Run may fail.`,
       );
-      console.error(`[pipeline] WARNING: low scratch disk (${disk.freeMb} MB).`);
+      console.error(`[reframe] WARNING: low scratch disk (${disk.freeMb} MB).`);
     }
 
     /* Materialize the working copy: copy local path, else clone. */
     if (config.isLocalPath) {
-      console.log(`[pipeline] local target — copying into work dir...`);
+      console.log(`[reframe] local target — copying into work dir...`);
       copyDirInto(config.target, config.workDir);
     } else {
-      console.log(`[pipeline] cloning ${config.target}...`);
+      console.log(`[reframe] cloning ${config.target}...`);
       await cloneRepo(config.target, config.workDir);
     }
 
@@ -217,10 +222,10 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       state = loadState(config.resumeRunDir);
       if (state) {
         resuming = true;
-        console.log(`[pipeline] resuming run from ${config.resumeRunDir}`);
+        console.log(`[reframe] resuming run from ${config.resumeRunDir}`);
       } else {
         console.log(
-          `[pipeline] --resume given but no state.json found — starting fresh.`,
+          `[reframe] --resume given but no state.json found — starting fresh.`,
         );
       }
     }
@@ -228,15 +233,15 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
     /* (5) Stage 0 — map. */
     let scope: ScopeDoc;
     if (resuming && state && state.stage0 === 'done') {
-      console.log(`[pipeline] Stage 0 already done — loading scope.json`);
+      console.log(`[reframe] Stage 0 already done — loading scope.json`);
       scope = JSON.parse(
         fs.readFileSync(path.join(config.runDir, 'scope.json'), 'utf8'),
       ) as ScopeDoc;
     } else {
-      console.log(`[pipeline] Stage 0 — mapping repo...`);
+      console.log(`[reframe] Stage 0 — mapping repo...`);
       scope = await runStage0(config, gemini);
       console.log(
-        `[pipeline] Stage 0 done — ${scope.pages.length} page(s), ` +
+        `[reframe] Stage 0 done — ${scope.pages.length} page(s), ` +
           `${scope.brokenContracts.length} broken contract(s).`,
       );
     }
@@ -246,7 +251,7 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       scope.pages = scope.pages.slice(0, config.maxPages);
       const msg = `Page cap: processing ${config.maxPages} of ${originalLength} mapped pages (--max-pages ${config.maxPages}). Re-run without --max-pages for full coverage.`;
       extraAlerts.push(msg);
-      console.log(`[pipeline] ${msg}`);
+      console.log(`[reframe] ${msg}`);
     }
 
     /* If we had no state yet (fresh run, or resume without file), build it
@@ -272,10 +277,10 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
        node_modules AND the running dev server) is deleted at the end of every
        run, so a cached boot.json baseUrl from a prior run points at a server
        that no longer exists. */
-    console.log(`[pipeline] Stage 0.5 — boot gate...`);
+    console.log(`[reframe] Stage 0.5 — boot gate...`);
     const boot = await runBootGate(config);
     console.log(
-      `[pipeline] boot status: ${boot.status}` +
+      `[reframe] boot status: ${boot.status}` +
         (boot.baseUrl ? ` @ ${boot.baseUrl}` : ''),
     );
     if (boot.status !== 'running') {
@@ -286,7 +291,7 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
     }
     if (config.auth) {
       console.log(
-        `[pipeline] auth-aware auditing enabled — ${config.auth.roles.length} ` +
+        `[reframe] auth-aware auditing enabled — ${config.auth.roles.length} ` +
           `role(s); gated routes audited logged in.`,
       );
     }
@@ -295,9 +300,9 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
     saveState(config.runDir, state);
 
     /* (8) Per-run branch in 'pr' mode. */
-    const branch = `rebuild-pipeline/${runStamp()}`;
+    const branch = `reframe/${runStamp()}`;
     if (config.applyMode === 'pr') {
-      console.log(`[pipeline] creating run branch ${branch}`);
+      console.log(`[reframe] creating run branch ${branch}`);
       try {
         await createRunBranch(config.workDir, branch);
       } catch (err) {
@@ -305,16 +310,16 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
           `Could not create run branch ${branch}: ${errMsg(err)}. ` +
             `Changes applied on the current branch instead.`,
         );
-        console.error(`[pipeline] branch creation failed: ${errMsg(err)}`);
+        console.error(`[reframe] branch creation failed: ${errMsg(err)}`);
       }
     }
 
     /* (9) PER-PAGE FAN-OUT. */
     if (config.quickScan) {
-      console.log(`[pipeline] quick-scan tier: per-page review agents on the cheap model.`);
+      console.log(`[reframe] quick-scan tier: per-page review agents on the cheap model.`);
     }
     console.log(
-      `[pipeline] fan-out: ${scope.pages.length} page(s), ` +
+      `[reframe] fan-out: ${scope.pages.length} page(s), ` +
         `concurrency ${config.concurrency}.`,
     );
     const pageEntries: PageManifestEntry[] = [];
@@ -323,6 +328,30 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       const pageState: PageState =
         state!.pages[page.slug] ??
         (state!.pages[page.slug] = { slug: page.slug, agents: freshAgentMap() });
+
+      const approvals = loadApprovals(config.runDir);
+      const approval = approvals?.pages[page.slug];
+      if (approval && approval.decision === 'skip') {
+        console.log(`[${page.slug}] skipped: marked 'skip' in approvals.json.`);
+        const reviewAgents: AgentName[] = ['audit', 'ux', 'design', 'compliance', 'code', 'verify'];
+        for (const a of reviewAgents) {
+          pageState.agents[a] = 'skipped';
+        }
+        pageState.pass = true;
+        saveState(config.runDir, state!);
+        pageEntries.push({
+          slug: page.slug,
+          route: page.route,
+          status: 'drive-failed',
+          health: undefined,
+          agentsRun: [],
+          pass: true,
+          gapsFound: 0,
+          gapsClosed: 0,
+          complianceFindings: 0,
+        });
+        return;
+      }
 
       const pageDir = path.join(config.runDir, 'pages', page.slug);
       ensureDir(pageDir);
@@ -336,6 +365,7 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
         boot,
         gemini: gemini!,
         pageDir,
+        approval,
       };
 
       // Checkpoint helper — marks an agent's status and persists state.
@@ -365,6 +395,9 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
         }
         mark(agent, 'running');
         try {
+          if (config.llmProvider !== 'gemini') {
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+          }
           const out = await fn();
           mark(agent, 'done');
           console.log(`[${page.slug}] ${agent}: done.`);
@@ -397,6 +430,22 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       // the operator approves proposed-changes.md before any apply pass.
       let verify: VerifyResult | undefined;
       if (config.applyMode !== 'review') {
+        if (ctx.audit && approval?.gaps) {
+          const originalGapCount = ctx.audit.gaps.length;
+          ctx.audit.gaps = ctx.audit.gaps.filter(g => {
+            const decision = approval.gaps?.[g.id];
+            if (decision === 'skip') {
+              console.log(`[${page.slug}] skipping gap ${g.id} per approvals.json`);
+              return false;
+            }
+            return true;
+          });
+          const skippedCount = originalGapCount - ctx.audit.gaps.length;
+          if (skippedCount > 0) {
+            console.log(`[${page.slug}] filtered gaps: ${originalGapCount} -> ${ctx.audit.gaps.length} (${skippedCount} skipped)`);
+          }
+        }
+
         ctx.code = (await runAgent('code', () => runCode(ctx))) ?? ctx.code;
         verify = await runAgent('verify', () => runVerify(ctx));
       } else {
@@ -462,7 +511,7 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
           });
           void audited;
         }
-        console.error(`[pipeline] page "${page.slug}" aborted — pool continues.`);
+        console.error(`[reframe] page "${page.slug}" aborted — pool continues.`);
       }
     });
 
@@ -476,31 +525,31 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
     if (config.applyMode === 'pr') {
       const passCount = orderedEntries.filter((e) => e.pass).length;
       const commitMsg =
-        `rebuild-pipeline: ${passCount}/${orderedEntries.length} pages passing`;
+        `reframe: ${passCount}/${orderedEntries.length} pages passing`;
       try {
-        console.log(`[pipeline] committing changes...`);
+        console.log(`[reframe] committing changes...`);
         await commitAll(config.workDir, commitMsg);
-        console.log(`[pipeline] opening PR...`);
+        console.log(`[reframe] opening PR...`);
         const url = await openPr(
           config.workDir,
           branch,
-          `rebuild-pipeline run — ${config.projectSlug}`,
+          `reframe run — ${config.projectSlug}`,
           buildPrBody(config, orderedEntries),
         );
         prUrl = url || undefined;
         console.log(
-          prUrl ? `[pipeline] PR: ${prUrl}` : `[pipeline] no GitHub remote — PR skipped.`,
+          prUrl ? `[reframe] PR: ${prUrl}` : `[reframe] no GitHub remote — PR skipped.`,
         );
       } catch (err) {
         extraAlerts.push(`Commit/PR step failed: ${errMsg(err)}`);
-        console.error(`[pipeline] commit/PR failed: ${errMsg(err)}`);
+        console.error(`[reframe] commit/PR failed: ${errMsg(err)}`);
       }
     } else if (config.applyMode === 'review') {
       console.log(
-        `[pipeline] review mode — no code generated; proposed-changes.md only.`,
+        `[reframe] review mode — no code generated; proposed-changes.md only.`,
       );
     } else {
-      console.log(`[pipeline] propose mode — diffs only, no commit/PR.`);
+      console.log(`[reframe] propose mode — diffs only, no commit/PR.`);
     }
 
     /* (11) Test scaffold. Skipped in review mode — a review pass applies no
@@ -509,13 +558,13 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
     if (config.applyMode === 'review') {
       state.testScaffold = 'skipped';
       saveState(config.runDir, state);
-      console.log(`[pipeline] review mode — test scaffold skipped.`);
+      console.log(`[reframe] review mode — test scaffold skipped.`);
     } else if (
       resuming &&
       state.testScaffold === 'done' &&
       usersJsonExists(config.runDir)
     ) {
-      console.log(`[pipeline] test scaffold already done — loading users.json`);
+      console.log(`[reframe] test scaffold already done — loading users.json`);
       testUsers = JSON.parse(
         fs.readFileSync(
           path.join(config.runDir, 'test-scaffold', 'users.json'),
@@ -523,17 +572,17 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
         ),
       ) as TestUser[];
     } else {
-      console.log(`[pipeline] building test scaffold...`);
+      console.log(`[reframe] building test scaffold...`);
       state.testScaffold = 'running';
       saveState(config.runDir, state);
       try {
         testUsers = await runTestScaffold(config, scope, boot, gemini);
         state.testScaffold = 'done';
-        console.log(`[pipeline] test scaffold: ${testUsers.length} test user(s).`);
+        console.log(`[reframe] test scaffold: ${testUsers.length} test user(s).`);
       } catch (err) {
         state.testScaffold = 'failed';
         extraAlerts.push(`Test scaffold failed: ${errMsg(err)}`);
-        console.error(`[pipeline] test scaffold failed: ${errMsg(err)}`);
+        console.error(`[reframe] test scaffold failed: ${errMsg(err)}`);
       }
       saveState(config.runDir, state);
     }
@@ -542,14 +591,14 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
     if (config.applyMode === 'review') {
       try {
         const pcPath = writeProposedChanges(config, scope);
-        console.log(`[pipeline] proposed changes written: ${pcPath}`);
+        console.log(`[reframe] proposed changes written: ${pcPath}`);
         extraAlerts.push(
           `Review pass complete — read & approve ${pcPath}, then apply with: ` +
             `rebuild ${config.target} --resume ${config.runDir} --apply-mode pr`,
         );
       } catch (err) {
         extraAlerts.push(`Failed to write proposed-changes.md: ${errMsg(err)}`);
-        console.error(`[pipeline] proposed-changes.md failed: ${errMsg(err)}`);
+        console.error(`[reframe] proposed-changes.md failed: ${errMsg(err)}`);
       }
     }
 
@@ -585,7 +634,7 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
     const allPass =
       orderedEntries.length > 0 && orderedEntries.every((e) => e.pass);
     console.log(
-      `\n[pipeline] run complete — ${orderedEntries.filter((e) => e.pass).length}/` +
+      `\n[reframe] run complete — ${orderedEntries.filter((e) => e.pass).length}/` +
         `${orderedEntries.length} pages passing, ${alerts.length} alert(s). ` +
         `all-pass=${allPass}.`,
     );
@@ -598,7 +647,7 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       const cleaned = await safeCleanup(config);
       // Best-effort manifest note — the run dir may already exist.
       if (cleaned) {
-        console.log(`[pipeline] scratch cleaned (finally).`);
+        console.log(`[reframe] scratch cleaned (finally).`);
       }
     }
   }
@@ -633,7 +682,7 @@ function resolveBrand(
   if (pinned) {
     fs.writeFileSync(resolvedPath, JSON.stringify(pinned, null, 2), 'utf8');
     console.log(
-      `[pipeline] brand: PINNED "${pinned.name}" — Agent 3 is deterministic.`,
+      `[reframe] brand: PINNED "${pinned.name}" — Agent 3 is deterministic.`,
     );
     return pinned;
   }
@@ -647,7 +696,7 @@ function resolveBrand(
     `Review ${resolvedPath}, set "pinned": true, save it as config/brand.json, ` +
     `and re-run with --brand config/brand.json. See docs/BRAND_SPEC.md.`;
   alerts.push(notice);
-  console.warn(`\n[pipeline] ⚠ ${notice}\n`);
+  console.warn(`\n[reframe] ⚠ ${notice}\n`);
   return bootstrap;
 }
 
@@ -685,13 +734,13 @@ function resolveConstraints(
     // Last-resort empty spec — Agent 6 simply finds nothing.
     constraints = { project: projectGoal || 'unknown', rules: [] };
     console.warn(
-      `[pipeline] ⚠ no constraints file found — Agent 6 runs with 0 rules.`,
+      `[reframe] ⚠ no constraints file found — Agent 6 runs with 0 rules.`,
     );
   }
 
   fs.writeFileSync(resolvedPath, JSON.stringify(constraints, null, 2), 'utf8');
   console.log(
-    `[pipeline] constraints: "${constraints.project}" — ` +
+    `[reframe] constraints: "${constraints.project}" — ` +
       `${constraints.rules.length} rule(s) for Agent 6.`,
   );
   return constraints;
@@ -724,7 +773,7 @@ async function safeCleanup(config: PipelineConfig): Promise<boolean> {
   try {
     return await cleanupScratch(config);
   } catch (err) {
-    console.error(`[pipeline] scratch cleanup failed: ${errMsg(err)}`);
+    console.error(`[reframe] scratch cleanup failed: ${errMsg(err)}`);
     return false;
   }
 }
@@ -739,9 +788,11 @@ function buildPrBody(
 ): string {
   const passCount = entries.filter((e) => e.pass).length;
   const lines = [
-    `Automated rebuild by **rebuild-pipeline** for \`${config.target}\`.`,
+    `Automated rebuild by **Reframe** for \`${config.target}\`.`,
     '',
     `**${passCount}/${entries.length} pages passing.**`,
+    '',
+    '### Page Manifest Summary',
     '',
     '| Page | Route | Pass | Gaps found | Gaps closed | Compliance findings |',
     '| ---- | ----- | ---- | ---------- | ----------- | ------------------- |',
@@ -752,7 +803,32 @@ function buildPrBody(
         `${e.gapsFound} | ${e.gapsClosed} | ${e.complianceFindings} |`,
     );
   }
-  lines.push('', '_Generated by rebuild-pipeline. Review every diff before merge._');
+
+  const approvals = loadApprovals(config.runDir);
+  if (approvals && Object.keys(approvals.pages).length > 0) {
+    lines.push('', '### Human Approvals & Reviewer Comments Ledger');
+    for (const [slug, approval] of Object.entries(approvals.pages)) {
+      const decisionEmoji = approval.decision === 'apply' ? '🟢 APPROVED/APPLY' : '🟡 SKIPPED';
+      lines.push(`- **Page \`${slug}\`**: ${decisionEmoji}`);
+      if (approval.note) {
+        lines.push(`  - **Reviewer Note**: _"${approval.note}"_`);
+      }
+      if (approval.comments && approval.comments.length > 0) {
+        lines.push(`  - **Threaded Collaborator Comments**:`);
+        for (const comment of approval.comments) {
+          lines.push(`    - _"${comment}"_`);
+        }
+      }
+      if (approval.gaps && Object.keys(approval.gaps).length > 0) {
+        const gapDecisions = Object.entries(approval.gaps)
+          .map(([gapId, dec]) => `\`${gapId}\`: ${dec === 'apply' ? 'apply' : 'skip'}`)
+          .join(', ');
+        lines.push(`  - **Gap Decisions**: ${gapDecisions}`);
+      }
+    }
+  }
+
+  lines.push('', '_Generated by Reframe. Review every diff before merge._');
   return lines.join('\n');
 }
 

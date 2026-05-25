@@ -1,0 +1,12 @@
+{
+  "id": "T4-meta-internal-audit",
+  "title": "Audit & re-classify internal vs external leads using referral/landing URL",
+  "brief": "Some leads in the dashboard are mis-categorized as internal vs external (media-buyer). The truth is in the referral / landing URL captured on `casesdaily_leads`: any lead whose `landing_page_url` or `referrer_url` is on a casesdaily-owned domain should be `isInternal = true`. Today, `isInternal` is set in `lib/ghl/enrich.ts` via heuristics — likely tag-based — and is wrong for some rows. \n\nProduce TWO things:\n\n(1) A read-only audit SQL (Supabase / Postgres) that joins ghl_leads -> casesdaily_leads via the casesdaily_lead_id FK (added in migration 20260520_add_ghl_fk_mappings) and returns rows where the current `_buyerSource` / mediaBuyer classification disagrees with what the URL implies. List the casesdaily domains you assume are internal: `casesdaily.com`, `*.casesdaily.com`, and any per-attorney domains from `casesdaily_domains.domain` where `is_active = true`. Output: lead_id, current mediaBuyer, current isInternal, landing_page_url, referrer_url, inferred isInternal, reason.\n\n(2) An updated `enrich.ts` `enrichOpp` (or a new helper) that, when a `casesdailyLeadId` is set, reclassifies isInternal/mediaBuyer based on the landing URL → casesdaily_domains lookup. Internal leads get mediaBuyer='Internal'. Include a TODO list of edge cases that can't be auto-resolved.",
+  "contextFiles": [
+    { "path": "casesdaily/src/lib/ghl/enrich.ts" },
+    { "path": "casesdaily/supabase/migrations/20260520_add_ghl_fk_mappings.sql" },
+    { "path": "casesdaily/supabase/migrations/20260330_merge_funnel_leads_into_casesdaily.sql" }
+  ],
+  "outputContract": "Markdown response:\n\n1. **Findings & assumptions** (8–15 lines) — what 'internal' means, which domains qualify, what the lookup key is.\n2. **Audit SQL** — single fenced ```sql block, ready to paste into the Supabase SQL editor. Must be a single SELECT, read-only.\n3. **Enrichment patch** — fenced code block, full updated file:\n   ```typescript\n   // FILE: casesdaily/src/lib/ghl/enrich.ts\n   <full file contents>\n   ```\n4. **Edge cases / TODOs** — bullet list.\n\nDo not invent table columns; only use what appears in the migration context.",
+  "extractFiles": true
+}

@@ -127,6 +127,25 @@ export interface PipelineConfig {
    * Always present (defaults to `{}`).
    */
   sampleParams: Record<string, string>;
+  /** Selected LLM provider, e.g. 'gemini', 'openai', 'anthropic', 'openai-compatible'. Default 'gemini' */
+  llmProvider: string;
+}
+
+/* ─────────────────────────── Approvals & Comments Ledger ─────────────────────────── */
+
+export type ApprovalDecision = 'apply' | 'skip';
+
+export interface PageApproval {
+  decision: ApprovalDecision;
+  gaps?: Record<string, ApprovalDecision>; // gapId -> apply|skip
+  note?: string;
+  comments?: string[]; // Threaded collaborator comments/notes
+}
+
+export interface ApprovalsDoc {
+  runDir: string;
+  approvedAt: string;
+  pages: Record<string, PageApproval>; // slug -> approval details
 }
 
 /* ─────────────────────────── Brand & Constraints ─────────────────────────── */
@@ -463,4 +482,6 @@ export interface AgentContext {
   design?: DesignSpec;
   compliance?: ComplianceResult;
   code?: CodeResult;
+  approval?: PageApproval;
 }
+

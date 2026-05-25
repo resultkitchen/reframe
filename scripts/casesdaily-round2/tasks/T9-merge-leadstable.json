@@ -1,0 +1,11 @@
+{
+  "id": "T9-merge-leadstable",
+  "title": "Merge UX-polished LeadsTable (T8) with preview-link props (T6)",
+  "brief": "Two prior Gemini runs produced rewrites of the same file (LeadsTable.tsx):\n- T8: UX polish — restructured the expansion area into a two-pane layout with action bar, polished typography, etc.\n- T6: added two new props `attorneySlugById: Record<string,string>` and `casesdailyLeadInfoById: Record<string, { landing_page_url: string | null; referrer_url: string | null }>`, plus a 'Sources & Preview' section in the expansion that shows links to (a) the AI casechecker preview `https://casesdaily.com/c/<slug>/ai?preview=1` when attorney slug is known, and (b) the original landing_page_url + referrer_url from casesdaily_leads.\n\nProduce the MERGED LeadsTable.tsx that:\n- Uses T8's overall UX polish (action bar at top of expansion, two-pane layout, typography, dividers).\n- Adds T6's two new optional props (default to `{}` so existing callers still compile).\n- Surfaces the preview links inside the action bar (top of expansion): 'View Landing Page', 'AI Preview', 'Original Lead URL' — buttons/anchors only render when their target is available.\n- Also keeps a compact 'Sources & Preview' subsection in the left pane showing the URLs with copy buttons (so the operator can grab the URL string).\n- Keeps all existing handlers (onMbStatus, onBilled, onCaseQuality, etc.), all existing fields, the row-tinting helper getRowTheme.\n\nDO NOT lose anything from either version.",
+  "contextFiles": [
+    { "path": ".gemini-staging/round2/T8-ux-polish/files/_T8_LeadsTable.tsx" },
+    { "path": ".gemini-staging/round2/T6-lead-expansion-preview-link/files/_T6_LeadsTable.tsx" }
+  ],
+  "outputContract": "Markdown:\n1. **Merge plan** (4-6 lines)\n2. **File** — one fenced code block:\n   ```typescript\n   // FILE: casesdaily/src/components/admin/dashboard/LeadsTable.tsx\n   <full merged file>\n   ```\n3. **Sanity check** — 3 bullets confirming what was preserved from each source.\n\nLight theme. Plain Tailwind. No deps.",
+  "extractFiles": true
+}

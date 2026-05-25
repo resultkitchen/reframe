@@ -1,16 +1,9 @@
 /**
- * GeminiClient — the only path to the Gemini API.
+ * GeminiClient — handles swappable LLM engines supporting Gemini (Tier-3 default),
+ * Anthropic, OpenAI, and custom OpenAI-compatible endpoints (Ollama/local).
  *
- * - Model id per call is resolved from `config.models[opts.role]`.
- * - Every call is timeout-bounded; timeouts/errors retry up to `maxRetries`.
- * - On FINAL failure the message is pushed to `this.alerts` AND printed to
- *   stderr immediately, so the operator is alerted in-session (not silently
- *   retried forever).
- * - `callJson` requests JSON output and parses it defensively.
- *
- * `@google/genai` is ESM-only; it is loaded via a genuine dynamic `import()`
- * that survives CommonJS down-compilation (the `Function` indirection stops
- * TypeScript from rewriting it to `require()`).
+ * Keeps the name GeminiClient for complete backwards compatibility across the pipeline,
+ * but implements generalized LLM calling mechanics under the hood.
  */
 
 import type {
@@ -68,12 +61,64 @@ export class GeminiClient implements IGeminiClient {
   private async run(opts: GeminiCallOptions, json: boolean): Promise<string> {
     const model = this.config.models[opts.role];
     if (!model) {
-      const msg = `Gemini: no model configured for role "${opts.role}"`;
+      const msg = `LLM Provider: no model configured for role "${opts.role}"`;
       this.alert(msg);
       throw new Error(msg);
     }
 
     const timeoutMs = opts.timeoutMs ?? this.config.callTimeoutMs;
+    const provider = this.config.llmProvider;
+
+    const maxAttempts = Math.max(1, this.config.maxRetries + 1);
+    let lastErr: unknown;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const text = await withTimeout(
+          (async () => {
+            if (provider === 'gemini') {
+              return await this.callGemini(opts, model, json);
+            } else if (provider === 'anthropic') {
+              return await this.callAnthropic(opts, model, json);
+            } else if (provider === 'openai') {
+              return await this.callOpenAI(opts, model, json);
+            } else if (provider === 'openai-compatible') {
+              return await this.callOpenAICompatible(opts, model, json);
+            } else {
+              throw new Error(`Unsupported LLM provider: ${provider}`);
+            }
+          })(),
+          timeoutMs,
+          `${opts.role}/${model} (${provider})`,
+        );
+
+        if (!text || !text.trim()) {
+          throw new Error('empty response');
+        }
+        return text;
+      } catch (err) {
+        lastErr = err;
+        const reason = err instanceof Error ? err.message : String(err);
+        if (attempt < maxAttempts) {
+          console.error(
+            `[llm-client] ${opts.role} (${provider}) attempt ${attempt}/${maxAttempts} failed ` +
+              `(${reason}) — retrying`,
+          );
+          await sleep(1000 * attempt * attempt);
+        }
+      }
+    }
+
+    const msg =
+      `LLM Provider (${provider}) call FAILED after ${maxAttempts} attempts ` +
+      `(role=${opts.role}, model=${model}): ` +
+      (lastErr instanceof Error ? lastErr.message : String(lastErr));
+    this.alert(msg);
+    throw lastErr instanceof Error ? lastErr : new Error(msg);
+  }
+
+  /** Call Google Gemini using the official SDK. */
+  private async callGemini(opts: GeminiCallOptions, model: string, json: boolean): Promise<string> {
     const parts: any[] = [{ text: opts.prompt }];
     for (const img of opts.images ?? []) {
       parts.push({ inlineData: { mimeType: 'image/png', data: img } });
@@ -87,47 +132,159 @@ export class GeminiClient implements IGeminiClient {
       genConfig.responseMimeType = 'application/json';
     }
 
-    const maxAttempts = Math.max(1, this.config.maxRetries + 1);
-    let lastErr: unknown;
+    const ai = await this.ai();
+    const res = await ai.models.generateContent({
+      model,
+      contents: [{ role: 'user', parts }],
+      config: genConfig,
+    });
+    return extractText(res);
+  }
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        const ai = await this.ai();
-        const text = await withTimeout(
-          (async () => {
-            const res = await ai.models.generateContent({
-              model,
-              contents: [{ role: 'user', parts }],
-              config: genConfig,
-            });
-            return extractText(res);
-          })(),
-          timeoutMs,
-          `${opts.role}/${model}`,
-        );
-        if (!text || !text.trim()) {
-          throw new Error('empty response');
-        }
-        return text;
-      } catch (err) {
-        lastErr = err;
-        const reason = err instanceof Error ? err.message : String(err);
-        if (attempt < maxAttempts) {
-          console.error(
-            `[gemini] ${opts.role} attempt ${attempt}/${maxAttempts} failed ` +
-              `(${reason}) — retrying`,
-          );
-          await sleep(1000 * attempt * attempt);
-        }
-      }
+  /** Call Anthropic Messages API using native global fetch. */
+  private async callAnthropic(opts: GeminiCallOptions, model: string, json: boolean): Promise<string> {
+    const apiKey = process.env.ANTHROPIC_API_KEY || '';
+    if (!apiKey) {
+      throw new Error('ANTHROPIC_API_KEY is not set in environment.');
     }
 
-    const msg =
-      `Gemini call FAILED after ${maxAttempts} attempts ` +
-      `(role=${opts.role}, model=${model}): ` +
-      (lastErr instanceof Error ? lastErr.message : String(lastErr));
-    this.alert(msg);
-    throw lastErr instanceof Error ? lastErr : new Error(msg);
+    const contentParts: any[] = [{ type: 'text', text: opts.prompt }];
+    for (const img of opts.images ?? []) {
+      contentParts.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/png',
+          data: img,
+        },
+      });
+    }
+
+    const payload: any = {
+      model,
+      messages: [{ role: 'user', content: contentParts }],
+      max_tokens: 4000,
+    };
+    if (opts.systemInstruction) {
+      payload.system = opts.systemInstruction;
+    }
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Anthropic API returned HTTP ${response.status}: ${errText}`);
+    }
+
+    const resJson = (await response.json()) as any;
+    return resJson.content?.[0]?.text || '';
+  }
+
+  /** Call OpenAI Chat Completions API using native global fetch. */
+  private async callOpenAI(opts: GeminiCallOptions, model: string, json: boolean): Promise<string> {
+    const apiKey = process.env.OPENAI_API_KEY || '';
+    if (!apiKey) {
+      throw new Error('OPENAI_API_KEY is not set in environment.');
+    }
+
+    const contentParts: any[] = [{ type: 'text', text: opts.prompt }];
+    for (const img of opts.images ?? []) {
+      contentParts.push({
+        type: 'image_url',
+        image_url: {
+          url: `data:image/png;base64,${img}`,
+        },
+      });
+    }
+
+    const messages: any[] = [];
+    if (opts.systemInstruction) {
+      messages.push({ role: 'system', content: opts.systemInstruction });
+    }
+    messages.push({ role: 'user', content: contentParts });
+
+    const payload: any = {
+      model,
+      messages,
+    };
+
+    if (json || opts.json) {
+      payload.response_format = { type: 'json_object' };
+    }
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'authorization': `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`OpenAI API returned HTTP ${response.status}: ${errText}`);
+    }
+
+    const resJson = (await response.json()) as any;
+    return resJson.choices?.[0]?.message?.content || '';
+  }
+
+  /** Call custom OpenAI-compatible endpoint (Ollama/local) using native global fetch. */
+  private async callOpenAICompatible(opts: GeminiCallOptions, model: string, json: boolean): Promise<string> {
+    const baseUrl = process.env.OPENAI_BASE_URL || 'http://localhost:11434/v1';
+    const apiKey = process.env.OPENAI_API_KEY || 'ollama';
+
+    const contentParts: any[] = [{ type: 'text', text: opts.prompt }];
+    for (const img of opts.images ?? []) {
+      contentParts.push({
+        type: 'image_url',
+        image_url: {
+          url: `data:image/png;base64,${img}`,
+        },
+      });
+    }
+
+    const messages: any[] = [];
+    if (opts.systemInstruction) {
+      messages.push({ role: 'system', content: opts.systemInstruction });
+    }
+    messages.push({ role: 'user', content: contentParts });
+
+    const payload: any = {
+      model,
+      messages,
+    };
+
+    if (json || opts.json) {
+      payload.response_format = { type: 'json_object' };
+    }
+
+    const endpoint = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'authorization': `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`OpenAI-compatible API (${endpoint}) returned HTTP ${response.status}: ${errText}`);
+    }
+
+    const resJson = (await response.json()) as any;
+    return resJson.choices?.[0]?.message?.content || '';
   }
 
   /** Record an operator-facing alert (stderr + collected list). */
@@ -205,7 +362,7 @@ function parseJson<T>(raw: string): T {
       }
     }
     throw new Error(
-      `Gemini JSON parse failed; raw output starts: ${s.slice(0, 200)}`,
+      `LLM Client JSON parse failed; raw output starts: ${s.slice(0, 200)}`,
     );
   }
 }

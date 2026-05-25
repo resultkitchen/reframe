@@ -1,17 +1,17 @@
 {
-  "name": "rebuild-pipeline",
+  "name": "@resultkitchen/reframe",
   "version": "0.1.0",
   "private": true,
-  "description": "Portable SaaS rebuild pipeline — 1 mapper + 6-agent per-page fan-out, Gemini-driven.",
+  "description": "Reframe — Portable SaaS screen-by-screen architectural refactoring engine.",
   "bin": {
-    "pipeline": "./dist/cli.js"
+    "reframe": "./dist/cli.js"
   },
   "main": "./dist/cli.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx src/cli.ts",
-    "pipeline": "tsx src/cli.ts",
+    "reframe": "tsx src/cli.ts",
     "test": "node --import tsx --test src/test/*.test.ts",
     "test:login": "node scripts/test-login.mjs",
     "postinstall": "playwright install chromium"

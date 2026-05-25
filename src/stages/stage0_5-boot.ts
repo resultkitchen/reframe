@@ -275,7 +275,7 @@ function stubIntegrations(workDir: string): StubResult {
   // Write .env.local — do NOT clobber an existing one the operator may have
   // placed; append/overwrite only our managed block.
   const banner =
-    '# === rebuild-pipeline Stage 0.5 — SAFE STUB ENV (no real side effects) ===';
+    '# === Reframe Stage 0.5 — SAFE STUB ENV (no real side effects) ===';
   const body = Object.entries(envVars)
     .map(([k, v]) => `${k}=${v}`)
     .join('\n');

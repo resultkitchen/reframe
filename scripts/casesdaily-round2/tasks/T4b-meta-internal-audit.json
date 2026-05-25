@@ -1,0 +1,12 @@
+{
+  "id": "T4b-meta-internal-audit",
+  "title": "Audit & re-classify internal vs external leads — schema-corrected",
+  "brief": "PREVIOUS RUN HAD A SCHEMA BUG: it referenced ghl_leads.contact, but the actual column is ghl_leads.contact_data (jsonb). Re-do with corrected schema below.\n\nVERIFIED LIVE SCHEMA (public.ghl_leads):\n- id text, contact_id text, name text, first_name text, last_name text, email text, phone text, source text\n- pipeline_id text, pipeline_stage_id text, status text\n- monetary_value numeric, tags text[]\n- contact_data jsonb  -- this is what was referenced as `contact` before — FIX IT\n- raw_data jsonb\n- ghl_created_at timestamptz, ghl_updated_at timestamptz, synced_at timestamptz, created_at timestamptz, updated_at timestamptz\n- attorney_account_id uuid (FK -> attorney_accounts.id)\n- casesdaily_lead_id uuid (FK -> casesdaily_leads.id)\n\ncasesdaily_leads has columns including `landing_page_url text` and `referrer_url text` (per migration 20260330_merge_funnel_leads_into_casesdaily.sql).\n\ncasesdaily_domains has columns `domain text`, `is_active boolean`.\n\nGoal unchanged: (1) audit SQL that finds leads whose isInternal/mediaBuyer classification disagrees with the URL truth; (2) updated enrich.ts that uses URL → internal-domain lookup to override the heuristic when a casesdailyLeadId is present.\n\nSeed internal domain list: 'casesdaily.com' plus all rows from casesdaily_domains where is_active = true. Match landing_page_url OR referrer_url against any of those domains as the host (or as a suffix `.<domain>`).\n\nFor the enrich.ts patch, accept an optional input map keyed by ghl_leads.id with { landingPageUrl, referrerUrl, internalDomains: string[] }, so enrichOpp can take that as injected context. The caller (data.ts) will join casesdaily_leads on its own.",
+  "contextFiles": [
+    { "path": "casesdaily/src/lib/ghl/enrich.ts" },
+    { "path": "casesdaily/supabase/migrations/20260520_add_ghl_fk_mappings.sql" },
+    { "path": "casesdaily/supabase/migrations/20260330_merge_funnel_leads_into_casesdaily.sql" }
+  ],
+  "outputContract": "Markdown response with:\n1. **Findings & assumptions** (short)\n2. **Audit SQL** — single ```sql block, must reference ghl_leads.contact_data NOT ghl_leads.contact. SELECT-only.\n3. **Enrichment patch** — full file:\n   ```typescript\n   // FILE: casesdaily/src/lib/ghl/enrich.ts\n   <full file>\n   ```\n4. **Edge cases**.",
+  "extractFiles": true
+}

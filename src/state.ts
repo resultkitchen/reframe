@@ -14,6 +14,7 @@ import type {
   PipelineConfig,
   RunState,
   StepStatus,
+  ApprovalsDoc,
 } from './types';
 
 /** Every agent, all pending — the initial per-page checkpoint state. */
@@ -128,6 +129,61 @@ export function saveState(runDir: string, state: RunState): void {
       const code = (err as NodeJS.ErrnoException)?.code;
       if (!code || !TRANSIENT_FS_ERRORS.has(code)) break;
       sleepSync(4 * 2 ** attempt); // 4, 8, 16, 32, 64, 128 ms
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * Load `runDir/approvals.json`, or null when it does not exist / is unreadable.
+ */
+export function loadApprovals(runDir: string): ApprovalsDoc | null {
+  const approvalsPath = path.join(runDir, 'approvals.json');
+  if (!fs.existsSync(approvalsPath)) return null;
+
+  try {
+    const raw = fs.readFileSync(approvalsPath, 'utf8');
+    return JSON.parse(raw) as ApprovalsDoc;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[state] failed to load approvals.json from "${runDir}": ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
+    return null;
+  }
+}
+
+/**
+ * Atomically write `runDir/approvals.json`: write a uniquely-named tmp file in the
+ * same dir, then rename over the target.
+ */
+export function saveApprovals(runDir: string, approvals: ApprovalsDoc): void {
+  fs.mkdirSync(runDir, { recursive: true });
+
+  const target = path.join(runDir, 'approvals.json');
+  const json = `${JSON.stringify(approvals, null, 2)}\n`;
+
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const tmp = path.join(
+      runDir,
+      `.approvals.${process.pid}.${Date.now()}.${(stateWriteCounter += 1)}.tmp`,
+    );
+    try {
+      fs.writeFileSync(tmp, json, 'utf8');
+      fs.renameSync(tmp, target);
+      return;
+    } catch (err) {
+      lastErr = err;
+      try {
+        if (fs.existsSync(tmp)) fs.rmSync(tmp, { force: true });
+      } catch {
+        /* ignore */
+      }
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (!code || !TRANSIENT_FS_ERRORS.has(code)) break;
+      sleepSync(4 * 2 ** attempt);
     }
   }
   throw lastErr;
