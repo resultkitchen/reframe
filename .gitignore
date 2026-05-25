@@ -19,6 +19,9 @@ RETROSPECTIVE.md
 RERUN-CASESDAILY-PROMPT.md
 FIX-MAPPER-PROMPT.md
 config/casesdaily-*
+scripts/
+OPTIMIZATION-PROMPT.md
+
 
 # rebuild-pipeline
 dist/
