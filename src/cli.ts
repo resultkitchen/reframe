@@ -32,6 +32,7 @@ Reframe — portable SaaS architectural refactoring engine (1 mapper + 6-agent f
 USAGE
   reframe rebuild <github-url|local-path> [flags]
   reframe init [target-path]
+  reframe review <run-dir> [--port <number>]
   reframe --help
 
 FLAGS
@@ -72,6 +73,7 @@ ENV
 
 EXAMPLES
   reframe init ./my-new-saas
+  reframe review ./runs/casesdaily-2026-05-25T15-29-40Z
   reframe rebuild https://github.com/acme/todo-saas
   reframe rebuild https://github.com/acme/todo-saas --max-pages 10 --quick-scan
   reframe rebuild ./local/project --apply-mode propose --concurrency 4
@@ -107,8 +109,28 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  // Handle 'review' command.
+  if (argv[0] === 'review') {
+    const runDir = argv[1];
+    if (!runDir) {
+      console.error('Error: "review" command requires a target run directory.');
+      console.error('Usage: reframe review <run-dir> [--port <number>]');
+      return 1;
+    }
+    let port = 3000;
+    const portIndex = argv.indexOf('--port');
+    if (portIndex !== -1 && argv[portIndex + 1]) {
+      port = parseInt(argv[portIndex + 1], 10) || 3000;
+    }
+
+    const { startReviewServer } = await import('./server');
+    await startReviewServer(runDir, port);
+    await new Promise(() => {}); // Keep server running
+    return 0;
+  }
+
   if (argv[0] !== 'rebuild') {
-    console.error(`Unknown command: "${argv[0]}". Expected "rebuild" or "init".`);
+    console.error(`Unknown command: "${argv[0]}". Expected "rebuild", "init", or "review".`);
     console.error(`Run "reframe --help" for usage.`);
     return 1;
   }
