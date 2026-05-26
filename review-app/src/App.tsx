@@ -372,6 +372,43 @@ export default function App() {
     }
   };
 
+  const generateAiPrompt = () => {
+    if (!activePage || !currentApproval) return '';
+    
+    const approvedGaps = activePage.audit?.gaps.filter(g => currentApproval.gaps?.[g.id] !== 'skip') || [];
+    
+    let gapsSection = '';
+    if (approvedGaps.length > 0) {
+      gapsSection = approvedGaps.map(g => {
+        return `- **[${g.severity.toUpperCase()}] ${g.category.toUpperCase()}**: ${g.description}\n  *Fix Strategy*: ${g.recommendation}`;
+      }).join('\n');
+    } else {
+      gapsSection = '- Review visual specifications and optimize layout for premium responsive aesthetics.';
+    }
+
+    const designSpec = activePage.design?.spec ? `\n### Brand Visual Tokens & Rules:\n${activePage.design.spec}` : '';
+    const pmNotes = currentApproval.note ? `\n### PM Adjustments & Instructions:\n${currentApproval.note}` : '';
+
+    return `# Reframe AI Refactoring Instruction Set
+
+You are an expert AI software architect. Please apply the following approved visual and functional refactoring upgrades directly to the target source file.
+
+## Workspace Context
+- **Screen**: ${activePage.slug}
+- **Route**: ${activePage.route || '/' + activePage.slug.replace(/-/g, '/')}
+
+## Target Upgrades to Apply:
+${gapsSection}
+${designSpec}
+${pmNotes}
+
+## Execution Checklist:
+1. Refactor the code changes inside the target page file to resolve all approved gaps.
+2. Maintain brand token guidelines and correct any visual contrast or alignment errors.
+3. Keep all existing unrelated comments, hooks, and logic intact.
+4. Verify changes compile and serve cleanly.`;
+  };
+
   if (loading) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: '1rem' }}>
@@ -776,31 +813,47 @@ export default function App() {
                             )}
 
                             {activeRightTab === 'downloads' && (
-                              /* ────────────────────────── ZERO-TERMINAL DOWNLOADS TAB ────────────────────────── */
-                              <div className="downloads-tab flex-col-layout" style={{ gap: '1rem', justifyContent: 'center', padding: '1rem 0' }}>
-                                <div className="download-info-banner">
-                                  <span className="download-banner-icon">📥</span>
-                                  <p className="download-banner-text"><strong>Zero-Terminal Mode:</strong> Download standard Git patches of the refactored page modifications directly, completely bypassing CLI usage.</p>
+                              /* ────────────────────────── EXPORT & AI PROMPT TAB ────────────────────────── */
+                              <div className="downloads-tab scroll-vertical-240" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                <div className="download-info-banner" style={{ background: '#f5f3ff', border: '1px solid #ddd6fe' }}>
+                                  <span className="download-banner-icon">🤖</span>
+                                  <p className="download-banner-text" style={{ color: '#5b21b6' }}>
+                                    <strong>AI Co-Pilot Integration:</strong> Copy a dynamically generated refactoring prompt optimized for Claude Code, Cursor, Codex, or Antigravity!
+                                  </p>
                                 </div>
 
-                                <div className="download-actions-grid" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                  <a 
-                                    href={`/api/patch/${activePage.slug}`}
-                                    download={`${activePage.slug}-refactor.patch`}
-                                    className="btn-primary glow-btn download-btn-premium"
-                                    style={{ textDecoration: 'none', justifyContent: 'center' }}
-                                  >
-                                    📥 Download Git Patch (.patch)
-                                  </a>
-                                  
-                                  <div className="patch-instructions-card">
-                                    <h5>💡 How to apply standard patch:</h5>
-                                    <ol style={{ paddingLeft: '1.1rem', fontSize: '0.8rem', color: '#64748b', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                      <li>Open your project directory in terminal or IDE (VS Code).</li>
-                                      <li>Run: <code>git apply path/to/${activePage.slug}-refactor.patch</code>.</li>
-                                      <li>Your local source files are immediately refactored!</li>
-                                    </ol>
-                                  </div>
+                                <button 
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(generateAiPrompt());
+                                    alert('⚡ AI Refactoring Prompt copied to clipboard!\n\nPaste this into your local AI coding assistant (Claude Code, Cursor, Antigravity, etc.) to immediately apply the approved upgrades!');
+                                  }}
+                                  className="btn-primary glow-btn"
+                                  style={{ justifyContent: 'center', background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)', border: 'none', boxShadow: '0 4px 12px rgba(99, 102, 241, 0.2)', padding: '0.85rem 1.5rem', fontWeight: '700' }}
+                                >
+                                  🤖 Copy AI Refactoring Prompt
+                                </button>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.25rem 0' }}>
+                                  <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }}></div>
+                                  <span style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase' }}>or download static files</span>
+                                  <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }}></div>
+                                </div>
+
+                                <a 
+                                  href={`/api/patch/${activePage.slug}`}
+                                  download={`${activePage.slug}-refactor.patch`}
+                                  className="btn-secondary"
+                                  style={{ textDecoration: 'none', justifyContent: 'center', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
+                                >
+                                  📥 Download Git Patch (.patch)
+                                </a>
+
+                                <div className="patch-instructions-card">
+                                  <h5>💡 When to use what?</h5>
+                                  <ul style={{ paddingLeft: '1.1rem', fontSize: '0.8rem', color: '#64748b', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                    <li><strong>AI Prompt (Recommended)</strong>: Resilient to code drift. Intelligently applies brand styles and fixes using your editor's AI co-pilot.</li>
+                                    <li><strong>Git Patch</strong>: Static file-level diff. Best for instant command-line import (<code>git apply</code>) if your local branch hasn't changed.</li>
+                                  </ul>
                                 </div>
                               </div>
                             )}
