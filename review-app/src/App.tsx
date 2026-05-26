@@ -80,6 +80,9 @@ export default function App() {
   // Local state changes before saving to disk
   const [currentApproval, setCurrentApproval] = useState<PageApproval | null>(null);
 
+  // Zoom mode for visual preview: 'fit' or 'native'
+  const [zoomMode, setZoomMode] = useState<'fit' | 'native'>('fit');
+
   // Load run details on boot
   useEffect(() => {
     fetchRunData();
@@ -337,14 +340,58 @@ export default function App() {
                 <div className="card">
                   <div className="card-header">
                     <h3 className="card-title">📱 Headless Browser Screen Capture</h3>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        className="btn-secondary"
+                        style={{
+                          padding: '0.25rem 0.65rem',
+                          fontSize: '0.75rem',
+                          borderRadius: '6px',
+                          background: zoomMode === 'fit' ? '#eff6ff' : '#ffffff',
+                          borderColor: zoomMode === 'fit' ? '#3b82f6' : '#cbd5e1',
+                          color: zoomMode === 'fit' ? '#1d4ed8' : '#475569',
+                          fontWeight: 600,
+                        }}
+                        onClick={() => setZoomMode('fit')}
+                      >
+                        📺 Fit to Panel
+                      </button>
+                      <button
+                        className="btn-secondary"
+                        style={{
+                          padding: '0.25rem 0.65rem',
+                          fontSize: '0.75rem',
+                          borderRadius: '6px',
+                          background: zoomMode === 'native' ? '#eff6ff' : '#ffffff',
+                          borderColor: zoomMode === 'native' ? '#3b82f6' : '#cbd5e1',
+                          color: zoomMode === 'native' ? '#1d4ed8' : '#475569',
+                          fontWeight: 600,
+                        }}
+                        onClick={() => setZoomMode('native')}
+                      >
+                        🔍 100% Size
+                      </button>
+                    </div>
                   </div>
-                  <div className="card-body">
-                    <div className="screenshot-container">
+                  <div className="card-body" style={{ padding: zoomMode === 'native' ? 0 : '1.5rem' }}>
+                    <div
+                      className="screenshot-container"
+                      style={
+                        zoomMode === 'native'
+                          ? { overflow: 'auto', maxHeight: '700px', minHeight: '400px', display: 'block', padding: '1rem', background: '#f1f5f9' }
+                          : {}
+                      }
+                    >
                       {activePage.hasScreenshot ? (
-                        <img 
-                          className="screenshot-img" 
-                          src={`/api/screenshot/${activePage.slug}`} 
-                          alt={`Rendered screenshot of ${activePage.slug}`} 
+                        <img
+                          className="screenshot-img"
+                          style={
+                            zoomMode === 'native'
+                              ? { width: 'auto', maxWidth: 'none', height: 'auto', display: 'block', margin: '0 auto', borderRadius: '8px', boxShadow: '0 10px 30px rgba(15,23,42,0.15)' }
+                              : {}
+                          }
+                          src={`/api/screenshot/${activePage.slug}`}
+                          alt={`Rendered screenshot of ${activePage.slug}`}
                         />
                       ) : (
                         <div className="no-screenshot">

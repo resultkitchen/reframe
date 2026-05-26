@@ -214,6 +214,7 @@ export interface PageScope {
   userFunction: string;                   // user-facing function
   dataDependencies: DataCall[];
   libraries: string[];                    // libs in play for THIS page
+  role?: string;                          // derived user role privilege group
 }
 
 /** Stage 0 output. */

@@ -567,6 +567,19 @@ function normalizeScope(
     const slugBase = kebab(route === '/' ? 'home' : route);
     const slug = uniqueSlug(slugBase, seenSlugs);
     const deps = Array.isArray(p.dataDependencies) ? p.dataDependencies : [];
+
+    // Derive role group heuristic
+    let derivedRole = 'public';
+    if (route.startsWith('/admin') || route === '/admin') {
+      derivedRole = 'admin';
+    } else if (route.startsWith('/media-buyer') || route === '/media-buyer') {
+      derivedRole = 'media_buyer';
+    } else if (route.startsWith('/dashboard') || route === '/dashboard') {
+      derivedRole = 'attorney';
+    } else if (route.startsWith('/onboarding') || route.startsWith('/signup') || route.startsWith('/auth')) {
+      derivedRole = 'guest';
+    }
+
     pages.push({
       slug,
       route,
@@ -583,6 +596,7 @@ function normalizeScope(
         target: typeof d.target === 'string' ? d.target : '',
         description: typeof d.description === 'string' ? d.description : '',
       })),
+      role: derivedRole,
     });
   }
 
@@ -661,6 +675,7 @@ function renderScopeMd(scope: ScopeDoc, config: PipelineConfig): string {
   for (const p of scope.pages) {
     lines.push(`### \`${p.route}\` — ${p.slug}`);
     lines.push(`- **File:** \`${p.filePath}\``);
+    if (p.role) lines.push(`- **Derived Role:** \`${p.role}\``);
     if (p.purpose) lines.push(`- **Purpose:** ${p.purpose}`);
     if (p.userFunction) lines.push(`- **User function:** ${p.userFunction}`);
     if (p.libraries.length > 0) {
