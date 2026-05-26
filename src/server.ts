@@ -103,6 +103,8 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
               } catch {}
             }
 
+            pageDetails.route = pageDetails.audit?.page || '/' + slug.replace(/-/g, '/');
+
             // Load UX spec
             const uxPath = path.join(pageDir, 'ux.json');
             if (fs.existsSync(uxPath)) {

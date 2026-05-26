@@ -289,7 +289,7 @@ export default function App() {
                   onClick={() => setActiveSlug(p.slug)}
                 >
                   <span className="page-item-title">{p.slug}</span>
-                  <span className="page-item-subtitle">{p.route}</span>
+                  <span className="page-item-subtitle">{p.route || '/' + p.slug.replace(/-/g, '/')}</span>
 
                   <div className="badge-row">
                     {/* Status badge */}
@@ -324,7 +324,7 @@ export default function App() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <h1 style={{ fontSize: '1.75rem', marginBottom: '0.25rem' }}>{activePage.slug}</h1>
-                  <p style={{ color: '#64748b', fontSize: '0.95rem' }}>Route: <code style={{ color: '#0f172a' }}>{activePage.route}</code></p>
+                  <p style={{ color: '#64748b', fontSize: '0.95rem' }}>Route: <code style={{ color: '#0f172a' }}>{activePage.route || '/' + activePage.slug.replace(/-/g, '/')}</code></p>
                 </div>
 
                 <button 
@@ -381,11 +381,11 @@ export default function App() {
                   <div style={{ fontSize: '0.9rem', color: '#334155', lineHeight: '1.5' }}>
                     <p style={{ marginBottom: '0.5rem' }}>
                       <strong>Role Scoping:</strong> {
-                        activePage.route.startsWith('/admin')
+                        (activePage.route || '').startsWith('/admin')
                           ? 'This is a restricted Admin control interface, driven and audited under active Admin system credentials.'
-                          : activePage.route.startsWith('/media-buyer')
+                          : (activePage.route || '').startsWith('/media-buyer')
                             ? 'This is the Media Buyer portal dashboard, managed by advertisement managers.'
-                            : activePage.route.startsWith('/dashboard')
+                            : (activePage.route || '').startsWith('/dashboard')
                               ? 'This is the primary Attorney tracking interface for leads, conversions, and order lists.'
                               : 'This is a public guest/onboarding screen or public-facing marketing funnel.'
                       }
