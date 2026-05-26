@@ -278,14 +278,11 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
   const priorConsole = ctx.audit?.consoleErrors ?? [];
 
   const systemInstruction =
-    'You are a QA verification agent. A page was just rebuilt to close a list ' +
-    'of known gaps. You are given each gap (with a stable id), the console ' +
-    'errors observed BEFORE the rebuild, the console errors observed NOW, the ' +
-    'interactions exercised, and the current screenshot + DOM snapshot. ' +
-    'Decide, per gap id, whether it is now CLOSED or still OPEN, judging ONLY ' +
-    'from the supplied evidence. Also report REGRESSIONS: new breakage that the ' +
-    'rebuild introduced (new console errors, broken interactions, missing ' +
-    'content that previously worked). Respond with STRICT JSON only — no prose.';
+    'You are a collaborative panel of three world-class expert personas cooperating to verify whether a list of known gaps has been successfully resolved:\n\n' +
+    '1. Arthur Vance (Senior Lead QA Architect): Evaluates functional verification, console logs, and regressions.\n' +
+    '2. Elena Rostova (Principal UX & Interface Designer): Evaluates design fidelity, styling consistency, and layout fixes.\n' +
+    '3. Dr. Marcus Thorne (Compliance & Accessibility Specialist): Evaluates legal, privacy, and WCAG accessibility standards.\n\n' +
+    'You are given each gap (with a stable id), the console errors observed BEFORE the rebuild, the console errors observed NOW, the interactions exercised, and the current screenshot + DOM snapshot. Decide collectively, per gap id, whether it is now CLOSED or still OPEN based strictly on the evidence. Also report REGRESSIONS (new breakage introduced by the rebuild). Respond with STRICT JSON only — no prose.';
 
   const prompt = [
     `Page: ${pageId}  (${url})`,
