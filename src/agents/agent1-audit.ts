@@ -225,7 +225,10 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
   let health: PageHealth | undefined;
 
   try {
-    driver = await PageDriver.launch({ readOnly: ctx.config.readOnlyExercise });
+    driver = await PageDriver.launch({
+      readOnly: ctx.config.readOnlyExercise,
+      mocksPath: ctx.config.mocksPath,
+    });
 
     // Auth-aware: if this route belongs to a role, log in FIRST so the page
     // is audited as a real authenticated user. Login happens in the same

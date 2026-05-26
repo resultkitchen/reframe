@@ -167,7 +167,10 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
   let health: PageHealth | undefined;
 
   try {
-    driver = await PageDriver.launch({ readOnly: ctx.config.readOnlyExercise });
+    driver = await PageDriver.launch({
+      readOnly: ctx.config.readOnlyExercise,
+      mocksPath: ctx.config.mocksPath,
+    });
 
     // Auth-aware: re-verify gated routes logged in, matching the audit pass.
     if (ctx.config.auth) {

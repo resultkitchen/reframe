@@ -6,6 +6,7 @@
  * Console + page errors are captured throughout.
  */
 
+import * as fs from 'node:fs';
 import type { Browser, ConsoleMessage, Page } from 'playwright';
 import type { AuthConfig, AuthRole, PageHealth } from './types';
 
@@ -49,17 +50,41 @@ export class PageDriver {
     });
   }
 
-  /**
-   * Launch headless Chromium and open a fresh page.
-   *
-   * `opts.readOnly` makes exercise() skip destructive clicks — set it when
-   * driving a live backend so no real mutation/email/charge fires.
-   */
-  static async launch(opts?: { readOnly?: boolean }): Promise<PageDriver> {
+  static async launch(opts?: { readOnly?: boolean; mocksPath?: string }): Promise<PageDriver> {
     const { chromium } = await import('playwright');
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();
     const page = await context.newPage();
+
+    // Register Network Mocks
+    if (opts?.mocksPath && fs.existsSync(opts.mocksPath)) {
+      try {
+        const raw = fs.readFileSync(opts.mocksPath, 'utf8');
+        const rules = JSON.parse(raw) as Array<{
+          pattern: string;
+          status?: number;
+          contentType?: string;
+          body: any;
+        }>;
+
+        for (const rule of rules) {
+          console.log(`[reframe] registering mock intercept: ${rule.pattern}`);
+          await page.route(rule.pattern, async (route) => {
+            const bodyStr = typeof rule.body === 'string' 
+              ? rule.body 
+              : JSON.stringify(rule.body);
+            await route.fulfill({
+              status: rule.status ?? 200,
+              contentType: rule.contentType ?? 'application/json',
+              body: bodyStr,
+            });
+          });
+        }
+      } catch (err) {
+        console.error(`[reframe] failed to load mocks: ${String(err)}`);
+      }
+    }
+
     return new PageDriver(browser, page, opts?.readOnly ?? false);
   }
 

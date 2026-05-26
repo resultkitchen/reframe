@@ -163,6 +163,7 @@ interface ParsedArgs {
   params?: string;
   llmProvider?: string;
   onlyRoles?: string[];
+  mocks?: string;
 }
 
 /**
@@ -224,6 +225,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.params = next();
     } else if (tok === '--only-roles') {
       out.onlyRoles = next().split(',').map((r) => r.trim()).filter((r) => r.length > 0);
+    } else if (tok === '--mocks') {
+      out.mocks = next();
     } else if (tok === '--llm-provider') {
       const v = next();
       if (v !== 'gemini' && v !== 'openai' && v !== 'anthropic' && v !== 'openai-compatible') {
@@ -371,6 +374,7 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     quickScan: args.quickScan ?? false,
     sampleParams: loadSampleParams(args.params),
     onlyRoles: args.onlyRoles,
+    mocksPath: args.mocks ? path.resolve(args.mocks) : undefined,
     llmProvider: args.llmProvider ?? 'gemini',
   };
 
