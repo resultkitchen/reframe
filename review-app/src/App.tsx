@@ -91,7 +91,7 @@ export default function App() {
   const [viewLayout, setViewLayout] = useState<'split' | 'full'>('full');
 
   // Preview mode: 'iframe' or 'screenshot'
-  const [previewMode, setPreviewMode] = useState<'iframe' | 'screenshot'>('iframe');
+  const [previewMode, setPreviewMode] = useState<'iframe' | 'screenshot'>('screenshot');
 
   // Load run details on boot
   useEffect(() => {
@@ -194,7 +194,7 @@ export default function App() {
     
     const page = data.pages.find(p => p.slug === activeSlug);
     if (page) {
-      setPreviewMode(page.hasHtml ? 'iframe' : 'screenshot');
+      setPreviewMode(page.hasScreenshot ? 'screenshot' : 'iframe');
     }
 
     const existing = data.approvals.pages[activeSlug];
