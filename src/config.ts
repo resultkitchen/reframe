@@ -162,6 +162,7 @@ interface ParsedArgs {
   quickScan?: boolean;
   params?: string;
   llmProvider?: string;
+  onlyRoles?: string[];
 }
 
 /**
@@ -221,6 +222,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.quickScan = true;
     } else if (tok === '--params') {
       out.params = next();
+    } else if (tok === '--only-roles') {
+      out.onlyRoles = next().split(',').map((r) => r.trim()).filter((r) => r.length > 0);
     } else if (tok === '--llm-provider') {
       const v = next();
       if (v !== 'gemini' && v !== 'openai' && v !== 'anthropic' && v !== 'openai-compatible') {
@@ -367,6 +370,7 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     maxPages: args.maxPages,
     quickScan: args.quickScan ?? false,
     sampleParams: loadSampleParams(args.params),
+    onlyRoles: args.onlyRoles,
     llmProvider: args.llmProvider ?? 'gemini',
   };
 

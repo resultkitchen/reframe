@@ -44,22 +44,22 @@ One command. It clones, maps, boots, audits every page with a real headless brow
 
 ---
 
-## See it in 14 seconds
+## See it in 90 seconds
 
 <p align="center">
-  <a href="video/">
-    <img src="assets/reframe-demo-poster.svg" alt="Reframe launch video — boot → map → 6-agent fan-out → green PR" width="82%">
+  <a href="video/reframe.mp4">
+    <img src="assets/reframe.gif" alt="Reframe launch video — three hours of bippity-boop becomes a 20-minute audit" width="82%">
   </a>
 </p>
 
 <p align="center"><sub>
   The launch video is a self-contained <a href="https://github.com/heygen-com/hyperframes"><b>Hyperframes</b></a> composition (write HTML, render video).<br>
-  Render the real MP4 in one command — no design tools, no After Effects:
+  Narration generated with <a href="https://fish.audio">Fish Audio</a> s2-pro. Render the real MP4 in one command — no design tools, no After Effects:
 </sub></p>
 
 ```bash
 cd video && npx hyperframes render --output reframe.mp4
-# → reframe.mp4 (1920×1080, ~14.5s) — then ./render.sh also spits out a loopable GIF for this README
+# → reframe.mp4 (1920×1080, ~50s) — then convert to assets/reframe.gif for this README
 ```
 
 > Why Hyperframes? It's HeyGen's open-source, Apache-2.0 video framework that renders HTML on headless Chrome — so the demo lives in the repo as code, diffs in git, and any AI agent can edit it ("make the title 2× bigger, add a fade-out"). The composition is in [`video/`](video/).

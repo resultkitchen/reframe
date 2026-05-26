@@ -246,6 +246,15 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       );
     }
 
+    if (config.onlyRoles && config.onlyRoles.length > 0) {
+      const rolesSet = new Set(config.onlyRoles);
+      const originalLength = scope.pages.length;
+      scope.pages = scope.pages.filter((p) => p.role && rolesSet.has(p.role));
+      console.log(
+        `[reframe] Role filter: processing ${scope.pages.length} of ${originalLength} mapped pages matching roles: ${config.onlyRoles.join(', ')}`,
+      );
+    }
+
     if (config.maxPages !== undefined && scope.pages.length > config.maxPages) {
       const originalLength = scope.pages.length;
       scope.pages = scope.pages.slice(0, config.maxPages);

@@ -127,6 +127,8 @@ export interface PipelineConfig {
    * Always present (defaults to `{}`).
    */
   sampleParams: Record<string, string>;
+  /** Filter run to only pages matching specific role names (e.g. ['admin', 'media_buyer']). */
+  onlyRoles?: string[];
   /** Selected LLM provider, e.g. 'gemini', 'openai', 'anthropic', 'openai-compatible'. Default 'gemini' */
   llmProvider: string;
 }
