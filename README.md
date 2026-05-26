@@ -44,7 +44,7 @@ One command. It clones, maps, boots, audits every page with a real headless brow
 
 ---
 
-## See it in 90 seconds
+## See it in 105 seconds
 
 <p align="center">
   <a href="video/reframe.mp4">

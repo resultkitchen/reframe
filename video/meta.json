@@ -1,0 +1,9 @@
+{
+  "name": "Reframe Launch",
+  "id": "reframe-launch",
+  "description": "14.5s launch/intro video for Reframe — boot → map → 6-agent fan-out → green PR.",
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "createdAt": "2026-05-25"
+}

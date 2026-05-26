@@ -32,3 +32,8 @@ playwright-report/
 *.log
 
 config/*-auth.json
+
+# Hyperframes skills (installed via `npx skills add heygen-com/hyperframes`).
+# Large 3rd-party content; track skills-lock.json so installs stay reproducible.
+.agents/
+.claude/skills/

@@ -1,0 +1,123 @@
+<svg width="1280" height="440" viewBox="0 0 1280 440" fill="none" xmlns="http://www.w3.org/2000/svg" font-family="'JetBrains Mono','SFMono-Regular',ui-monospace,Menlo,Consolas,monospace" role="img" aria-label="Reframe — point it at any repo, get back a reviewed pull request">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="440" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#070A12"/>
+      <stop offset="0.55" stop-color="#0A1020"/>
+      <stop offset="1" stop-color="#0C1426"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#34E7D6"/>
+      <stop offset="0.5" stop-color="#5BC8FF"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+    <linearGradient id="accent2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#F062A6"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#5BC8FF" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#5BC8FF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#8B5CF6" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#8B5CF6" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="34" height="34" patternUnits="userSpaceOnUse">
+      <path d="M34 0H0V34" fill="none" stroke="#FFFFFF" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
+  </defs>
+
+  <!-- backdrop -->
+  <rect width="1280" height="440" rx="20" fill="url(#bg)"/>
+  <rect width="1280" height="440" rx="20" fill="url(#grid)"/>
+  <circle cx="220" cy="120" r="320" fill="url(#glow)"/>
+  <circle cx="1080" cy="360" r="320" fill="url(#glow2)"/>
+  <rect x="0.5" y="0.5" width="1279" height="439" rx="20" fill="none" stroke="#FFFFFF" stroke-opacity="0.08"/>
+
+  <!-- top status strip -->
+  <g transform="translate(64,52)" font-size="13" fill="#7E8CA3" letter-spacing="2">
+    <circle cx="6" cy="-4" r="5" fill="#34E7D6"/>
+    <circle cx="24" cy="-4" r="5" fill="#FFC857"/>
+    <circle cx="42" cy="-4" r="5" fill="#F062A6"/>
+    <text x="66" y="0" fill="#9AA7BD">$ reframe rebuild  github.com/you/app  --apply-mode review</text>
+  </g>
+
+  <!-- frame brackets motif (the "Reframe" idea) -->
+  <g stroke="url(#accent)" stroke-width="3" fill="none" opacity="0.85">
+    <path d="M40 150 H72 M40 150 V182"/>
+    <path d="M40 320 H72 M40 320 V288"/>
+  </g>
+
+  <!-- wordmark -->
+  <g transform="translate(60,150)">
+    <text x="0" y="92" font-size="118" font-weight="800" letter-spacing="-3" fill="#EAF1FB">RE<tspan fill="url(#accent)">FRAME</tspan></text>
+    <text x="4" y="138" font-size="22" font-weight="600" fill="#AFC0D9" letter-spacing="0.5">Point it at any repo. Get back a reviewed pull request.</text>
+
+    <!-- tag chips -->
+    <g font-size="13" font-weight="600" transform="translate(4,170)">
+      <g>
+        <rect x="0" y="0" width="186" height="30" rx="15" fill="#0E1A2E" stroke="#34E7D6" stroke-opacity="0.45"/>
+        <text x="16" y="20" fill="#7FF0E2">1 mapper · 6 agents</text>
+      </g>
+      <g transform="translate(198,0)">
+        <rect x="0" y="0" width="166" height="30" rx="15" fill="#13142A" stroke="#8B5CF6" stroke-opacity="0.5"/>
+        <text x="16" y="20" fill="#C3B5FF">parallel per-page</text>
+      </g>
+      <g transform="translate(374,0)">
+        <rect x="0" y="0" width="158" height="30" rx="15" fill="#231327" stroke="#F062A6" stroke-opacity="0.5"/>
+        <text x="16" y="20" fill="#FFAFD6">verified, not vibes</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- pipeline visual: MAP -> 6 agents -> PR -->
+  <g transform="translate(690,86)">
+    <!-- MAP node -->
+    <g>
+      <rect x="0" y="118" width="86" height="64" rx="12" fill="#0E1A2E" stroke="url(#accent)" stroke-width="2"/>
+      <text x="43" y="146" text-anchor="middle" font-size="13" font-weight="700" fill="#EAF1FB">MAP</text>
+      <text x="43" y="166" text-anchor="middle" font-size="10" fill="#7FF0E2">stage 0</text>
+    </g>
+
+    <!-- connectors fan out -->
+    <g stroke="url(#accent)" stroke-width="1.6" fill="none" opacity="0.55">
+      <path d="M86 150 C150 150 150 24 214 24"/>
+      <path d="M86 150 C150 150 150 72 214 72"/>
+      <path d="M86 150 C150 150 150 120 214 120"/>
+      <path d="M86 150 C150 150 150 180 214 180"/>
+      <path d="M86 150 C150 150 150 228 214 228"/>
+      <path d="M86 150 C150 150 150 276 214 276"/>
+      <animate attributeName="opacity" values="0.35;0.8;0.35" dur="3.2s" repeatCount="indefinite"/>
+    </g>
+
+    <!-- 6 agent nodes -->
+    <g font-size="11" font-weight="700">
+      <g transform="translate(214,4)"><rect width="150" height="40" rx="10" fill="#0C1526" stroke="#34E7D6" stroke-opacity="0.6"/><text x="14" y="25" fill="#CFE9FF">1 · audit</text></g>
+      <g transform="translate(214,52)"><rect width="150" height="40" rx="10" fill="#0C1526" stroke="#5BC8FF" stroke-opacity="0.6"/><text x="14" y="25" fill="#CFE9FF">2 · ux</text></g>
+      <g transform="translate(214,100)"><rect width="150" height="40" rx="10" fill="#0C1526" stroke="#7AA8FF" stroke-opacity="0.6"/><text x="14" y="25" fill="#CFE9FF">3 · design</text></g>
+      <g transform="translate(214,160)"><rect width="150" height="40" rx="10" fill="#120E2A" stroke="#8B5CF6" stroke-opacity="0.6"/><text x="14" y="25" fill="#D9CCFF">6 · compliance</text></g>
+      <g transform="translate(214,208)"><rect width="150" height="40" rx="10" fill="#160E26" stroke="#B07CF0" stroke-opacity="0.6"/><text x="14" y="25" fill="#E4CCFF">4 · code</text></g>
+      <g transform="translate(214,256)"><rect width="150" height="40" rx="10" fill="#1E1024" stroke="#F062A6" stroke-opacity="0.6"/><text x="14" y="25" fill="#FFCBE6">5 · verify</text></g>
+    </g>
+
+    <!-- converge to PR -->
+    <g stroke="url(#accent2)" stroke-width="1.6" fill="none" opacity="0.6">
+      <path d="M364 24 C420 24 420 150 452 150"/>
+      <path d="M364 72 C420 72 420 150 452 150"/>
+      <path d="M364 120 C420 120 420 150 452 150"/>
+      <path d="M364 180 C420 180 420 150 452 150"/>
+      <path d="M364 228 C420 228 420 150 452 150"/>
+      <path d="M364 276 C420 276 420 150 452 150"/>
+    </g>
+
+    <!-- PR node -->
+    <g transform="translate(452,118)">
+      <rect x="0" y="0" width="78" height="64" rx="12" fill="#0E1F18" stroke="#34E7D6" stroke-width="2"/>
+      <path d="M28 30 l8 9 16 -18" stroke="#34E7D6" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="39" y="56" text-anchor="middle" font-size="11" font-weight="700" fill="#7FF0E2">PR</text>
+    </g>
+  </g>
+</svg>

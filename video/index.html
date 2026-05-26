@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Reframe — launch</title>
+</head>
+<body style="margin:0;background:#06070B;">
+
+<!--
+  Reframe launch video — Hyperframes composition (HTML → MP4).
+  Render:  cd video && npx hyperframes render --output reframe.mp4
+  Audio:   audio/narration.mp3 (ElevenLabs, atempo=1.5, 104.46s)
+  Total:   104.5s @ 1920x1080.
+
+  Scene timings WHISPER-ANCHORED to actual narration word timestamps:
+    1. Hour-three / robot bippity-boop horror     0.0  – 21.5  (Frankenstein @ 22.4)
+    2. What ships — Frankenstein errors          21.0  – 36.5  (Here's why @ 36.6)
+    3. TPS bar chart — Claude vs Gemini Flash    36.0  – 53.5  (Reframe @ 53.8)
+    4. Reframe fans out — 30-100 agents          53.0  – 71.5  (Pair @ 71.6)
+    5. Gemini + 20 min + LLM-agnostic            71.0  – 84.5  (Open source @ 84.8)
+    6. Open source · github URL · KILL           84.0  – 99.5  (So. @ 99.6)
+    7. CTA — what are you building right now?    99.0  – 104.5
+-->
+
+<div id="root" data-composition-id="reframe-launch"
+     data-start="0" data-width="1920" data-height="1080"
+     style="position:absolute;inset:0;overflow:hidden;color:#EAF1FB;
+            font-family:'Inter',ui-sans-serif,system-ui,'Segoe UI',Roboto,sans-serif;
+            background:
+              radial-gradient(1200px 700px at 18% 12%, #0E1B33 0%, rgba(14,27,51,0) 60%),
+              radial-gradient(1100px 700px at 86% 88%, #19123A 0%, rgba(25,18,58,0) 60%),
+              linear-gradient(135deg,#06070B 0%,#0A1020 55%,#0C1426 100%);">
+
+  <style>
+    #root .mono { font-family:'JetBrains Mono',ui-monospace,monospace; }
+    #root .display { font-family:'Archivo Black','Inter',sans-serif; letter-spacing:-.02em; }
+    #root .accent { color:#34E7D6; }
+    #root .warn   { color:#FFC857; }
+    #root .red    { color:#FF6B6B; }
+    #root .green  { color:#3FB950; }
+    #root .dim    { color:#8CA0BE; }
+    #root .scene  { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:120px; box-sizing:border-box; }
+    #root .badge  { display:inline-block; padding:10px 22px; border:2px solid #34E7D6; color:#34E7D6; font-family:'JetBrains Mono',monospace; font-size:22px; letter-spacing:3px; text-transform:uppercase; border-radius:4px; }
+    #root .pill   { display:inline-flex; align-items:center; gap:10px; padding:14px 24px; border-radius:999px; font-family:'JetBrains Mono',monospace; font-size:24px; letter-spacing:1px; }
+  </style>
+
+  <!-- ───────── persistent grid background (track 0) ───────── -->
+  <div id="bggrid" class="clip" data-start="0" data-duration="104.5" data-track-index="0"
+       style="position:absolute;inset:0;opacity:.4;z-index:0;
+              background-image:linear-gradient(#ffffff10 1px,transparent 1px),linear-gradient(90deg,#ffffff10 1px,transparent 1px);
+              background-size:46px 46px;mask-image:radial-gradient(circle at 50% 45%,#000 55%,transparent 100%);"></div>
+
+  <!-- ───────── audio narration (own track) ───────── -->
+  <audio id="narration" data-start="0" data-duration="104.46" data-track-index="9"
+         src="audio/narration.mp3" data-volume="1"></audio>
+
+  <!-- ═══════════════════════════════════════════════════════
+       SCENE 1 — Hour three / bippity-boop horror  (0 → 21.5)
+       ═══════════════════════════════════════════════════════ -->
+  <div id="s1" class="clip scene" data-start="0" data-duration="21.5" data-track-index="1" style="z-index:5;">
+    <div id="s1label" class="mono dim" style="font-size:26px;letter-spacing:5px;margin-bottom:42px;text-transform:uppercase;">
+      03 : 00 : 00 &nbsp;·&nbsp; with Claude
+    </div>
+    <div id="s1terminal" class="mono" style="background:#000;border:1px solid #1F2937;border-radius:10px;padding:34px 44px;font-size:30px;width:1300px;line-height:1.6;box-shadow:0 0 80px rgba(255,107,107,0.15);">
+      <span class="accent">$</span> <span id="s1cmd">claude refactor ./app</span><span id="s1caret" class="accent">▌</span><br>
+      <span id="s1l1" class="dim" style="opacity:0;">Waiting for model response...</span><br>
+      <span id="s1l2" class="warn" style="opacity:0;">⚠ button onClick handler still undefined on /screens/7</span><br>
+      <span id="s1l3" class="dim" style="opacity:0;">Retrying...</span>
+    </div>
+    <div id="s1bb" class="display" style="margin-top:46px;font-size:120px;line-height:1.0;letter-spacing:-.03em;">
+      <span id="bb1" style="display:inline-block;opacity:0;">BIPPITY.</span>
+      <span id="bb2" style="display:inline-block;opacity:0;" class="dim">BOOP.</span>
+      <span id="bb3" style="display:inline-block;opacity:0;">BIPPITY.</span>
+      <span id="bb4" style="display:inline-block;opacity:0;" class="red">BOOP.</span>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       SCENE 2 — Frankenstein  (21.0 → 36.5)   anchor: "Frankenstein" @ 22.44s
+       ═══════════════════════════════════════════════════════ -->
+  <div id="s2" class="clip scene" data-start="21" data-duration="15.5" data-track-index="2" style="z-index:5;">
+    <div id="s2label" class="mono red" style="font-size:24px;letter-spacing:5px;margin-bottom:30px;text-transform:uppercase;">
+      What ships
+    </div>
+    <div id="s2title" class="display" style="font-size:104px;line-height:1;letter-spacing:-.04em;margin-bottom:42px;text-align:center;">
+      A <span class="red">FRANKENSTEIN.</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:18px;width:1320px;">
+      <div id="s2e1" class="mono" style="font-size:30px;background:rgba(255,107,107,.08);border-left:5px solid #FF6B6B;padding:20px 28px;border-radius:6px;">
+        <span class="red">✗</span> &nbsp;buttons that <b>lie</b>
+      </div>
+      <div id="s2e2" class="mono" style="font-size:30px;background:rgba(255,107,107,.08);border-left:5px solid #FF6B6B;padding:20px 28px;border-radius:6px;">
+        <span class="red">✗</span> &nbsp;functions the model <b>hallucinated</b> out of thin air
+      </div>
+      <div id="s2e3" class="mono" style="font-size:30px;background:rgba(255,107,107,.08);border-left:5px solid #FF6B6B;padding:20px 28px;border-radius:6px;">
+        <span class="red">✗</span> &nbsp;pages stitched together with <b>imports that don't exist</b>
+      </div>
+    </div>
+    <div id="s2close" class="display" style="margin-top:44px;font-size:72px;line-height:1;letter-spacing:-.02em;text-align:center;">
+      <span class="dim">the vibe-coding hangover.</span><br>
+      <span class="warn">COMPLETELY NEEDLESS.</span>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       SCENE 3 — TPS comparison  (36.0 → 53.5)   anchor: "why" @ 36.6s · "Reframe" @ 53.8s
+       ═══════════════════════════════════════════════════════ -->
+  <div id="s3" class="clip scene" data-start="36" data-duration="17.5" data-track-index="1" style="z-index:5;">
+    <div id="s3label" class="mono dim" style="font-size:22px;letter-spacing:5px;margin-bottom:14px;text-transform:uppercase;">
+      Output tokens / second
+    </div>
+    <div id="s3title" class="display" style="font-size:80px;line-height:1;letter-spacing:-.03em;margin-bottom:54px;text-align:center;">
+      Your speed budget. <span class="dim">Sitting on the table.</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:30px;width:1500px;">
+      <!-- Claude bar -->
+      <div style="display:flex;align-items:center;gap:24px;">
+        <div class="mono" style="width:280px;font-size:30px;text-align:right;">Claude · GPT</div>
+        <div style="flex:1;height:88px;background:#0E1424;border-radius:10px;overflow:hidden;position:relative;border:1px solid #1F2937;">
+          <div id="s3bar1" style="position:absolute;left:0;top:0;bottom:0;width:18%;background:linear-gradient(90deg,#3a3f6b,#5764a4);border-radius:10px 0 0 10px;transform-origin:left center;"></div>
+        </div>
+        <div id="s3num1" class="mono dim" style="width:200px;font-size:42px;font-weight:700;">~48 t/s</div>
+      </div>
+      <!-- Gemini bar -->
+      <div style="display:flex;align-items:center;gap:24px;">
+        <div class="mono accent" style="width:280px;font-size:30px;text-align:right;">Gemini Flash-Lite</div>
+        <div style="flex:1;height:88px;background:#0E1424;border-radius:10px;overflow:hidden;position:relative;border:1px solid #1F2937;">
+          <div id="s3bar2" style="position:absolute;left:0;top:0;bottom:0;width:96%;background:linear-gradient(90deg,#34E7D6,#FFC857);border-radius:10px 0 0 10px;box-shadow:0 0 30px rgba(52,231,214,0.4);"></div>
+        </div>
+        <div id="s3num2" class="mono warn" style="width:200px;font-size:42px;font-weight:700;">330 t/s</div>
+      </div>
+    </div>
+    <div id="s3callout" class="display" style="margin-top:48px;font-size:88px;line-height:1;letter-spacing:-.03em;">
+      <span class="accent">7× faster than Opus.</span>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       SCENE 4 — Reframe fan-out  (53.0 → 71.5)   anchor: "Reframe" @ 53.8s · "amnesia" @ 70.24s · "Pair" @ 71.56s
+       ═══════════════════════════════════════════════════════ -->
+  <div id="s4" class="clip scene" data-start="53" data-duration="18.5" data-track-index="2" style="z-index:5;">
+    <div id="s4label" class="mono accent" style="font-size:24px;letter-spacing:6px;margin-bottom:18px;text-transform:uppercase;">
+      Reframe uses it
+    </div>
+    <div id="s4title" class="display" style="font-size:96px;line-height:1.0;text-align:center;letter-spacing:-.03em;margin-bottom:28px;">
+      <span class="warn">30 – 100</span> specialized agents.<br>
+      <span class="dim" style="font-size:54px;font-weight:400;font-family:'Inter',sans-serif;">one per screen of your repo</span>
+    </div>
+    <div id="s4grid" style="display:grid;grid-template-columns:repeat(20,1fr);gap:10px;width:1500px;margin-top:14px;"></div>
+    <div id="s4subtitle" style="margin-top:38px;font-size:32px;line-height:1.4;text-align:center;max-width:1400px;" class="dim">
+      Each agent gets a <span class="accent">small, focused context window</span> — small enough that the model<br>doesn't have to be a genius to follow instructions.
+    </div>
+    <div id="s4pills" style="margin-top:30px;display:flex;gap:20px;">
+      <span class="pill" style="background:rgba(63,185,80,.12);border:1px solid rgba(63,185,80,.5);color:#3FB950;"><b>✓</b> NO million-token soup</span>
+      <span class="pill" style="background:rgba(63,185,80,.12);border:1px solid rgba(63,185,80,.5);color:#3FB950;"><b>✓</b> NO amnesia</span>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       SCENE 5 — 20 min + Gemini + LLM-agnostic  (71.0 → 84.5)   anchor: "Pair" @ 71.56s · "20" @ 76.92s · "Open" @ 84.84s
+       ═══════════════════════════════════════════════════════ -->
+  <div id="s5" class="clip scene" data-start="71" data-duration="13.5" data-track-index="1" style="z-index:5;">
+    <div id="s5label" class="mono dim" style="font-size:22px;letter-spacing:5px;margin-bottom:18px;text-transform:uppercase;">
+      Full QA + refactor of your whole SaaS
+    </div>
+    <div id="s5time" class="display" style="font-size:280px;line-height:.95;letter-spacing:-.05em;">
+      <span class="warn">&lt; 20</span> <span style="font-size:120px;" class="dim">min</span>
+    </div>
+    <div id="s5powered" style="margin-top:28px;display:flex;align-items:center;gap:18px;font-size:32px;">
+      <span class="dim">powered by</span>
+      <span class="display" style="font-size:48px;letter-spacing:-.02em;">
+        <span style="color:#4285F4;">G</span><span style="color:#EA4335;">o</span><span style="color:#FBBC04;">o</span><span style="color:#4285F4;">g</span><span style="color:#34A853;">l</span><span style="color:#EA4335;">e</span> Gemini
+      </span>
+    </div>
+    <div id="s5agnostic" style="margin-top:42px;display:flex;flex-direction:column;align-items:center;gap:18px;">
+      <div class="mono dim" style="font-size:22px;letter-spacing:4px;text-transform:uppercase;">
+        Or use the old geezers — Reframe is LLM-agnostic
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center;">
+        <span class="pill" style="background:#0E1424;border:1px solid #1F2937;">Gemini</span>
+        <span class="pill" style="background:#0E1424;border:1px solid #1F2937;">Claude</span>
+        <span class="pill" style="background:#0E1424;border:1px solid #1F2937;">OpenAI</span>
+        <span class="pill" style="background:#0E1424;border:1px solid #1F2937;">Groq</span>
+        <span class="pill" style="background:#0E1424;border:1px solid #1F2937;">Local</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       SCENE 6 — Open source · git URL · KILL  (84.0 → 99.5)   anchor: "Open" @ 84.84s · "Point" @ 93.30s
+       ═══════════════════════════════════════════════════════ -->
+  <div id="s6" class="clip scene" data-start="84" data-duration="15.5" data-track-index="2" style="z-index:5;">
+    <div id="s6label" class="mono accent" style="font-size:24px;letter-spacing:6px;margin-bottom:22px;text-transform:uppercase;">
+      Open source · MIT
+    </div>
+    <div id="s6cmd" class="mono" style="background:#000;border:1px solid #1F2937;border-radius:14px;padding:38px 52px;font-size:46px;letter-spacing:.5px;width:1480px;line-height:1.4;box-shadow:0 0 80px rgba(52,231,214,.18);">
+      <span class="accent">$</span> &nbsp;git clone<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#EAF1FB;">https://github.com/<span class="warn">resultkitchen</span>/<span class="accent">rebuild-pipeline</span></span>
+    </div>
+    <div id="s6tag" class="display" style="margin-top:48px;font-size:84px;line-height:1.04;text-align:center;letter-spacing:-.03em;">
+      Point it at your app.<br>
+      <span class="red">KILL. THE. BIPPITY-BOOP.</span>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       SCENE 7 — CTA  (99.0 → 104.5)   anchor: "So." @ 99.60s · "building" @ 100.78s
+       ═══════════════════════════════════════════════════════ -->
+  <div id="s7" class="clip scene" data-start="99" data-duration="5.5" data-track-index="1" style="z-index:5;">
+    <div id="s7brand" class="mono accent" style="font-size:24px;letter-spacing:6px;margin-bottom:30px;text-transform:uppercase;">
+      Reframe
+    </div>
+    <div id="s7q" class="display" style="font-size:112px;line-height:1.04;text-align:center;letter-spacing:-.03em;max-width:1600px;">
+      What are you building <span class="accent">right now?</span>
+    </div>
+    <div id="s7sub" style="margin-top:46px;font-size:38px;text-align:center;line-height:1.45;max-width:1300px;" class="dim">
+      Drop the link below — I'll send you the exact prompt to point Reframe at it.
+    </div>
+    <div id="s7cta" style="margin-top:54px;display:flex;gap:18px;align-items:center;">
+      <span style="font-size:62px;">👇</span>
+      <span class="mono warn" style="font-size:32px;letter-spacing:4px;text-transform:uppercase;">comments</span>
+    </div>
+  </div>
+
+  <!-- GSAP -->
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <script>
+    // Build agent grid for scene 4 (20 cols × 5 rows = 100 dots)
+    const grid = document.getElementById('s4grid');
+    const COLS = 20, ROWS = 5;
+    for (let i = 0; i < COLS * ROWS; i++) {
+      const d = document.createElement('div');
+      d.className = 's4dot';
+      d.style.cssText = 'aspect-ratio:1/1;border-radius:3px;background:#34E7D6;opacity:0;box-shadow:0 0 10px rgba(52,231,214,.5);';
+      grid.appendChild(d);
+    }
+
+    window.__timelines = window.__timelines || {};
+    const tl = gsap.timeline({ paused: true });
+
+    /* ═════ SCENE 1 (0–21.5): Hour 3 / robot bippity-boop ═════
+       Whisper anchors: Boop. @ 15.0, Boop. @ 18.98 */
+    tl.from('#s1', { opacity: 0, duration: 0.6, ease: 'power2.out' }, 0.1);
+    tl.from('#s1label', { y: -20, opacity: 0, duration: 0.5, ease: 'power2.out' }, 0.5);
+    tl.from('#s1terminal', { y: 30, opacity: 0, duration: 0.7, ease: 'power3.out' }, 1.0);
+    tl.to('#s1caret', { opacity: 0, duration: 0.5, ease: 'steps(1)', repeat: 28, yoyo: true }, 1.8);
+    tl.to('#s1l1', { opacity: 1, duration: 0.4 }, 4.5);
+    tl.to('#s1l2', { opacity: 1, duration: 0.4 }, 7.0);
+    tl.to('#s1l3', { opacity: 1, duration: 0.4 }, 9.5);
+    tl.from('#bb1', { y: 40, duration: 0.4, ease: 'power3.out' }, 12.8);
+    tl.to('#bb1',   { opacity: 1, duration: 0.3 }, 12.8);
+    tl.from('#bb2', { y: 40, duration: 0.4, ease: 'power3.out' }, 14.0);
+    tl.to('#bb2',   { opacity: 1, duration: 0.3 }, 14.0);
+    tl.from('#bb3', { y: 40, duration: 0.4, ease: 'power3.out' }, 17.0);
+    tl.to('#bb3',   { opacity: 1, duration: 0.3 }, 17.0);
+    tl.from('#bb4', { y: 40, duration: 0.4, ease: 'back.out(1.6)' }, 18.5);
+    tl.to('#bb4',   { opacity: 1, duration: 0.3 }, 18.5);
+
+    /* ═════ SCENE 2 (21–36.5): Frankenstein ═════
+       Anchors: Frankenstein @ 22.44, hangover/needless ~32-35 */
+    tl.from('#s2', { opacity: 0, duration: 0.5, ease: 'power2.out' }, 21.1);
+    tl.from('#s2label', { y: -20, opacity: 0, duration: 0.4, ease: 'power2.out' }, 21.5);
+    tl.from('#s2title', { scale: 0.85, opacity: 0, duration: 0.6, ease: 'back.out(1.4)' }, 22.1);
+    tl.from('#s2e1', { x: -60, opacity: 0, duration: 0.5, ease: 'power3.out' }, 24.0);
+    tl.from('#s2e2', { x: -60, opacity: 0, duration: 0.5, ease: 'power3.out' }, 26.5);
+    tl.from('#s2e3', { x: -60, opacity: 0, duration: 0.5, ease: 'power3.out' }, 29.0);
+    tl.from('#s2close', { y: 30, opacity: 0, duration: 0.6, ease: 'power3.out' }, 32.5);
+
+    /* ═════ SCENE 3 (36–53.5): TPS bars ═════
+       Anchors: why @ 36.6, Opus @ 37.78, Seven @ 48.82 */
+    tl.from('#s3', { opacity: 0, duration: 0.5, ease: 'power2.out' }, 36.1);
+    tl.from('#s3label', { y: -20, opacity: 0, duration: 0.4, ease: 'power2.out' }, 36.5);
+    tl.from('#s3title', { y: 30, opacity: 0, duration: 0.55, ease: 'power3.out' }, 36.9);
+    tl.from('#s3bar1', { scaleX: 0, duration: 1.2, ease: 'power2.out' }, 38.0);
+    tl.from('#s3num1', { opacity: 0, duration: 0.3 }, 39.0);
+    tl.from('#s3bar2', { scaleX: 0, duration: 0.7, ease: 'power3.out' }, 44.5);
+    tl.from('#s3num2', { scale: 0.7, opacity: 0, duration: 0.4, ease: 'back.out(1.6)' }, 45.0);
+    tl.from('#s3callout', { scale: 0.8, opacity: 0, duration: 0.6, ease: 'back.out(1.5)' }, 48.5);
+
+    /* ═════ SCENE 4 (53–71.5): Reframe fan-out ═════
+       Anchors: Reframe @ 53.8, amnesia @ 70.24 */
+    tl.from('#s4', { opacity: 0, duration: 0.5, ease: 'power2.out' }, 53.1);
+    tl.from('#s4label', { y: -20, opacity: 0, duration: 0.4, ease: 'power2.out' }, 53.5);
+    tl.from('#s4title', { y: 30, opacity: 0, duration: 0.6, ease: 'power3.out' }, 54.0);
+    tl.from('.s4dot', {
+      scale: 0, opacity: 0, duration: 0.4, ease: 'back.out(1.6)',
+      stagger: { each: 0.04, from: 'center', grid: [ROWS, COLS] }
+    }, 56.0);
+    tl.from('#s4subtitle', { y: 20, opacity: 0, duration: 0.55, ease: 'power2.out' }, 62.0);
+    tl.from('#s4pills', { y: 30, opacity: 0, duration: 0.5, ease: 'back.out(1.4)' }, 67.5);
+
+    /* ═════ SCENE 5 (71–84.5): 20 min + Gemini + LLM-agnostic ═════
+       Anchors: Pair @ 71.56, 20 @ 76.92, agnostic @ 84.0 */
+    tl.from('#s5', { opacity: 0, duration: 0.5, ease: 'power2.out' }, 71.1);
+    tl.from('#s5label', { y: -20, opacity: 0, duration: 0.4, ease: 'power2.out' }, 71.5);
+    tl.from('#s5time', { scale: 0.7, opacity: 0, duration: 0.8, ease: 'expo.out' }, 75.5);
+    tl.from('#s5powered', { y: 20, opacity: 0, duration: 0.5, ease: 'power2.out' }, 77.5);
+    tl.from('#s5agnostic', { y: 30, opacity: 0, duration: 0.6, ease: 'power3.out' }, 80.5);
+
+    /* ═════ SCENE 6 (84–99.5): Open source · git URL · KILL ═════
+       Anchors: Open @ 84.84, Pull @ 85.88, Point @ 93.30 */
+    tl.from('#s6', { opacity: 0, duration: 0.5, ease: 'power2.out' }, 84.1);
+    tl.from('#s6label', { y: -20, opacity: 0, duration: 0.4, ease: 'power2.out' }, 84.5);
+    tl.from('#s6cmd', { y: 40, opacity: 0, duration: 0.7, ease: 'power3.out' }, 85.2);
+    tl.from('#s6tag', { y: 30, opacity: 0, duration: 0.6, ease: 'power3.out' }, 93.0);
+
+    /* ═════ SCENE 7 (99–104.5): CTA ═════
+       Anchors: So. @ 99.60, building @ 100.78 */
+    tl.from('#s7', { opacity: 0, duration: 0.5, ease: 'power2.out' }, 99.1);
+    tl.from('#s7brand', { y: -20, opacity: 0, duration: 0.4, ease: 'power2.out' }, 99.5);
+    tl.from('#s7q', { y: 50, opacity: 0, duration: 0.7, ease: 'power3.out' }, 100.0);
+    tl.from('#s7sub', { y: 30, opacity: 0, duration: 0.6, ease: 'power2.out' }, 101.6);
+    tl.from('#s7cta', { scale: 0.7, opacity: 0, duration: 0.5, ease: 'back.out(1.5)' }, 102.8);
+
+    tl.to('#s7', { opacity: 1, duration: 0.01 }, 104.3);
+
+    window.__timelines['reframe-launch'] = tl;
+  </script>
+</div>
+</body>
+</html>
