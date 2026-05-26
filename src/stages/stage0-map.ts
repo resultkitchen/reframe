@@ -29,7 +29,7 @@ import type {
 const SKIP_DIRS = new Set([
   'node_modules', '.git', '.next', 'dist', 'build', 'out', 'coverage',
   '.turbo', '.vercel', '.netlify', '.cache', 'vendor', '.svelte-kit',
-  '.nuxt', '.output', 'runs', '.wolf', '.idea', '.vscode',
+  '.nuxt', '.output', 'runs', '.wolf', '.idea', '.vscode', 'ghl-dashboard',
 ]);
 
 /** Per-file content truncation cap (chars) in the digest. */

@@ -69,6 +69,7 @@ function writeArtifacts(
   reason: string,
   consoleErrors: string[],
   interactions: string[],
+  screenshot?: string,
 ): void {
   try {
     fs.mkdirSync(ctx.pageDir, { recursive: true });
@@ -82,6 +83,10 @@ function writeArtifacts(
       renderMd(ctx, result, reason, consoleErrors, interactions),
       'utf8',
     );
+    if (screenshot) {
+      fs.writeFileSync(path.join(ctx.pageDir, 'audit.png'), Buffer.from(screenshot, 'base64'));
+      fs.writeFileSync(path.join(ctx.pageDir, 'verify.png'), Buffer.from(screenshot, 'base64'));
+    }
   } catch (err) {
     console.error(`[agent5-verify] failed to write artifacts: ${String(err)}`);
   }
@@ -243,6 +248,7 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
         : `Page is unhealthy: ${health?.status} — ${health?.detail}`,
       consoleErrors,
       interactions,
+      screenshot,
     );
     return result;
   }
@@ -333,6 +339,7 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
       `Verification model call failed: ${String(err)}.`,
       consoleErrors,
       interactions,
+      screenshot,
     );
     return result;
   }
@@ -353,6 +360,7 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
     pass ? '' : 'One or more non-low gaps remain open or a regression was found.',
     consoleErrors,
     interactions,
+    screenshot,
   );
   return result;
 }

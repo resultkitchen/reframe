@@ -110,7 +110,7 @@ function renderMd(result: AuditResult): string {
   return lines.join('\n');
 }
 
-function writeOutputs(ctx: AgentContext, result: AuditResult): void {
+function writeOutputs(ctx: AgentContext, result: AuditResult, screenshot?: string): void {
   fs.mkdirSync(ctx.pageDir, { recursive: true });
   fs.writeFileSync(
     path.join(ctx.pageDir, 'audit.json'),
@@ -118,6 +118,13 @@ function writeOutputs(ctx: AgentContext, result: AuditResult): void {
     'utf8',
   );
   fs.writeFileSync(path.join(ctx.pageDir, 'audit.md'), renderMd(result), 'utf8');
+  if (screenshot) {
+    try {
+      fs.writeFileSync(path.join(ctx.pageDir, 'audit.png'), Buffer.from(screenshot, 'base64'));
+    } catch (err) {
+      console.error(`[agent1-audit] failed to write screenshot to disk: ${String(err)}`);
+    }
+  }
 }
 
 const SYSTEM_INSTRUCTION = `You are a senior product QA auditor. You inspect ONE web page that has been driven in a real browser. You receive a screenshot, an accessibility/DOM snapshot, the page source context, the list of interactions that were exercised, and any console errors.
@@ -338,6 +345,6 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
     ...(authRole ? { authRole } : {}),
   };
 
-  writeOutputs(ctx, result);
+  writeOutputs(ctx, result, screenshot);
   return result;
 }

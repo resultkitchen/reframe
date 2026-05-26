@@ -388,13 +388,21 @@ export class PageDriver {
     };
   }
 
+
   /** Full-page screenshot as a base64 PNG string (no `data:` prefix). */
   async screenshot(): Promise<string> {
     try {
-      const buf = await this.page.screenshot({
-        fullPage: true,
-        type: 'png',
-      });
+      const buf = await promiseWithTimeout<Buffer | null>(
+        this.page.screenshot({
+          fullPage: true,
+          type: 'png',
+        }),
+        15000,
+        null,
+      );
+      if (!buf) {
+        throw new Error('Screenshot timed out after 15000ms');
+      }
       return buf.toString('base64');
     } catch (err) {
       this.consoleErrors.push(
@@ -411,7 +419,11 @@ export class PageDriver {
    */
   async snapshot(): Promise<string> {
     try {
-      const aria = await this.page.locator('body').ariaSnapshot();
+      const aria = await promiseWithTimeout<string>(
+        this.page.locator('body').ariaSnapshot(),
+        10000,
+        '',
+      );
       if (aria && aria.trim()) {
         return aria;
       }
@@ -420,8 +432,10 @@ export class PageDriver {
     }
 
     try {
-      return await this.page.evaluate(
-        () => document.body?.innerText ?? '',
+      return await promiseWithTimeout<string>(
+        this.page.evaluate(() => document.body?.innerText ?? ''),
+        5000,
+        '',
       );
     } catch (err) {
       this.consoleErrors.push(
@@ -440,4 +454,16 @@ export class PageDriver {
       // Already closed / crashed — nothing to do.
     }
   }
+}
+
+/** Safe promise race timeout helper to prevent headless hangs under heavy load. */
+function promiseWithTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([promise, timeout]).then((res) => {
+    clearTimeout(timer);
+    return res;
+  });
 }
