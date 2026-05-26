@@ -438,6 +438,23 @@ export class PageDriver {
     }
   }
 
+  /** Full-page HTML DOM snapshot. */
+  async content(): Promise<string> {
+    try {
+      return await promiseWithTimeout<string>(
+        this.page.content(),
+        10000,
+        '',
+      );
+    } catch (err) {
+      this.consoleErrors.push(
+        `[content] failed to capture HTML: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+      return '';
+    }
+  }
+
   /**
    * Text snapshot of the page: the ARIA accessibility snapshot, falling
    * back to `body.innerText` when it is unavailable.

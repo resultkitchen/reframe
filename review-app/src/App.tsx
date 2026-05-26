@@ -21,6 +21,7 @@ interface PageData {
   slug: string;
   route: string;
   hasScreenshot: boolean;
+  hasHtml?: boolean;
   audit?: {
     gaps: Gap[];
     health?: {
@@ -84,7 +85,10 @@ export default function App() {
   const [zoomMode, setZoomMode] = useState<'fit' | 'native'>('fit');
 
   // View layout format: 'split' (side-by-side) or 'full' (stacked full-width visual)
-  const [viewLayout, setViewLayout] = useState<'split' | 'full'>('split');
+  const [viewLayout, setViewLayout] = useState<'split' | 'full'>('full');
+
+  // Preview mode: 'iframe' or 'screenshot'
+  const [previewMode, setPreviewMode] = useState<'iframe' | 'screenshot'>('iframe');
 
   // Load run details on boot
   useEffect(() => {
@@ -118,6 +122,11 @@ export default function App() {
   useEffect(() => {
     if (!data || !activeSlug) return;
     
+    const page = data.pages.find(p => p.slug === activeSlug);
+    if (page) {
+      setPreviewMode(page.hasHtml ? 'iframe' : 'screenshot');
+    }
+
     const existing = data.approvals.pages[activeSlug];
     if (existing) {
       setCurrentApproval({
@@ -128,7 +137,6 @@ export default function App() {
       });
     } else {
       // Default fallback approval payload
-      const page = data.pages.find(p => p.slug === activeSlug);
       const gapsDefault: Record<string, 'apply' | 'skip'> = {};
       if (page?.audit?.gaps) {
         page.audit.gaps.forEach(g => {
@@ -163,6 +171,23 @@ export default function App() {
     setCurrentApproval({
       ...currentApproval,
       gaps: currentGaps,
+    });
+  };
+
+  // Toggle all gaps
+  const handleToggleAllGaps = () => {
+    if (!currentApproval || !activePage?.audit?.gaps) return;
+    const allCurrentlyApply = activePage.audit.gaps.every(g => currentApproval.gaps?.[g.id] !== 'skip');
+    const targetStatus: 'apply' | 'skip' = allCurrentlyApply ? 'skip' : 'apply';
+    
+    const updatedGaps = { ...currentApproval.gaps };
+    activePage.audit.gaps.forEach(g => {
+      updatedGaps[g.id] = targetStatus;
+    });
+    
+    setCurrentApproval({
+      ...currentApproval,
+      gaps: updatedGaps,
     });
   };
 
@@ -253,7 +278,7 @@ export default function App() {
         <div className="logo-group">
           <div className="logo-badge">R</div>
           <span className="logo-text">Reframe</span>
-          <span className="logo-sub">Visual Review</span>
+          <span className="logo-sub">Visual Refactoring Workspace</span>
         </div>
         
         {data && (
@@ -321,301 +346,313 @@ export default function App() {
           {activePage && currentApproval ? (
             <>
               {/* Header details */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="detail-pane-header">
                 <div>
-                  <h1 style={{ fontSize: '1.75rem', marginBottom: '0.25rem' }}>{activePage.slug}</h1>
-                  <p style={{ color: '#64748b', fontSize: '0.95rem' }}>Route: <code style={{ color: '#0f172a' }}>{activePage.route || '/' + activePage.slug.replace(/-/g, '/')}</code></p>
+                  <h1 className="active-page-title">{activePage.slug}</h1>
+                  <p style={{ color: '#64748b', fontSize: '0.95rem' }}>
+                    Route: <code className="active-route-code">{activePage.route || '/' + activePage.slug.replace(/-/g, '/')}</code>
+                  </p>
                 </div>
 
-                <button 
-                  onClick={handleSaveApproval} 
-                  className="btn-primary glow-btn"
-                  disabled={saving}
-                >
-                  {saving ? 'Saving...' : '💾 Save Page Ledger'}
-                </button>
-              </div>
-
-              {/* Executive Summary Card */}
-              <div className="card" style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #ffffff 100%)', border: '1px solid #bfdbfe', boxShadow: '0 4px 20px rgba(59, 130, 246, 0.04)' }}>
-                <div className="card-body" style={{ padding: '1.25rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-                    <h3 style={{ fontSize: '0.85rem', textTransform: 'uppercase', color: '#1e40af', fontWeight: 800, letterSpacing: '0.05em' }}>
-                      📋 Executive Summary & Scoping
-                    </h3>
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                      <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>Workspace layout:</span>
-                      <button
-                        className="btn-secondary"
-                        style={{
-                          padding: '0.25rem 0.65rem',
-                          fontSize: '0.75rem',
-                          borderRadius: '6px',
-                          background: viewLayout === 'split' ? '#3b82f6' : '#ffffff',
-                          color: viewLayout === 'split' ? '#ffffff' : '#475569',
-                          borderColor: viewLayout === 'split' ? '#2563eb' : '#cbd5e1',
-                          fontWeight: 600,
-                        }}
-                        onClick={() => setViewLayout('split')}
-                      >
-                        📂 Split spec
-                      </button>
-                      <button
-                        className="btn-secondary"
-                        style={{
-                          padding: '0.25rem 0.65rem',
-                          fontSize: '0.75rem',
-                          borderRadius: '6px',
-                          background: viewLayout === 'full' ? '#3b82f6' : '#ffffff',
-                          color: viewLayout === 'full' ? '#ffffff' : '#475569',
-                          borderColor: viewLayout === 'full' ? '#2563eb' : '#cbd5e1',
-                          fontWeight: 600,
-                        }}
-                        onClick={() => setViewLayout('full')}
-                      >
-                        🖥️ Full-width visual
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={{ fontSize: '0.9rem', color: '#334155', lineHeight: '1.5' }}>
-                    <p style={{ marginBottom: '0.5rem' }}>
-                      <strong>Role Scoping:</strong> {
-                        (activePage.route || '').startsWith('/admin')
-                          ? 'This is a restricted Admin control interface, driven and audited under active Admin system credentials.'
-                          : (activePage.route || '').startsWith('/media-buyer')
-                            ? 'This is the Media Buyer portal dashboard, managed by advertisement managers.'
-                            : (activePage.route || '').startsWith('/dashboard')
-                              ? 'This is the primary Attorney tracking interface for leads, conversions, and order lists.'
-                              : 'This is a public guest/onboarding screen or public-facing marketing funnel.'
-                      }
-                    </p>
-                    <p style={{ margin: 0, color: '#64748b', fontSize: '0.85rem' }}>
-                      <strong>Audit summary:</strong> Loaded successfully with page health status <strong>{activePage.audit?.health?.status ?? 'ok'}</strong>. Detected <strong>{activePage.audit?.gaps?.length ?? 0} visual/architectural upgrades</strong> to process. Toggle checkboxes below to approve specific code fixes.
-                    </p>
-                  </div>
+                <div className="header-actions">
+                  <button 
+                    onClick={handleSaveApproval} 
+                    className="btn-primary glow-btn"
+                    disabled={saving}
+                  >
+                    {saving ? 'Saving...' : '💾 Save Page Ledger'}
+                  </button>
                 </div>
               </div>
 
-              {/* Side-by-Side or Full-width visual workspace */}
-              <div 
-                className="workspace-grid"
-                style={
-                  viewLayout === 'full' 
-                    ? { display: 'flex', flexDirection: 'column', gap: '2rem' } 
-                    : {}
-                }
-              >
+              {/* Redesigned grid flow: ELEVATED HORIZONTAL DASHBOARD FLOW */}
+              <div className="horizontal-dashboard">
                 
-                {/* LEFT COLUMN: Visual mockup preview */}
-                <div className="card" style={viewLayout === 'full' ? { width: '100%' } : {}}>
-                  <div className="card-header">
-                    <h3 className="card-title">📱 Headless Browser Screen Capture</h3>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                {/* Column 1: Page Summary Card & Approvals */}
+                <div className="card dashboard-card">
+                  <div className="card-header compact-header">
+                    <h3 className="card-title text-blue">📋 Page Summary & Approvals</h3>
+                  </div>
+                  <div className="card-body compact-body">
+                    <div className="scoping-info">
+                      <span className="info-label">Role Scope:</span>
+                      <p className="info-desc">
+                        {
+                          (activePage.route || '').startsWith('/admin')
+                            ? '🛡️ Restricted Admin Control (Audited with Admin credentials)'
+                            : (activePage.route || '').startsWith('/media-buyer')
+                              ? '📊 Media Buyer Portal (Audited with Campaign credentials)'
+                              : (activePage.route || '').startsWith('/dashboard')
+                                ? '⚖️ Attorney Tracking Dashboard (Audited with Lead credentials)'
+                                : '🌐 Public Marketing Screen / Public Guest Funnel'
+                        }
+                      </p>
+                    </div>
+
+                    <div className="approval-choices">
                       <button
-                        className="btn-secondary"
-                        style={{
-                          padding: '0.25rem 0.65rem',
-                          fontSize: '0.75rem',
-                          borderRadius: '6px',
-                          background: zoomMode === 'fit' ? '#eff6ff' : '#ffffff',
-                          borderColor: zoomMode === 'fit' ? '#3b82f6' : '#cbd5e1',
-                          color: zoomMode === 'fit' ? '#1d4ed8' : '#475569',
-                          fontWeight: 600,
-                        }}
-                        onClick={() => setZoomMode('fit')}
+                        className={`btn-choice-pill smooth-all choice-apply ${currentApproval.decision === 'apply' ? 'selected' : ''}`}
+                        onClick={() => handleDecisionToggle('apply')}
                       >
-                        📺 Fit to Panel
+                        🟢 WILL APPLY REBUILDS
                       </button>
                       <button
-                        className="btn-secondary"
-                        style={{
-                          padding: '0.25rem 0.65rem',
-                          fontSize: '0.75rem',
-                          borderRadius: '6px',
-                          background: zoomMode === 'native' ? '#eff6ff' : '#ffffff',
-                          borderColor: zoomMode === 'native' ? '#3b82f6' : '#cbd5e1',
-                          color: zoomMode === 'native' ? '#1d4ed8' : '#475569',
-                          fontWeight: 600,
-                        }}
-                        onClick={() => setZoomMode('native')}
+                        className={`btn-choice-pill smooth-all choice-skip ${currentApproval.decision === 'skip' ? 'selected' : ''}`}
+                        onClick={() => handleDecisionToggle('skip')}
                       >
-                        🔍 100% Size
+                        🟡 SKIP ALL REBUILDS
                       </button>
                     </div>
+
+                    <div className="form-group compact-group">
+                      <label className="form-label compact-label">PM / Client Refinement Instructions</label>
+                      <textarea
+                        rows={2}
+                        className="input-text compact-textarea"
+                        placeholder="Refinement instructions..."
+                        value={currentApproval.note ?? ''}
+                        onChange={(e) => setCurrentApproval({ ...currentApproval, note: e.target.value })}
+                      />
+                    </div>
                   </div>
-                  <div className="card-body" style={{ padding: zoomMode === 'native' ? 0 : '1.5rem' }}>
-                    <div
-                      className="screenshot-container"
-                      style={
-                        zoomMode === 'native'
-                          ? { overflow: 'auto', maxHeight: '700px', minHeight: '400px', display: 'block', padding: '1rem', background: '#f1f5f9' }
-                          : viewLayout === 'full'
-                            ? { display: 'flex', justifyContent: 'center', background: '#f1f5f9', minHeight: '600px' }
-                            : {}
-                      }
-                    >
-                      {activePage.hasScreenshot ? (
-                        <img
-                          className="screenshot-img"
-                          style={
-                            zoomMode === 'native'
-                              ? { width: 'auto', maxWidth: 'none', height: 'auto', display: 'block', margin: '0 auto', borderRadius: '8px', boxShadow: '0 10px 30px rgba(15,23,42,0.15)' }
-                              : viewLayout === 'full'
-                                ? { width: '100%', maxWidth: '1100px', height: 'auto', display: 'block', margin: '0 auto', borderRadius: '8px', boxShadow: '0 10px 30px rgba(15,23,42,0.1)' }
-                                : {}
-                          }
-                          src={`/api/screenshot/${activePage.slug}`}
-                          alt={`Rendered screenshot of ${activePage.slug}`}
-                        />
+                </div>
+
+                {/* Column 2: Threaded Designer/PM Feedback */}
+                <div className="card dashboard-card">
+                  <div className="card-header compact-header">
+                    <h3 className="card-title text-indigo">💬 Refinement Comments</h3>
+                  </div>
+                  <div className="card-body compact-body flex-col-layout">
+                    <div className="comments-timeline compact-timeline">
+                      {currentApproval.comments && currentApproval.comments.length > 0 ? (
+                        currentApproval.comments.map((c, i) => (
+                          <div key={i} className="comment-bubble compact-bubble">
+                            <div className="comment-bubble-author">Collaborator</div>
+                            <div className="comment-bubble-text">{c}</div>
+                          </div>
+                        ))
                       ) : (
-                        <div className="no-screenshot">
-                          <span style={{ fontSize: '2.5rem' }}>🖼️</span>
-                          <p>No visual screenshot captured for this run.</p>
-                        </div>
+                        <p className="no-comments-placeholder">
+                          No feedback comments. Type below to add.
+                        </p>
                       )}
                     </div>
+
+                    <form onSubmit={handleAddComment} className="comments-input-row compact-row">
+                      <input
+                        type="text"
+                        className="input-text compact-input"
+                        placeholder="Add comment..."
+                        value={newComment}
+                        onChange={(e) => setNewComment(e.target.value)}
+                      />
+                      <button type="submit" className="input-btn compact-btn">Send</button>
+                    </form>
                   </div>
                 </div>
 
-                {/* RIGHT COLUMN: Reviewer workspace & checklists */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-                  
-                  {/* Approvals ledger control */}
-                  <div className="card">
-                    <div className="card-header">
-                      <h3 className="card-title">🟢 Client & Visual Approvals</h3>
-                    </div>
-                    <div className="card-body">
-                      <div className="approval-actions">
-                        <button
-                          className={`btn-choice smooth-all ${currentApproval.decision === 'apply' ? 'selected-apply' : ''}`}
-                          onClick={() => handleDecisionToggle('apply')}
-                        >
-                          <span className="btn-choice-emoji">🟢</span>
-                          <span className="btn-choice-title">Apply Rebuilds</span>
-                          <span className="btn-choice-sub">Approve design changes and apply code upgrades.</span>
-                        </button>
-
-                        <button
-                          className={`btn-choice smooth-all ${currentApproval.decision === 'skip' ? 'selected-skip' : ''}`}
-                          onClick={() => handleDecisionToggle('skip')}
-                        >
-                          <span className="btn-choice-emoji">🟡</span>
-                          <span className="btn-choice-title">Skip Rebuilds</span>
-                          <span className="btn-choice-sub">Bypass coding, reviews, and git commits.</span>
-                        </button>
-                      </div>
-
-                      {/* Review note textarea */}
-                      <div className="form-group">
-                        <label className="form-label">Review Overall Note (PM / Client instructions)</label>
-                        <textarea
-                          rows={3}
-                          className="input-text"
-                          placeholder="e.g. Approved button colors and slate tokens. Tweak title typography contrast."
-                          value={currentApproval.note ?? ''}
-                          onChange={(e) => setCurrentApproval({ ...currentApproval, note: e.target.value })}
-                        />
-                      </div>
-                    </div>
+                {/* Column 3: Selective Upgrades Checklist */}
+                <div className="card dashboard-card flex-double">
+                  <div className="card-header compact-header">
+                    <h3 className="card-title text-green">🛠️ Selective Code Upgrades</h3>
+                    {activePage.audit && activePage.audit.gaps.length > 0 && (
+                      <button 
+                        onClick={handleToggleAllGaps} 
+                        className="btn-text-action"
+                      >
+                        🔄 Toggle All ({activePage.audit.gaps.every(g => currentApproval.gaps?.[g.id] !== 'skip') ? 'Skip All' : 'Apply All'})
+                      </button>
+                    )}
                   </div>
+                  <div className="card-body compact-body scroll-vertical-180">
+                    {activePage.audit && activePage.audit.gaps.length > 0 ? (
+                      <div className="gaps-list compact-gaps">
+                        {activePage.audit.gaps.map((gap) => {
+                          const isSkipped = currentApproval.gaps?.[gap.id] === 'skip';
 
-                  {/* Threaded collaborator comments */}
-                  <div className="card">
-                    <div className="card-header">
-                      <h3 className="card-title">💬 Threaded Designer/PM Feedback</h3>
-                    </div>
-                    <div className="card-body">
-                      <div className="comments-timeline">
-                        {currentApproval.comments && currentApproval.comments.length > 0 ? (
-                          currentApproval.comments.map((c, i) => (
-                            <div key={i} className="comment-bubble">
-                              <div className="comment-bubble-author">Collaborator</div>
-                              <div className="comment-bubble-text">{c}</div>
+                          return (
+                            <div 
+                              key={gap.id} 
+                              className={`gap-item-row smooth-all ${!isSkipped ? 'gap-apply' : 'gap-skip'}`}
+                              onClick={() => handleGapToggle(gap.id)}
+                            >
+                              <div className="gap-row-check">
+                                <span className={`status-dot ${!isSkipped ? 'dot-green' : 'dot-orange'}`}></span>
+                              </div>
+                              <div className="gap-row-content">
+                                <div className="gap-row-header">
+                                  <span className={`gap-row-tag tag-${gap.severity}`}>{gap.severity}</span>
+                                  <span className="gap-row-category">{gap.category}</span>
+                                  <span className={`gap-row-pill ${!isSkipped ? 'pill-green' : 'pill-orange'}`}>
+                                    {!isSkipped ? '🟢 WILL APPLY FIX' : '🟡 WILL SKIP FIX'}
+                                  </span>
+                                </div>
+                                <p className="gap-row-desc">{gap.description}</p>
+                              </div>
                             </div>
-                          ))
-                        ) : (
-                          <p style={{ color: '#94a3b8', fontSize: '0.85rem', fontStyle: 'italic', padding: '1rem 0' }}>
-                            No feedback threads registered. Type below to kickstart one.
-                          </p>
-                        )}
+                          );
+                        })}
                       </div>
-
-                      <form onSubmit={handleAddComment} className="comments-input-row">
-                        <input
-                          type="text"
-                          className="input-text"
-                          placeholder="Add visual refinement instructions..."
-                          value={newComment}
-                          onChange={(e) => setNewComment(e.target.value)}
-                        />
-                        <button type="submit" className="input-btn">Send</button>
-                      </form>
-                    </div>
+                    ) : (
+                      <p className="no-gaps-placeholder">🎉 No architectural or visual gaps detected on this page!</p>
+                    )}
                   </div>
+                </div>
 
+              </div>
+
+              {/* Consolidated Workspace Toolbar */}
+              <div className="workspace-toolbar">
+                <div className="toolbar-left">
+                  <span className="toolbar-section-label">👀 PREVIEW ENGINE</span>
+                  <div className="segmented-control">
+                    <button
+                      className={`control-btn ${previewMode === 'iframe' ? 'active' : ''}`}
+                      disabled={!activePage.hasHtml}
+                      onClick={() => setPreviewMode('iframe')}
+                      title={activePage.hasHtml ? "View live sandboxed HTML preview" : "HTML snapshot not available"}
+                    >
+                      🖥️ Live HTML {activePage.hasHtml ? '🟢' : '⚪'}
+                    </button>
+                    <button
+                      className={`control-btn ${previewMode === 'screenshot' ? 'active' : ''}`}
+                      onClick={() => setPreviewMode('screenshot')}
+                      title="View static image screenshot"
+                    >
+                      🖼️ Screenshot 🟢
+                    </button>
+                  </div>
+                </div>
+
+                <div className="toolbar-center">
+                  <span className="toolbar-section-label">📐 VIEWPORT SIZE</span>
+                  <div className="segmented-control">
+                    <button
+                      className={`control-btn ${zoomMode === 'fit' ? 'active' : ''}`}
+                      onClick={() => setZoomMode('fit')}
+                    >
+                      📺 Fit viewport
+                    </button>
+                    <button
+                      className={`control-btn ${zoomMode === 'native' ? 'active' : ''}`}
+                      onClick={() => setZoomMode('native')}
+                    >
+                      🔍 100% Native
+                    </button>
+                  </div>
+                </div>
+
+                <div className="toolbar-right">
+                  <span className="toolbar-section-label">📂 WORKSPACE LAYOUT</span>
+                  <div className="segmented-control">
+                    <button
+                      className={`control-btn ${viewLayout === 'split' ? 'active' : ''}`}
+                      onClick={() => setViewLayout('split')}
+                    >
+                      📂 Split view
+                    </button>
+                    <button
+                      className={`control-btn ${viewLayout === 'full' ? 'active' : ''}`}
+                      onClick={() => setViewLayout('full')}
+                    >
+                      🖥️ Full-width
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              {/* Gaps exclusion checklist */}
-              {activePage.audit && activePage.audit.gaps.length > 0 && (
-                <div className="card">
-                  <div className="card-header">
-                    <h3 className="card-title">🛠️ Selective Code Upgrades (Check to apply fix in next PR)</h3>
-                  </div>
-                  <div className="card-body">
-                    <div className="gaps-list">
-                      {activePage.audit.gaps.map((gap) => {
-                        const isSkipped = currentApproval.gaps?.[gap.id] === 'skip';
-
-                        return (
-                          <div key={gap.id} className="gap-item smooth-all" style={{ borderLeft: `4px solid ${!isSkipped ? '#22c55e' : '#f59e0b'}`, background: !isSkipped ? '#ffffff' : '#fafafa' }}>
-                            <input
-                              type="checkbox"
-                              className="gap-checkbox"
-                              checked={!isSkipped}
-                              onChange={() => handleGapToggle(gap.id)}
-                            />
-                            <div className="gap-info">
-                              <div className="gap-header-row" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                                <span className={`gap-tag gap-tag-${gap.severity}`}>{gap.severity}</span>
-                                <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600 }}>{gap.category}</span>
-                                <span style={{ 
-                                  fontSize: '0.7rem', 
-                                  padding: '0.1rem 0.4rem', 
-                                  borderRadius: '4px',
-                                  background: !isSkipped ? '#dcfce7' : '#fffbeb',
-                                  color: !isSkipped ? '#15803d' : '#d97706',
-                                  border: `1px solid ${!isSkipped ? '#bbf7d0' : '#fef3c7'}`,
-                                  fontWeight: 700
-                                }}>
-                                  {!isSkipped ? '🟢 WILL APPLY FIX' : '🟡 WILL SKIP FIX'}
-                                </span>
-                              </div>
-                              <p className="gap-desc" style={{ textDecoration: isSkipped ? 'line-through' : 'none', color: isSkipped ? '#94a3b8' : '#1e293b' }}>{gap.description}</p>
-                              {gap.recommendation && (
-                                <p className="gap-rec" style={{ opacity: isSkipped ? 0.6 : 1 }}><strong>Recommendation:</strong> {gap.recommendation}</p>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
+              {/* Sandboxed, scrollable and premium preview pane */}
+              <div className={`workspace-preview-area ${viewLayout === 'split' ? 'split-layout' : 'full-layout'}`}>
+                
+                {/* Visual Preview Device Container */}
+                <div className="preview-card">
+                  <div className="browser-chrome-header">
+                    <div className="browser-dots">
+                      <span className="b-dot dot-red"></span>
+                      <span className="b-dot dot-yellow"></span>
+                      <span className="b-dot dot-green"></span>
+                    </div>
+                    <div className="browser-address-bar">
+                      <span className="lock-icon">🔒</span>
+                      <span className="address-text">{`http://localhost/${activePage.route || activePage.slug}`}</span>
+                    </div>
+                    <div className="browser-engine-badge">
+                      {previewMode === 'iframe' ? 'Sandboxed HTML5' : 'Static PNG'}
                     </div>
                   </div>
+
+                  <div className={`preview-viewport-scroll ${zoomMode === 'native' ? 'native-scroll' : 'fit-scroll'}`}>
+                    {previewMode === 'iframe' && activePage.hasHtml ? (
+                      <iframe
+                        src={`/api/html/${activePage.slug}`}
+                        sandbox="allow-scripts"
+                        title={`Static preview of ${activePage.slug}`}
+                        className="preview-iframe-snapshot"
+                        style={zoomMode === 'native' ? { height: '1500px' } : { height: '800px' }}
+                      />
+                    ) : activePage.hasScreenshot ? (
+                      <img
+                        className="screenshot-img-refactored"
+                        src={`/api/screenshot/${activePage.slug}`}
+                        alt={`Rendered screenshot of ${activePage.slug}`}
+                      />
+                    ) : (
+                      <div className="no-screenshot">
+                        <span style={{ fontSize: '2.5rem' }}>🖼️</span>
+                        <p>No preview asset available for this page.</p>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
+
+                {/* Split view spec panel if viewLayout === 'split' */}
+                {viewLayout === 'split' && (
+                  <div className="split-specs-container">
+                    
+                    {/* ASCII wireframe or specs if available */}
+                    {activePage.ux && (
+                      <div className="card compact-spec-card">
+                        <div className="card-header spec-header">
+                          <h3 className="card-title text-indigo">📐 UX Wireframe Spec</h3>
+                        </div>
+                        <div className="card-body spec-body font-mono">
+                          <pre className="ascii-wireframe">{activePage.ux.asciiWireframe}</pre>
+                        </div>
+                      </div>
+                    )}
+
+                    {activePage.design && (
+                      <div className="card compact-spec-card">
+                        <div className="card-header spec-header">
+                          <h3 className="card-title text-blue">🎨 Design Spec</h3>
+                        </div>
+                        <div className="card-body spec-body">
+                          <pre className="pre-spec">{activePage.design.spec}</pre>
+                          <div style={{ marginTop: '1rem' }}>
+                            <strong style={{ fontSize: '0.8rem', color: '#64748b' }}>Brand Tokens:</strong>
+                            <div className="badge-row" style={{ marginTop: '0.25rem' }}>
+                              {activePage.design.brandTokensUsed.map((t, idx) => (
+                                <span key={idx} className="badge badge-apply">{t}</span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
               {/* Code Diffs Proposed changes */}
               {activePage.codeDiff && (
-                <div className="card">
+                <div className="card border-slate">
                   <div className="card-header">
-                    <h3 className="card-title">📝 Proposed Architectural Diffs</h3>
+                    <h3 className="card-title">📝 Proposed Refactoring Changes</h3>
                   </div>
                   <div className="card-body" style={{ padding: 0 }}>
                     <div className="diff-panel">
                       <div className="diff-header">
-                        <span className="diff-title">Architectural verification proposal</span>
+                        <span className="diff-title">Git Code Refactor Verification Proposal (code.diff)</span>
                       </div>
                       <div className="diff-body">
                         <pre className="diff-pre">

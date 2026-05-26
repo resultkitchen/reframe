@@ -70,6 +70,7 @@ function writeArtifacts(
   consoleErrors: string[],
   interactions: string[],
   screenshot?: string,
+  html?: string,
 ): void {
   try {
     fs.mkdirSync(ctx.pageDir, { recursive: true });
@@ -86,6 +87,10 @@ function writeArtifacts(
     if (screenshot) {
       fs.writeFileSync(path.join(ctx.pageDir, 'audit.png'), Buffer.from(screenshot, 'base64'));
       fs.writeFileSync(path.join(ctx.pageDir, 'verify.png'), Buffer.from(screenshot, 'base64'));
+    }
+    if (html) {
+      fs.writeFileSync(path.join(ctx.pageDir, 'audit.html'), html, 'utf8');
+      fs.writeFileSync(path.join(ctx.pageDir, 'verify.html'), html, 'utf8');
     }
   } catch (err) {
     console.error(`[agent5-verify] failed to write artifacts: ${String(err)}`);
@@ -163,6 +168,7 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
   let interactions: string[] = [];
   let screenshot = '';
   let snapshot = '';
+  let html = '';
   let loginNote: string | undefined;
   let health: PageHealth | undefined;
 
@@ -200,6 +206,11 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
       snapshot = await driver.snapshot();
     } catch (err) {
       console.error(`[agent5-verify] snapshot failed: ${String(err)}`);
+    }
+    try {
+      html = await driver.content();
+    } catch (err) {
+      console.error(`[agent5-verify] HTML content failed: ${String(err)}`);
     }
 
     health = await driver.health(routePath, ctx.config.auth?.loginUrl);
@@ -252,6 +263,7 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
       consoleErrors,
       interactions,
       screenshot,
+      html,
     );
     return result;
   }
@@ -343,6 +355,7 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
       consoleErrors,
       interactions,
       screenshot,
+      html,
     );
     return result;
   }
@@ -364,6 +377,7 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
     consoleErrors,
     interactions,
     screenshot,
+    html,
   );
   return result;
 }

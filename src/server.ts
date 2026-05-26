@@ -144,8 +144,9 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
               } catch {}
             }
 
-            // Verify if screenshots exist
+            // Verify if screenshots and HTML exist
             pageDetails.hasScreenshot = fs.existsSync(path.join(pageDir, 'audit.png'));
+            pageDetails.hasHtml = fs.existsSync(path.join(pageDir, 'audit.html'));
 
             pages.push(pageDetails);
           }
@@ -226,6 +227,30 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
       } else {
         res.writeHead(404);
         res.end('Screenshot not found');
+      }
+      return;
+    }
+
+    // 4. GET /api/html/:slug — Serve individual page HTML snapshot
+    if (pathname.startsWith('/api/html/') && req.method === 'GET') {
+      const slug = pathname.substring('/api/html/'.length);
+      if (slug.includes('..') || slug.includes('/') || slug.includes('\\')) {
+        res.writeHead(400);
+        res.end('Malformed page slug parameter');
+        return;
+      }
+
+      const htmlPath = path.join(absRunDir, 'pages', slug, 'audit.html');
+      if (fs.existsSync(htmlPath)) {
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Security-Policy': "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; img-src * data:; style-src * 'unsafe-inline';",
+          'X-Frame-Options': 'SAMEORIGIN'
+        });
+        fs.createReadStream(htmlPath).pipe(res);
+      } else {
+        res.writeHead(404);
+        res.end('HTML snapshot not found');
       }
       return;
     }

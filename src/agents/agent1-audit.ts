@@ -110,7 +110,7 @@ function renderMd(result: AuditResult): string {
   return lines.join('\n');
 }
 
-function writeOutputs(ctx: AgentContext, result: AuditResult, screenshot?: string): void {
+function writeOutputs(ctx: AgentContext, result: AuditResult, screenshot?: string, html?: string): void {
   fs.mkdirSync(ctx.pageDir, { recursive: true });
   fs.writeFileSync(
     path.join(ctx.pageDir, 'audit.json'),
@@ -123,6 +123,13 @@ function writeOutputs(ctx: AgentContext, result: AuditResult, screenshot?: strin
       fs.writeFileSync(path.join(ctx.pageDir, 'audit.png'), Buffer.from(screenshot, 'base64'));
     } catch (err) {
       console.error(`[agent1-audit] failed to write screenshot to disk: ${String(err)}`);
+    }
+  }
+  if (html) {
+    try {
+      fs.writeFileSync(path.join(ctx.pageDir, 'audit.html'), html, 'utf8');
+    } catch (err) {
+      console.error(`[agent1-audit] failed to write HTML snapshot to disk: ${String(err)}`);
     }
   }
 }
@@ -219,6 +226,7 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
   let consoleErrors: string[] = [];
   let snapshot = '';
   let screenshot = '';
+  let html = '';
   let driveError: string | undefined;
   let authRole: string | undefined;
   let loginNote: string | undefined;
@@ -266,6 +274,12 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
     } catch (err) {
       screenshot = '';
       driveError = `screenshot failed: ${String(err)}`;
+    }
+
+    try {
+      html = await driver.content();
+    } catch (err) {
+      console.error(`[agent1-audit] DOM capture failed: ${String(err)}`);
     }
 
     health = await driver.health(routePath, ctx.config.auth?.loginUrl);
@@ -348,6 +362,6 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
     ...(authRole ? { authRole } : {}),
   };
 
-  writeOutputs(ctx, result, screenshot);
+  writeOutputs(ctx, result, screenshot, html);
   return result;
 }
