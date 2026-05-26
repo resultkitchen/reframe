@@ -33,7 +33,14 @@ playwright-report/
 
 config/*-auth.json
 
-# Hyperframes skills (installed via `npx skills add heygen-com/hyperframes`).
-# Large 3rd-party content; track skills-lock.json so installs stay reproducible.
+# Hyperframes skills installed via `npx skills add heygen-com/hyperframes`
+# — large 3rd-party content; not needed in the repo.
 .agents/
-.claude/skills/
+skills-lock.json
+
+# Claude Code project config — local-only (references .wolf/ hooks that
+# aren't shipped). Anything inside .claude/ is per-developer.
+.claude/
+
+# Local init marker from new-proj
+.project-initialized
