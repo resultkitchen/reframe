@@ -315,6 +315,60 @@ export default function App() {
     }
   };
 
+  const [applying, setApplying] = useState<boolean>(false);
+
+  const handleApplyRefactor = async () => {
+    if (!activeSlug || !currentApproval) return;
+    setApplying(true);
+    try {
+      // First, save the approvals to make sure we use the latest decisions
+      const saveResponse = await fetch('/api/approvals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slug: activeSlug,
+          approval: currentApproval,
+        }),
+      });
+
+      if (!saveResponse.ok) {
+        throw new Error('Failed to save selections before applying.');
+      }
+
+      // Sync local state doc
+      setData(prev => {
+        if (!prev) return prev;
+        const updatedPages = { ...prev.approvals.pages };
+        updatedPages[activeSlug] = currentApproval;
+        return {
+          ...prev,
+          approvals: {
+            ...prev.approvals,
+            pages: updatedPages,
+          },
+        };
+      });
+
+      // Then trigger apply
+      const applyResponse = await fetch('/api/apply', {
+        method: 'POST',
+      });
+
+      if (!applyResponse.ok) {
+        throw new Error('Failed to trigger background rebuild.');
+      }
+
+      const resJson = await applyResponse.json();
+      if (resJson.success) {
+        alert(`⚡ Git Refactoring Triggered in Background!\n\nThe pipeline is now running in the background to apply your approved upgrades. You can monitor the progress log file at:\n${resJson.logFile}`);
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApplying(false);
+    }
+  };
+
   if (loading) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: '1rem' }}>
@@ -411,337 +465,377 @@ export default function App() {
         {/* ────────────────────────── DETAIL PANE ────────────────────────── */}
         <section className="detail-pane">
           {activePage && currentApproval ? (
-            <>
-              {/* Header details */}
-              <div className="detail-pane-header">
-                <div>
-                  <h1 className="active-page-title">{activePage.slug}</h1>
-                  <p style={{ color: '#64748b', fontSize: '0.95rem' }}>
-                    Route: <code className="active-route-code">{activePage.route || '/' + activePage.slug.replace(/-/g, '/')}</code>
-                  </p>
-                </div>
+            (() => {
+              const isPageBroken = activePage.audit?.health && !activePage.audit.health.healthy;
 
-                <div className="header-actions">
-                  <button 
-                    onClick={handleSaveApproval} 
-                    className="btn-primary glow-btn"
-                    disabled={saving}
-                  >
-                    {saving ? 'Saving...' : '💾 Save Page Ledger'}
-                  </button>
-                </div>
-              </div>
-
-              {/* Redesigned grid flow: ELEVATED HORIZONTAL DASHBOARD FLOW */}
-              <div className="horizontal-dashboard">
-                
-                {/* Column 1: Page Summary Card & Approvals */}
-                <div className="card dashboard-card">
-                  <div className="card-header compact-header">
-                    <h3 className="card-title text-blue">📋 Page Summary & Approvals</h3>
-                  </div>
-                  <div className="card-body compact-body">
-                    <div className="scoping-info">
-                      <span className="info-label">Role Scope:</span>
-                      <p className="info-desc">
-                        {
-                          (activePage.route || '').startsWith('/admin')
-                            ? '🛡️ Restricted Admin Control (Audited with Admin credentials)'
-                            : (activePage.route || '').startsWith('/media-buyer')
-                              ? '📊 Media Buyer Portal (Audited with Campaign credentials)'
-                              : (activePage.route || '').startsWith('/dashboard')
-                                ? '⚖️ Attorney Tracking Dashboard (Audited with Lead credentials)'
-                                : '🌐 Public Marketing Screen / Public Guest Funnel'
-                        }
+              return (
+                <>
+                  {/* Header details */}
+                  <div className="detail-pane-header">
+                    <div>
+                      <h1 className="active-page-title">{activePage.slug}</h1>
+                      <p style={{ color: '#64748b', fontSize: '0.95rem' }}>
+                        Route: <code className="active-route-code">{activePage.route || '/' + activePage.slug.replace(/-/g, '/')}</code>
                       </p>
                     </div>
 
-                    <div className="approval-choices">
-                      <button
-                        className={`btn-choice-pill smooth-all choice-apply ${currentApproval.decision === 'apply' ? 'selected' : ''}`}
-                        onClick={() => handleDecisionToggle('apply')}
+                    <div className="header-actions" style={{ display: 'flex', gap: '0.75rem' }}>
+                      <button 
+                        onClick={handleSaveApproval} 
+                        className="btn-secondary"
+                        disabled={saving || applying}
                       >
-                        🟢 WILL APPLY REBUILDS
+                        {saving ? 'Saving...' : '💾 Save Selections'}
                       </button>
-                      <button
-                        className={`btn-choice-pill smooth-all choice-skip ${currentApproval.decision === 'skip' ? 'selected' : ''}`}
-                        onClick={() => handleDecisionToggle('skip')}
+                      <button 
+                        onClick={handleApplyRefactor} 
+                        className="btn-primary glow-btn"
+                        disabled={applying || saving}
                       >
-                        🟡 SKIP ALL REBUILDS
+                        {applying ? 'Applying...' : '⚡ Apply Upgrades to Git'}
                       </button>
                     </div>
-
-                    <div className="form-group compact-group">
-                      <label className="form-label compact-label">PM / Client Refinement Instructions</label>
-                      <textarea
-                        rows={2}
-                        className="input-text compact-textarea"
-                        placeholder="Refinement instructions..."
-                        value={currentApproval.note ?? ''}
-                        onChange={(e) => setCurrentApproval({ ...currentApproval, note: e.target.value })}
-                      />
-                    </div>
                   </div>
-                </div>
 
-                {/* Column 2: Threaded Designer/PM Feedback */}
-                <div className="card dashboard-card">
-                  <div className="card-header compact-header">
-                    <h3 className="card-title text-indigo">💬 Refinement Comments</h3>
-                  </div>
-                  <div className="card-body compact-body flex-col-layout">
-                    <div className="comments-timeline compact-timeline">
-                      {currentApproval.comments && currentApproval.comments.length > 0 ? (
-                        currentApproval.comments.map((c, i) => (
-                          <div key={i} className="comment-bubble compact-bubble">
-                            <div className="comment-bubble-author">Collaborator</div>
-                            <div className="comment-bubble-text">{c}</div>
+                  {isPageBroken ? (
+                    /* ────────────────────────── CRITICAL FAILURE & REFIT FLOW ────────────────────────── */
+                    <div className="critical-failure-view">
+                      <div className="failure-banner-card">
+                        <div className="failure-banner-header">
+                          <span className="failure-icon">🚨</span>
+                          <div>
+                            <h2 className="failure-title">Critical Blocker: This screen failed to boot or load correctly</h2>
+                            <p className="failure-subtitle">Headless browser could not render the URL. Direct developer action required.</p>
                           </div>
-                        ))
-                      ) : (
-                        <p className="no-comments-placeholder">
-                          No feedback comments. Type below to add.
-                        </p>
+                        </div>
+
+                        <div className="failure-banner-body">
+                          <div className="failure-reason-box">
+                            <strong className="reason-header">Why it broke (System Error State):</strong>
+                            <code className="reason-details">{activePage.audit.health.detail || 'Connection timed out or dev server wont-start.'}</code>
+                          </div>
+
+                          <div className="failure-troubleshooting">
+                            <h3>🛠️ Action Plan / How to Fix:</h3>
+                            <ol>
+                              <li>Ensure your local backend HTTP server is running on the expected port (e.g. port 5173 for Vite, or port 3000 for server API).</li>
+                              <li>Check that your environment config matches the database and network credentials in <code>.env.local</code>.</li>
+                              <li>Approve the pre-populated quick refactor below to automatically resolve common boot/route crashes in git.</li>
+                            </ol>
+                          </div>
+
+                          <div className="failure-action-bar">
+                            <button 
+                              onClick={handleApplyRefactor} 
+                              className="btn-primary glow-btn btn-large"
+                              disabled={applying || saving}
+                            >
+                              ⚡ Approve & Apply Quick Refactor to Git
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {activePage.codeDiff && (
+                        <div className="card border-slate" style={{ marginTop: '1.5rem' }}>
+                          <div className="card-header compact-header">
+                            <h3 className="card-title text-indigo">📝 Pre-Populated Code Refactoring Fix</h3>
+                          </div>
+                          <div className="card-body" style={{ padding: 0 }}>
+                            <div className="diff-panel">
+                              <div className="diff-header">
+                                <span className="diff-title">Proposed Fix Diff (already populated)</span>
+                              </div>
+                              <div className="diff-body">
+                                <pre className="diff-pre">
+                                  {activePage.codeDiff.split('\n').map((line, i) => {
+                                    let className = 'diff-line';
+                                    if (line.startsWith('+')) className += ' diff-line-add';
+                                    else if (line.startsWith('-')) className += ' diff-line-del';
+                                    else if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) className += ' diff-line-info';
+
+                                    return (
+                                      <span key={i} className={className}>
+                                        {line}
+                                      </span>
+                                    );
+                                  })}
+                                </pre>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </div>
+                  ) : (
+                    /* ────────────────────────── NORMAL HEALTHY FLOW ────────────────────────── */
+                    <>
+                      {/* Redesigned grid flow: ELEVATED TWO-COLUMN HORIZONTAL DASHBOARD FLOW */}
+                      <div className="horizontal-dashboard">
+                        
+                        {/* Column 1 (Left 60%): Selective Code Upgrades (Checking applies fixes to git) */}
+                        <div className="card dashboard-card">
+                          <div className="card-header compact-header">
+                            <h3 className="card-title text-green">🛠️ Selective Code Upgrades (Prioritize fixes for next commit)</h3>
+                            {activePage.audit && activePage.audit.gaps.length > 0 && (
+                              <button 
+                                onClick={handleToggleAllGaps} 
+                                className="btn-text-action"
+                              >
+                                🔄 Toggle All ({activePage.audit.gaps.every(g => currentApproval.gaps?.[g.id] !== 'skip') ? 'Skip All' : 'Apply All'})
+                              </button>
+                            )}
+                          </div>
+                          <div className="card-body compact-body scroll-vertical-240">
+                            {activePage.audit && activePage.audit.gaps.length > 0 ? (
+                              <div className="gaps-list compact-gaps">
+                                {activePage.audit.gaps.map((gap) => {
+                                  const isSkipped = currentApproval.gaps?.[gap.id] === 'skip';
 
-                    <form onSubmit={handleAddComment} className="comments-input-row compact-row">
-                      <input
-                        type="text"
-                        className="input-text compact-input"
-                        placeholder="Add comment..."
-                        value={newComment}
-                        onChange={(e) => setNewComment(e.target.value)}
-                      />
-                      <button type="submit" className="input-btn compact-btn">Send</button>
-                    </form>
-                  </div>
-                </div>
-
-                {/* Column 3: Selective Upgrades Checklist */}
-                <div className="card dashboard-card flex-double">
-                  <div className="card-header compact-header">
-                    <h3 className="card-title text-green">🛠️ Selective Code Upgrades</h3>
-                    {activePage.audit && activePage.audit.gaps.length > 0 && (
-                      <button 
-                        onClick={handleToggleAllGaps} 
-                        className="btn-text-action"
-                      >
-                        🔄 Toggle All ({activePage.audit.gaps.every(g => currentApproval.gaps?.[g.id] !== 'skip') ? 'Skip All' : 'Apply All'})
-                      </button>
-                    )}
-                  </div>
-                  <div className="card-body compact-body scroll-vertical-180">
-                    {activePage.audit && activePage.audit.gaps.length > 0 ? (
-                      <div className="gaps-list compact-gaps">
-                        {activePage.audit.gaps.map((gap) => {
-                          const isSkipped = currentApproval.gaps?.[gap.id] === 'skip';
-
-                          return (
-                            <div 
-                              key={gap.id} 
-                              className={`gap-item-row smooth-all ${!isSkipped ? 'gap-apply' : 'gap-skip'}`}
-                              onClick={() => handleGapToggle(gap.id)}
-                            >
-                              <div className="gap-row-check">
-                                <span className={`status-dot ${!isSkipped ? 'dot-green' : 'dot-orange'}`}></span>
+                                  return (
+                                    <div 
+                                      key={gap.id} 
+                                      className={`gap-item-row smooth-all ${!isSkipped ? 'gap-apply' : 'gap-skip'}`}
+                                      onClick={() => handleGapToggle(gap.id)}
+                                    >
+                                      <div className="gap-row-check">
+                                        <input 
+                                          type="checkbox" 
+                                          className="gap-checkbox-tactile"
+                                          checked={!isSkipped}
+                                          onChange={() => {}} // toggled by row click
+                                        />
+                                      </div>
+                                      <div className="gap-row-content">
+                                        <div className="gap-row-header">
+                                          <span className={`gap-row-tag tag-${gap.severity}`}>{gap.severity}</span>
+                                          <span className="gap-row-category">{gap.category}</span>
+                                          <span className={`gap-row-pill ${!isSkipped ? 'pill-green' : 'pill-orange'}`}>
+                                            {!isSkipped ? '🟢 WILL APPLY FIX' : '🟡 WILL SKIP FIX'}
+                                          </span>
+                                        </div>
+                                        <p className="gap-row-desc">{gap.description}</p>
+                                        {gap.recommendation && (
+                                          <p className="gap-row-rec"><strong>Fix Strategy:</strong> {gap.recommendation}</p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               </div>
-                              <div className="gap-row-content">
-                                <div className="gap-row-header">
-                                  <span className={`gap-row-tag tag-${gap.severity}`}>{gap.severity}</span>
-                                  <span className="gap-row-category">{gap.category}</span>
-                                  <span className={`gap-row-pill ${!isSkipped ? 'pill-green' : 'pill-orange'}`}>
-                                    {!isSkipped ? '🟢 WILL APPLY FIX' : '🟡 WILL SKIP FIX'}
-                                  </span>
-                                </div>
-                                <p className="gap-row-desc">{gap.description}</p>
+                            ) : (
+                              <p className="no-gaps-placeholder">🎉 No visual or functional blockers detected on this screen!</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Column 2 (Right 40%): Approvals Scoping & Collaboration */}
+                        <div className="card dashboard-card">
+                          <div className="card-header compact-header">
+                            <h3 className="card-title text-blue">📋 Scoping Decisions & Collaboration</h3>
+                          </div>
+                          <div className="card-body compact-body flex-col-layout">
+                            
+                            <div className="scoping-action-card">
+                              <div className="approval-choices-row">
+                                <button
+                                  className={`btn-choice-pill-compact choice-apply ${currentApproval.decision === 'apply' ? 'selected' : ''}`}
+                                  onClick={() => handleDecisionToggle('apply')}
+                                >
+                                  🟢 APPLY UPGRADES
+                                </button>
+                                <button
+                                  className={`btn-choice-pill-compact choice-skip ${currentApproval.decision === 'skip' ? 'selected' : ''}`}
+                                  onClick={() => handleDecisionToggle('skip')}
+                                >
+                                  🟡 BYPASS SCREEN
+                                </button>
+                              </div>
+
+                              <div className="approvals-explain-box">
+                                <p className="explain-text">
+                                  <strong>How it works:</strong> Check checkboxes to the left, then click <strong>"Save Selections"</strong> or <strong>"Apply Upgrades to Git"</strong>. The automated pipeline run will commit only approved code fixes into your active branch.
+                                </p>
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="no-gaps-placeholder">🎉 No architectural or visual gaps detected on this page!</p>
-                    )}
-                  </div>
-                </div>
 
-              </div>
+                            <div className="form-group compact-group">
+                              <label className="form-label compact-label">PM / Client Refinement Instructions</label>
+                              <textarea
+                                rows={2}
+                                className="input-text compact-textarea"
+                                placeholder="Add refactoring adjustments, hex overrides, or notes..."
+                                value={currentApproval.note ?? ''}
+                                onChange={(e) => setCurrentApproval({ ...currentApproval, note: e.target.value })}
+                              />
+                            </div>
 
-              {/* Consolidated Workspace Toolbar */}
-              <div className="workspace-toolbar">
-                <div className="toolbar-left">
-                  <span className="toolbar-section-label">👀 PREVIEW ENGINE</span>
-                  <div className="segmented-control">
-                    <button
-                      className={`control-btn ${previewMode === 'iframe' ? 'active' : ''}`}
-                      disabled={!activePage.hasHtml}
-                      onClick={() => setPreviewMode('iframe')}
-                      title={activePage.hasHtml ? "View live sandboxed HTML preview" : "HTML snapshot not available"}
-                    >
-                      🖥️ Live HTML {activePage.hasHtml ? '🟢' : '⚪'}
-                    </button>
-                    <button
-                      className={`control-btn ${previewMode === 'screenshot' ? 'active' : ''}`}
-                      onClick={() => setPreviewMode('screenshot')}
-                      title="View static image screenshot"
-                    >
-                      🖼️ Screenshot 🟢
-                    </button>
-                  </div>
-                </div>
+                            <div className="comments-timeline compact-timeline-overhauled">
+                              {currentApproval.comments && currentApproval.comments.length > 0 ? (
+                                currentApproval.comments.map((c, i) => (
+                                  <div key={i} className="comment-bubble compact-bubble">
+                                    <div className="comment-bubble-author">Collaborator</div>
+                                    <div className="comment-bubble-text">{c}</div>
+                                  </div>
+                                ))
+                              ) : null}
+                            </div>
 
-                <div className="toolbar-center">
-                  <span className="toolbar-section-label">📐 VIEWPORT SIZE</span>
-                  <div className="segmented-control">
-                    <button
-                      className={`control-btn ${zoomMode === 'fit' ? 'active' : ''}`}
-                      onClick={() => setZoomMode('fit')}
-                    >
-                      📺 Fit viewport
-                    </button>
-                    <button
-                      className={`control-btn ${zoomMode === 'native' ? 'active' : ''}`}
-                      onClick={() => setZoomMode('native')}
-                    >
-                      🔍 100% Native
-                    </button>
-                  </div>
-                </div>
-
-                <div className="toolbar-right">
-                  <span className="toolbar-section-label">📂 WORKSPACE LAYOUT</span>
-                  <div className="segmented-control">
-                    <button
-                      className={`control-btn ${viewLayout === 'split' ? 'active' : ''}`}
-                      onClick={() => setViewLayout('split')}
-                    >
-                      📂 Split view
-                    </button>
-                    <button
-                      className={`control-btn ${viewLayout === 'full' ? 'active' : ''}`}
-                      onClick={() => setViewLayout('full')}
-                    >
-                      🖥️ Full-width
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Sandboxed, scrollable and premium preview pane */}
-              <div className={`workspace-preview-area ${viewLayout === 'split' ? 'split-layout' : 'full-layout'}`}>
-                
-                {/* Visual Preview Device Container */}
-                <div className="preview-card">
-                  <div className="browser-chrome-header">
-                    <div className="browser-dots">
-                      <span className="b-dot dot-red"></span>
-                      <span className="b-dot dot-yellow"></span>
-                      <span className="b-dot dot-green"></span>
-                    </div>
-                    <div className="browser-address-bar">
-                      <span className="lock-icon">🔒</span>
-                      <span className="address-text">{`http://localhost/${activePage.route || activePage.slug}`}</span>
-                    </div>
-                    <div className="browser-engine-badge">
-                      {previewMode === 'iframe' ? 'Sandboxed HTML5' : 'Static PNG'}
-                    </div>
-                  </div>
-
-                  <div className={`preview-viewport-scroll ${zoomMode === 'native' ? 'native-scroll' : 'fit-scroll'}`}>
-                    {previewMode === 'iframe' && activePage.hasHtml ? (
-                      <iframe
-                        src={`/api/html/${activePage.slug}`}
-                        sandbox="allow-scripts"
-                        title={`Static preview of ${activePage.slug}`}
-                        className="preview-iframe-snapshot"
-                        style={zoomMode === 'native' ? { height: '1500px' } : { height: '800px' }}
-                      />
-                    ) : activePage.hasScreenshot ? (
-                      <img
-                        className="screenshot-img-refactored"
-                        src={`/api/screenshot/${activePage.slug}`}
-                        alt={`Rendered screenshot of ${activePage.slug}`}
-                      />
-                    ) : (
-                      <div className="no-screenshot">
-                        <span style={{ fontSize: '2.5rem' }}>🖼️</span>
-                        <p>No preview asset available for this page.</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Split view spec panel if viewLayout === 'split' */}
-                {viewLayout === 'split' && (
-                  <div className="split-specs-container">
-                    
-                    {/* ASCII wireframe or specs if available */}
-                    {activePage.ux && (
-                      <div className="card compact-spec-card">
-                        <div className="card-header spec-header">
-                          <h3 className="card-title text-indigo">📐 UX Wireframe Spec</h3>
+                            <form onSubmit={handleAddComment} className="comments-input-row compact-row">
+                              <input
+                                type="text"
+                                className="input-text compact-input"
+                                placeholder="Type comment..."
+                                value={newComment}
+                                onChange={(e) => setNewComment(e.target.value)}
+                              />
+                              <button type="submit" className="input-btn compact-btn">Send</button>
+                            </form>
+                          </div>
                         </div>
-                        <div className="card-body spec-body font-mono">
-                          <pre className="ascii-wireframe">{activePage.ux.asciiWireframe}</pre>
-                        </div>
-                      </div>
-                    )}
 
-                    {activePage.design && (
-                      <div className="card compact-spec-card">
-                        <div className="card-header spec-header">
-                          <h3 className="card-title text-blue">🎨 Design Spec</h3>
+                      </div>
+
+                      {/* Simplified Workspace Preview Pane */}
+                      <div className="workspace-preview-area full-layout">
+                        
+                        {/* Visual Preview Device Container */}
+                        <div className="preview-card">
+                          <div className="browser-chrome-header">
+                            <div className="browser-dots">
+                              <span className="b-dot dot-red"></span>
+                              <span className="b-dot dot-yellow"></span>
+                              <span className="b-dot dot-green"></span>
+                            </div>
+                            <div className="browser-address-bar">
+                              <span className="lock-icon">🔒</span>
+                              <span className="address-text">{`http://localhost/${activePage.route || activePage.slug}`}</span>
+                            </div>
+
+                            {/* Single simple preview engine toggle */}
+                            <div className="segmented-control-compact">
+                              <button
+                                className={`control-btn-compact ${previewMode === 'iframe' ? 'active' : ''}`}
+                                disabled={!activePage.hasHtml}
+                                onClick={() => setPreviewMode('iframe')}
+                              >
+                                🖥️ Live View
+                              </button>
+                              <button
+                                className={`control-btn-compact ${previewMode === 'screenshot' ? 'active' : ''}`}
+                                onClick={() => setPreviewMode('screenshot')}
+                              >
+                                🖼️ Screenshot
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="preview-viewport-scroll fit-scroll">
+                            {previewMode === 'iframe' && activePage.hasHtml ? (
+                              <iframe
+                                src={`/api/html/${activePage.slug}`}
+                                sandbox="allow-scripts"
+                                title={`Static preview of ${activePage.slug}`}
+                                className="preview-iframe-snapshot"
+                                style={{ height: '800px' }}
+                              />
+                            ) : activePage.hasScreenshot ? (
+                              <img
+                                className="screenshot-img-refactored"
+                                src={`/api/screenshot/${activePage.slug}`}
+                                alt={`Rendered screenshot of ${activePage.slug}`}
+                                onError={(e) => {
+                                  // gracefull fallback for missing image (e.g. mock slug mismatch)
+                                  e.currentTarget.style.display = 'none';
+                                  const parent = e.currentTarget.parentElement;
+                                  if (parent) {
+                                    const placeholder = document.createElement('div');
+                                    placeholder.className = 'screenshot-placeholder-mock';
+                                    placeholder.innerHTML = '🖼️ Mock Preview Asset Loaded';
+                                    parent.appendChild(placeholder);
+                                  }
+                                }}
+                              />
+                            ) : (
+                              <div className="no-screenshot">
+                                <span style={{ fontSize: '2.5rem' }}>🖼️</span>
+                                <p>No preview asset available for this page.</p>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <div className="card-body spec-body">
-                          <pre className="pre-spec">{activePage.design.spec}</pre>
-                          <div style={{ marginTop: '1rem' }}>
-                            <strong style={{ fontSize: '0.8rem', color: '#64748b' }}>Brand Tokens:</strong>
-                            <div className="badge-row" style={{ marginTop: '0.25rem' }}>
-                              {activePage.design.brandTokensUsed.map((t, idx) => (
-                                <span key={idx} className="badge badge-apply">{t}</span>
-                              ))}
+
+                      </div>
+
+                      {/* UX & Design specs displayed cleanly under the preview card */}
+                      <div className="specs-accordions-row">
+                        {activePage.ux && (
+                          <div className="card spec-card-flat">
+                            <div className="card-header spec-header">
+                              <h3 className="card-title text-indigo">📐 UX Wireframe Blueprint</h3>
+                            </div>
+                            <div className="card-body spec-body font-mono">
+                              <pre className="ascii-wireframe">{activePage.ux.asciiWireframe}</pre>
+                            </div>
+                          </div>
+                        )}
+
+                        {activePage.design && (
+                          <div className="card spec-card-flat">
+                            <div className="card-header spec-header">
+                              <h3 className="card-title text-blue">🎨 Brand Tokens Inventory</h3>
+                            </div>
+                            <div className="card-body spec-body">
+                              <pre className="pre-spec">{activePage.design.spec}</pre>
+                              <div style={{ marginTop: '1rem' }}>
+                                <strong style={{ fontSize: '0.8rem', color: '#64748b' }}>Design Tokens:</strong>
+                                <div className="badge-row" style={{ marginTop: '0.25rem' }}>
+                                  {activePage.design.brandTokensUsed.map((t, idx) => (
+                                    <span key={idx} className="badge badge-apply">{t}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Proposed Code Refactoring Changes */}
+                      {activePage.codeDiff && (
+                        <div className="card border-slate">
+                          <div className="card-header">
+                            <h3 className="card-title">📝 Proposed Refactoring Changes</h3>
+                          </div>
+                          <div className="card-body" style={{ padding: 0 }}>
+                            <div className="diff-panel">
+                              <div className="diff-header">
+                                <span className="diff-title">Git Code Refactor Verification Proposal (code.diff)</span>
+                              </div>
+                              <div className="diff-body">
+                                <pre className="diff-pre">
+                                  {activePage.codeDiff.split('\n').map((line, i) => {
+                                    let className = 'diff-line';
+                                    if (line.startsWith('+')) className += ' diff-line-add';
+                                    else if (line.startsWith('-')) className += ' diff-line-del';
+                                    else if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) className += ' diff-line-info';
+
+                                    return (
+                                      <span key={i} className={className}>
+                                        {line}
+                                      </span>
+                                    );
+                                  })}
+                                </pre>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Code Diffs Proposed changes */}
-              {activePage.codeDiff && (
-                <div className="card border-slate">
-                  <div className="card-header">
-                    <h3 className="card-title">📝 Proposed Refactoring Changes</h3>
-                  </div>
-                  <div className="card-body" style={{ padding: 0 }}>
-                    <div className="diff-panel">
-                      <div className="diff-header">
-                        <span className="diff-title">Git Code Refactor Verification Proposal (code.diff)</span>
-                      </div>
-                      <div className="diff-body">
-                        <pre className="diff-pre">
-                          {activePage.codeDiff.split('\n').map((line, i) => {
-                            let className = 'diff-line';
-                            if (line.startsWith('+')) className += ' diff-line-add';
-                            else if (line.startsWith('-')) className += ' diff-line-del';
-                            else if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++')) className += ' diff-line-info';
-
-                            return (
-                              <span key={i} className={className}>
-                                {line}
-                              </span>
-                            );
-                          })}
-                        </pre>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </>
+                      )}
+                    </>
+                  )}
+                </>
+              );
+            })()
           ) : (
             <div className="no-selection glass-card">
               <span style={{ fontSize: '3rem' }}>🎯</span>

@@ -8,4 +8,9 @@ export default defineConfig({
     outDir: '../dist/review-app',
     emptyOutDir: true,
   },
+  server: {
+    proxy: {
+      '/api': 'http://localhost:3000',
+    },
+  },
 });

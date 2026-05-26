@@ -255,6 +255,80 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
       return;
     }
 
+    // 5. POST /api/apply — Apply approved code refactor via resume command
+    if (pathname === '/api/apply' && req.method === 'POST') {
+      try {
+        const manifestPath = path.join(absRunDir, 'manifest.json');
+        if (!fs.existsSync(manifestPath)) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'manifest.json not found in run directory' }));
+          return;
+        }
+
+        const manifestRaw = fs.readFileSync(manifestPath, 'utf8');
+        const manifest = JSON.parse(manifestRaw);
+
+        const target = manifest.target;
+        if (!target) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Target path not found in manifest' }));
+          return;
+        }
+
+        // Spawn rebuild in background
+        const { spawn } = await import('node:child_process');
+        
+        // Find CLI path
+        const cliPath = path.resolve(path.join(__dirname, 'cli.js'));
+        const logFilePath = path.join(absRunDir, 'logs', 'apply-rebuild.log');
+        
+        // Ensure logs directory exists
+        const logsDir = path.dirname(logFilePath);
+        if (!fs.existsSync(logsDir)) {
+          fs.mkdirSync(logsDir, { recursive: true });
+        }
+        
+        const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
+
+        logStream.write(`\n--- Applying Rebuild at ${new Date().toISOString()} ---\n`);
+        logStream.write(`Command: node "${cliPath}" rebuild "${target}" --resume "${absRunDir}" --apply-mode pr\n\n`);
+
+        const cp = spawn('node', [
+          cliPath,
+          'rebuild',
+          target,
+          '--resume',
+          absRunDir,
+          '--apply-mode',
+          'pr'
+        ], {
+          cwd: process.cwd(),
+          env: process.env,
+          stdio: ['ignore', 'pipe', 'pipe']
+        });
+
+        cp.stdout?.pipe(logStream);
+        cp.stderr?.pipe(logStream);
+
+        cp.on('error', (err) => {
+          logStream.write(`Process spawn error: ${err.message}\n`);
+        });
+
+        cp.unref();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+          success: true, 
+          message: 'Rebuild apply process triggered in background.',
+          logFile: logFilePath
+        }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      }
+      return;
+    }
+
     // ────────────────────────── STATIC ASSET ROUTER ──────────────────────────
 
     // Resolve file path to static web app

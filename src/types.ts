@@ -266,7 +266,8 @@ export type PageHealthStatus =
   | 'auth-redirect'       // bounced to a login/auth page — not what was asked
   | 'error-overlay'       // a Next.js/Vite/React framework error overlay shows
   | 'http-error'          // the document responded 4xx/5xx
-  | 'navigation-failed';  // the browser could not navigate to the route
+  | 'navigation-failed'  // the browser could not navigate to the route
+  | 'boot-failed';        // the app server failed to boot
 
 export interface PageHealth {
   status: PageHealthStatus;

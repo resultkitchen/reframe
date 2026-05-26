@@ -200,6 +200,14 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
   if (ctx.boot.status !== 'running') {
     const result: AuditResult = {
       page: pageId,
+      health: {
+        status: 'boot-failed',
+        healthy: false,
+        finalUrl: '',
+        detail: `dev server boot status is "${ctx.boot.status}".${
+          ctx.boot.reason ? ` Reason: ${ctx.boot.reason}` : ''
+        }`,
+      },
       consoleErrors: [],
       interactionsExercised: [],
       gaps: [
