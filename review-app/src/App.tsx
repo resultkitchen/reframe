@@ -83,6 +83,9 @@ export default function App() {
   // Zoom mode for visual preview: 'fit' or 'native'
   const [zoomMode, setZoomMode] = useState<'fit' | 'native'>('fit');
 
+  // View layout format: 'split' (side-by-side) or 'full' (stacked full-width visual)
+  const [viewLayout, setViewLayout] = useState<'split' | 'full'>('split');
+
   // Load run details on boot
   useEffect(() => {
     fetchRunData();
@@ -333,11 +336,79 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Side-by-Side visual workspace */}
-              <div className="workspace-grid">
+              {/* Executive Summary Card */}
+              <div className="card" style={{ background: 'linear-gradient(135deg, #f8fafc 0%, #ffffff 100%)', border: '1px solid #bfdbfe', boxShadow: '0 4px 20px rgba(59, 130, 246, 0.04)' }}>
+                <div className="card-body" style={{ padding: '1.25rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <h3 style={{ fontSize: '0.85rem', textTransform: 'uppercase', color: '#1e40af', fontWeight: 800, letterSpacing: '0.05em' }}>
+                      📋 Executive Summary & Scoping
+                    </h3>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 600 }}>Workspace layout:</span>
+                      <button
+                        className="btn-secondary"
+                        style={{
+                          padding: '0.25rem 0.65rem',
+                          fontSize: '0.75rem',
+                          borderRadius: '6px',
+                          background: viewLayout === 'split' ? '#3b82f6' : '#ffffff',
+                          color: viewLayout === 'split' ? '#ffffff' : '#475569',
+                          borderColor: viewLayout === 'split' ? '#2563eb' : '#cbd5e1',
+                          fontWeight: 600,
+                        }}
+                        onClick={() => setViewLayout('split')}
+                      >
+                        📂 Split spec
+                      </button>
+                      <button
+                        className="btn-secondary"
+                        style={{
+                          padding: '0.25rem 0.65rem',
+                          fontSize: '0.75rem',
+                          borderRadius: '6px',
+                          background: viewLayout === 'full' ? '#3b82f6' : '#ffffff',
+                          color: viewLayout === 'full' ? '#ffffff' : '#475569',
+                          borderColor: viewLayout === 'full' ? '#2563eb' : '#cbd5e1',
+                          fontWeight: 600,
+                        }}
+                        onClick={() => setViewLayout('full')}
+                      >
+                        🖥️ Full-width visual
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: '0.9rem', color: '#334155', lineHeight: '1.5' }}>
+                    <p style={{ marginBottom: '0.5rem' }}>
+                      <strong>Role Scoping:</strong> {
+                        activePage.route.startsWith('/admin')
+                          ? 'This is a restricted Admin control interface, driven and audited under active Admin system credentials.'
+                          : activePage.route.startsWith('/media-buyer')
+                            ? 'This is the Media Buyer portal dashboard, managed by advertisement managers.'
+                            : activePage.route.startsWith('/dashboard')
+                              ? 'This is the primary Attorney tracking interface for leads, conversions, and order lists.'
+                              : 'This is a public guest/onboarding screen or public-facing marketing funnel.'
+                      }
+                    </p>
+                    <p style={{ margin: 0, color: '#64748b', fontSize: '0.85rem' }}>
+                      <strong>Audit summary:</strong> Loaded successfully with page health status <strong>{activePage.audit?.health?.status ?? 'ok'}</strong>. Detected <strong>{activePage.audit?.gaps?.length ?? 0} visual/architectural upgrades</strong> to process. Toggle checkboxes below to approve specific code fixes.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Side-by-Side or Full-width visual workspace */}
+              <div 
+                className="workspace-grid"
+                style={
+                  viewLayout === 'full' 
+                    ? { display: 'flex', flexDirection: 'column', gap: '2rem' } 
+                    : {}
+                }
+              >
                 
                 {/* LEFT COLUMN: Visual mockup preview */}
-                <div className="card">
+                <div className="card" style={viewLayout === 'full' ? { width: '100%' } : {}}>
                   <div className="card-header">
                     <h3 className="card-title">📱 Headless Browser Screen Capture</h3>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -379,7 +450,9 @@ export default function App() {
                       style={
                         zoomMode === 'native'
                           ? { overflow: 'auto', maxHeight: '700px', minHeight: '400px', display: 'block', padding: '1rem', background: '#f1f5f9' }
-                          : {}
+                          : viewLayout === 'full'
+                            ? { display: 'flex', justifyContent: 'center', background: '#f1f5f9', minHeight: '600px' }
+                            : {}
                       }
                     >
                       {activePage.hasScreenshot ? (
@@ -388,7 +461,9 @@ export default function App() {
                           style={
                             zoomMode === 'native'
                               ? { width: 'auto', maxWidth: 'none', height: 'auto', display: 'block', margin: '0 auto', borderRadius: '8px', boxShadow: '0 10px 30px rgba(15,23,42,0.15)' }
-                              : {}
+                              : viewLayout === 'full'
+                                ? { width: '100%', maxWidth: '1100px', height: 'auto', display: 'block', margin: '0 auto', borderRadius: '8px', boxShadow: '0 10px 30px rgba(15,23,42,0.1)' }
+                                : {}
                           }
                           src={`/api/screenshot/${activePage.slug}`}
                           alt={`Rendered screenshot of ${activePage.slug}`}
@@ -487,7 +562,7 @@ export default function App() {
               {activePage.audit && activePage.audit.gaps.length > 0 && (
                 <div className="card">
                   <div className="card-header">
-                    <h3 className="card-title">✅ Selective Gaps Checklist</h3>
+                    <h3 className="card-title">🛠️ Selective Code Upgrades (Check to apply fix in next PR)</h3>
                   </div>
                   <div className="card-body">
                     <div className="gaps-list">
@@ -495,7 +570,7 @@ export default function App() {
                         const isSkipped = currentApproval.gaps?.[gap.id] === 'skip';
 
                         return (
-                          <div key={gap.id} className="gap-item smooth-all">
+                          <div key={gap.id} className="gap-item smooth-all" style={{ borderLeft: `4px solid ${!isSkipped ? '#22c55e' : '#f59e0b'}`, background: !isSkipped ? '#ffffff' : '#fafafa' }}>
                             <input
                               type="checkbox"
                               className="gap-checkbox"
@@ -503,13 +578,24 @@ export default function App() {
                               onChange={() => handleGapToggle(gap.id)}
                             />
                             <div className="gap-info">
-                              <div className="gap-header-row">
+                              <div className="gap-header-row" style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                                 <span className={`gap-tag gap-tag-${gap.severity}`}>{gap.severity}</span>
                                 <span style={{ fontSize: '0.8rem', color: '#64748b', fontWeight: 600 }}>{gap.category}</span>
+                                <span style={{ 
+                                  fontSize: '0.7rem', 
+                                  padding: '0.1rem 0.4rem', 
+                                  borderRadius: '4px',
+                                  background: !isSkipped ? '#dcfce7' : '#fffbeb',
+                                  color: !isSkipped ? '#15803d' : '#d97706',
+                                  border: `1px solid ${!isSkipped ? '#bbf7d0' : '#fef3c7'}`,
+                                  fontWeight: 700
+                                }}>
+                                  {!isSkipped ? '🟢 WILL APPLY FIX' : '🟡 WILL SKIP FIX'}
+                                </span>
                               </div>
-                              <p className="gap-desc">{gap.description}</p>
+                              <p className="gap-desc" style={{ textDecoration: isSkipped ? 'line-through' : 'none', color: isSkipped ? '#94a3b8' : '#1e293b' }}>{gap.description}</p>
                               {gap.recommendation && (
-                                <p className="gap-rec"><strong>Recommendation:</strong> {gap.recommendation}</p>
+                                <p className="gap-rec" style={{ opacity: isSkipped ? 0.6 : 1 }}><strong>Recommendation:</strong> {gap.recommendation}</p>
                               )}
                             </div>
                           </div>
