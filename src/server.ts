@@ -152,9 +152,27 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
           }
         }
 
+        let isGitRepo = false;
+        try {
+          const manifestPath = path.join(absRunDir, 'manifest.json');
+          if (fs.existsSync(manifestPath)) {
+            const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+            const targetPath = manifest.target;
+            if (targetPath) {
+              const resolvedTarget = path.resolve(targetPath);
+              isGitRepo = fs.existsSync(path.join(resolvedTarget, '.git'));
+            }
+          } else {
+            isGitRepo = fs.existsSync(path.join(absRunDir, '..', '.git')) || fs.existsSync(path.join(process.cwd(), '.git'));
+          }
+        } catch {
+          isGitRepo = fs.existsSync(path.join(process.cwd(), '.git'));
+        }
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           runDir: absRunDir,
+          isGitRepo,
           state,
           approvals,
           pages,
@@ -251,6 +269,29 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
       } else {
         res.writeHead(404);
         res.end('HTML snapshot not found');
+      }
+      return;
+    }
+
+    // 4.5. GET /api/patch/:slug — Download standard git patch file
+    if (pathname.startsWith('/api/patch/') && req.method === 'GET') {
+      const slug = pathname.substring('/api/patch/'.length);
+      if (slug.includes('..') || slug.includes('/') || slug.includes('\\')) {
+        res.writeHead(400);
+        res.end('Malformed page slug parameter');
+        return;
+      }
+
+      const diffPath = path.join(absRunDir, 'pages', slug, 'code.diff');
+      if (fs.existsSync(diffPath)) {
+        res.writeHead(200, {
+          'Content-Type': 'text/plain',
+          'Content-Disposition': `attachment; filename="${slug}-refactor.patch"`
+        });
+        fs.createReadStream(diffPath).pipe(res);
+      } else {
+        res.writeHead(404);
+        res.end('Diff patch not found');
       }
       return;
     }

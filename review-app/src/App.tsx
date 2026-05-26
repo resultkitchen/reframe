@@ -58,6 +58,7 @@ interface PageApproval {
 
 interface RunData {
   runDir: string;
+  isGitRepo?: boolean;
   state: {
     projectSlug: string;
     startedAt: string;
@@ -77,6 +78,8 @@ export default function App() {
 
   // New comment input per page
   const [newComment, setNewComment] = useState<string>('');
+
+  const [activeRightTab, setActiveRightTab] = useState<'decisions' | 'guide' | 'downloads'>('decisions');
 
   // Local state changes before saving to disk
   const [currentApproval, setCurrentApproval] = useState<PageApproval | null>(null);
@@ -479,7 +482,12 @@ export default function App() {
                       </p>
                     </div>
 
-                    <div className="header-actions" style={{ display: 'flex', gap: '0.75rem' }}>
+                    <div className="header-actions" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                      {data && !data.isGitRepo && (
+                        <span className="badge badge-fail" style={{ fontSize: '0.75rem', textTransform: 'none', padding: '0.35rem 0.65rem' }}>
+                          ⚠️ Non-Git Workspace
+                        </span>
+                      )}
                       <button 
                         onClick={handleSaveApproval} 
                         className="btn-secondary"
@@ -490,7 +498,8 @@ export default function App() {
                       <button 
                         onClick={handleApplyRefactor} 
                         className="btn-primary glow-btn"
-                        disabled={applying || saving}
+                        disabled={applying || saving || (data && !data.isGitRepo)}
+                        title={data && !data.isGitRepo ? "Git repository not detected. Please use the Downloads tab to apply modifications manually." : "Auto-commit approved upgrades to your Git workspace."}
                       >
                         {applying ? 'Applying...' : '⚡ Apply Upgrades to Git'}
                       </button>
@@ -629,68 +638,172 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Column 2 (Right 40%): Approvals Scoping & Collaboration */}
+                        {/* Column 2 (Right 40%): Approvals Scoping & Interactive Guides */}
                         <div className="card dashboard-card">
-                          <div className="card-header compact-header">
-                            <h3 className="card-title text-blue">📋 Scoping Decisions & Collaboration</h3>
+                          <div className="card-header compact-header" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'stretch' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <h3 className="card-title text-blue">⚡ Workspace & scoping</h3>
+                            </div>
+                            
+                            {/* Segmented Tab Strip */}
+                            <div className="segmented-control" style={{ width: '100%' }}>
+                              <button 
+                                className={`control-btn ${activeRightTab === 'decisions' ? 'active' : ''}`}
+                                onClick={() => setActiveRightTab('decisions')}
+                                style={{ flex: 1, textAlign: 'center' }}
+                              >
+                                📋 Decisions
+                              </button>
+                              <button 
+                                className={`control-btn ${activeRightTab === 'guide' ? 'active' : ''}`}
+                                onClick={() => setActiveRightTab('guide')}
+                                style={{ flex: 1, textAlign: 'center' }}
+                              >
+                                🧭 Guide
+                              </button>
+                              <button 
+                                className={`control-btn ${activeRightTab === 'downloads' ? 'active' : ''}`}
+                                onClick={() => setActiveRightTab('downloads')}
+                                style={{ flex: 1, textAlign: 'center' }}
+                              >
+                                📥 Downloads
+                              </button>
+                            </div>
                           </div>
                           <div className="card-body compact-body flex-col-layout">
-                            
-                            <div className="scoping-action-card">
-                              <div className="approval-choices-row">
-                                <button
-                                  className={`btn-choice-pill-compact choice-apply ${currentApproval.decision === 'apply' ? 'selected' : ''}`}
-                                  onClick={() => handleDecisionToggle('apply')}
-                                >
-                                  🟢 APPLY UPGRADES
-                                </button>
-                                <button
-                                  className={`btn-choice-pill-compact choice-skip ${currentApproval.decision === 'skip' ? 'selected' : ''}`}
-                                  onClick={() => handleDecisionToggle('skip')}
-                                >
-                                  🟡 BYPASS SCREEN
-                                </button>
-                              </div>
-
-                              <div className="approvals-explain-box">
-                                <p className="explain-text">
-                                  <strong>How it works:</strong> Check checkboxes to the left, then click <strong>"Save Selections"</strong> or <strong>"Apply Upgrades to Git"</strong>. The automated pipeline run will commit only approved code fixes into your active branch.
-                                </p>
-                              </div>
-                            </div>
-
-                            <div className="form-group compact-group">
-                              <label className="form-label compact-label">PM / Client Refinement Instructions</label>
-                              <textarea
-                                rows={2}
-                                className="input-text compact-textarea"
-                                placeholder="Add refactoring adjustments, hex overrides, or notes..."
-                                value={currentApproval.note ?? ''}
-                                onChange={(e) => setCurrentApproval({ ...currentApproval, note: e.target.value })}
-                              />
-                            </div>
-
-                            <div className="comments-timeline compact-timeline-overhauled">
-                              {currentApproval.comments && currentApproval.comments.length > 0 ? (
-                                currentApproval.comments.map((c, i) => (
-                                  <div key={i} className="comment-bubble compact-bubble">
-                                    <div className="comment-bubble-author">Collaborator</div>
-                                    <div className="comment-bubble-text">{c}</div>
+                            {activeRightTab === 'decisions' && (
+                              /* ────────────────────────── DECISIONS TAB ────────────────────────── */
+                              <>
+                                <div className="scoping-action-card">
+                                  <div className="approval-choices-row">
+                                    <button
+                                      className={`btn-choice-pill-compact choice-apply ${currentApproval.decision === 'apply' ? 'selected' : ''}`}
+                                      onClick={() => handleDecisionToggle('apply')}
+                                    >
+                                      🟢 APPLY UPGRADES
+                                    </button>
+                                    <button
+                                      className={`btn-choice-pill-compact choice-skip ${currentApproval.decision === 'skip' ? 'selected' : ''}`}
+                                      onClick={() => handleDecisionToggle('skip')}
+                                    >
+                                      🟡 BYPASS SCREEN
+                                    </button>
                                   </div>
-                                ))
-                              ) : null}
-                            </div>
 
-                            <form onSubmit={handleAddComment} className="comments-input-row compact-row">
-                              <input
-                                type="text"
-                                className="input-text compact-input"
-                                placeholder="Type comment..."
-                                value={newComment}
-                                onChange={(e) => setNewComment(e.target.value)}
-                              />
-                              <button type="submit" className="input-btn compact-btn">Send</button>
-                            </form>
+                                  <div className="approvals-explain-box">
+                                    <p className="explain-text">
+                                      <strong>Scoping Decisions:</strong> Choose whether to refactor this screen. Use the checkbox list on the left to prioritize specific fixes.
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="form-group compact-group">
+                                  <label className="form-label compact-label">PM / Client Refinement Instructions</label>
+                                  <textarea
+                                    rows={2}
+                                    className="input-text compact-textarea"
+                                    placeholder="Add refactoring adjustments, hex overrides, or notes..."
+                                    value={currentApproval.note ?? ''}
+                                    onChange={(e) => setCurrentApproval({ ...currentApproval, note: e.target.value })}
+                                  />
+                                </div>
+
+                                <div className="comments-timeline compact-timeline-overhauled">
+                                  {currentApproval.comments && currentApproval.comments.length > 0 ? (
+                                    currentApproval.comments.map((c, i) => (
+                                      <div key={i} className="comment-bubble compact-bubble">
+                                        <div className="comment-bubble-author">Collaborator</div>
+                                        <div className="comment-bubble-text">{c}</div>
+                                      </div>
+                                    ))
+                                  ) : (
+                                    <p className="no-comments-placeholder">No collaborator threads started.</p>
+                                  )}
+                                </div>
+
+                                <form onSubmit={handleAddComment} className="comments-input-row compact-row">
+                                  <input
+                                    type="text"
+                                    className="input-text compact-input"
+                                    placeholder="Type comment..."
+                                    value={newComment}
+                                    onChange={(e) => setNewComment(e.target.value)}
+                                  />
+                                  <button type="submit" className="input-btn compact-btn">Send</button>
+                                </form>
+                              </>
+                            )}
+
+                            {activeRightTab === 'guide' && (
+                              /* ────────────────────────── INTEGRATION GUIDE TAB ────────────────────────── */
+                              <div className="integration-guide-tab scroll-vertical-240" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                <div className="guide-step-card">
+                                  <span className="step-num">Step 1</span>
+                                  <p className="step-text"><strong>Scoping check:</strong> Select your visual/functional upgrades on the left and set decisions to 'APPLY' or 'BYPASS'.</p>
+                                </div>
+                                
+                                <div className="guide-step-card">
+                                  <span className="step-num">Step 2</span>
+                                  <p className="step-text"><strong>Save Selections:</strong> Click <code>💾 Save Selections</code>. This writes your precise instructions to `approvals.json` in the run directory.</p>
+                                </div>
+
+                                <div className="guide-step-card">
+                                  <span className="step-num">Step 3</span>
+                                  <p className="step-text"><strong>Apply Refactoring:</strong> If this is a Git project, click <code>⚡ Apply Upgrades to Git</code> to automatically commit changes. If not, use the <strong>Downloads</strong> tab to copy code changes manually.</p>
+                                </div>
+
+                                <div className="guide-integrations-box">
+                                  <h4>📂 Durable Ledger File:</h4>
+                                  <p className="guide-meta-desc">Your selections are stored in a standard JSON format that is instantly referenceable by other local agents (Claude Code, Antigravity, Codex):</p>
+                                  <code className="guide-path-code" title="Click to copy" onClick={(e) => {
+                                    navigator.clipboard.writeText(`${data.runDir}\\approvals.json`);
+                                    alert('Ledger path copied to clipboard!');
+                                  }}>
+                                    {`${data.runDir.substring(0, 45)}...\\approvals.json`}
+                                  </code>
+                                </div>
+
+                                <div className="guide-cli-command-box">
+                                  <h4>💻 Resume via Terminal command:</h4>
+                                  <code className="guide-command-code" title="Click to copy" onClick={(e) => {
+                                    navigator.clipboard.writeText(`reframe rebuild ./local/project --resume "${data.runDir}" --apply-mode pr`);
+                                    alert('CLI Command copied to clipboard!');
+                                  }}>
+                                    {`reframe rebuild --resume "${data.state.projectSlug}" --apply-mode pr`}
+                                  </code>
+                                </div>
+                              </div>
+                            )}
+
+                            {activeRightTab === 'downloads' && (
+                              /* ────────────────────────── ZERO-TERMINAL DOWNLOADS TAB ────────────────────────── */
+                              <div className="downloads-tab flex-col-layout" style={{ gap: '1rem', justifyContent: 'center', padding: '1rem 0' }}>
+                                <div className="download-info-banner">
+                                  <span className="download-banner-icon">📥</span>
+                                  <p className="download-banner-text"><strong>Zero-Terminal Mode:</strong> Download standard Git patches of the refactored page modifications directly, completely bypassing CLI usage.</p>
+                                </div>
+
+                                <div className="download-actions-grid" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                  <a 
+                                    href={`/api/patch/${activePage.slug}`}
+                                    download={`${activePage.slug}-refactor.patch`}
+                                    className="btn-primary glow-btn download-btn-premium"
+                                    style={{ textDecoration: 'none', justifyContent: 'center' }}
+                                  >
+                                    📥 Download Git Patch (.patch)
+                                  </a>
+                                  
+                                  <div className="patch-instructions-card">
+                                    <h5>💡 How to apply standard patch:</h5>
+                                    <ol style={{ paddingLeft: '1.1rem', fontSize: '0.8rem', color: '#64748b', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                      <li>Open your project directory in terminal or IDE (VS Code).</li>
+                                      <li>Run: <code>git apply path/to/${activePage.slug}-refactor.patch</code>.</li>
+                                      <li>Your local source files are immediately refactored!</li>
+                                    </ol>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         </div>
 
