@@ -268,7 +268,7 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
   });
 
   return new Promise((resolve) => {
-    server.listen(port, () => {
+    server.listen(port, '0.0.0.0', () => {
       console.log(`[reframe] review dashboard live at http://localhost:${port}`);
       resolve(server);
     });
