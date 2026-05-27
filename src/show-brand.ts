@@ -34,7 +34,7 @@ function loadBrandFromRunDir(runDir: string): { brand: BrandSpec | null; source:
 }
 
 /** Render a colored-ish terminal pretty-print of the brand. */
-function renderBrand(brand: BrandSpec, source: string, runDir: string): string {
+export function renderBrand(brand: BrandSpec, source: string, runDir: string): string {
   const lines: string[] = [];
   const rule = '─────────────────────────────────────────────────────────────────';
 

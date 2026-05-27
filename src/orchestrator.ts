@@ -336,19 +336,19 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       } catch (err) {
         extraAlerts.push(`Could not write brand.candidate.json: ${errMsg(err)}`);
       }
+
+      // Pretty-print the brand candidate inline so the operator sees what
+      // they're about to pin without having to run a follow-up command.
+      // The `reframe show-brand` subcommand renders the same block out of
+      // a completed run dir, so the experience is consistent.
       console.log('');
-      console.log('─────────────────────────────────────────────────────────────────');
       console.log(`[reframe] BOOTSTRAP COMPLETE — ${scope.pages.length} pages mapped.`);
-      console.log('');
-      console.log(`  Brand candidate written to:`);
-      console.log(`    ${brandCandidatePath}`);
-      console.log('');
-      console.log(`  Review the candidate, edit if needed, then PIN it:`);
-      console.log(`    1. Copy it into your repo:  cp ${brandCandidatePath} config/brand.json`);
-      console.log(`    2. Open config/brand.json and set  "pinned": true`);
-      console.log(`    3. Re-run the audit:  reframe rebuild ${config.target} --brand config/brand.json`);
-      console.log('─────────────────────────────────────────────────────────────────');
-      console.log('');
+      try {
+        const { renderBrand } = await import('./show-brand');
+        console.log(renderBrand(brand, 'brand.candidate.json', config.runDir));
+      } catch (err) {
+        console.error(`[reframe] could not render brand summary: ${errMsg(err)}`);
+      }
 
       // Interactive pin: if stdin is a TTY (a human is at the keyboard, not
       // CI), offer to write config/brand.json directly so the operator can

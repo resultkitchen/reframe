@@ -17,9 +17,11 @@ Theme: **the dual-register sprint**. Every finding the pipeline emits now ships 
 
 ### Added — CLI
 
-- **`reframe bootstrap <target>`** subcommand + `--bootstrap-only` flag. Runs Stage 0 + brand resolution and exits without booting the dev server or running agents. Writes `<runDir>/brand.candidate.json`. Interactive TTY prompt offers to write `config/brand.json` on success — silent in non-TTY contexts.
-- **`reframe show-brand <runDir>`** subcommand. Pretty-prints the bootstrapped (or resolved) brand spec with pin status and 3-step pin instructions. Closes the bootstrap UX loop without spinning up the SPA.
-- **`--diff-only [--diff-base <ref>]`**. Filters per-page fan-out to source files changed on the current branch vs the base. Stage 0 still maps the whole app; only the agent pool narrows. Base auto-resolves `origin/main` → `origin/master` → `main` → `master`. The flag that makes Reframe usable as a CI gate on big repos.
+- **`reframe bootstrap <target>`** subcommand + `--bootstrap-only` flag. Runs Stage 0 + brand resolution and exits without booting the dev server or running agents. Writes `<runDir>/brand.candidate.json` and **renders the candidate inline** via the same `renderBrand` formatter `show-brand` uses. Interactive TTY prompt offers to write `config/brand.json` on success — silent in non-TTY contexts.
+- **`reframe show-brand <runDir>`** subcommand. Pretty-prints the bootstrapped (or resolved) brand spec with pin status and 3-step pin instructions.
+- **`reframe pin <runDir> [--out <path>] [--force]`** subcommand. Non-interactive equivalent of the `bootstrap` y/N prompt — same write semantics, works in CI / shell scripts. Refuses to overwrite an existing pinned brand unless `--force` is set.
+- **`reframe verify <runDir>`** subcommand + `--verify-only` flag. Re-runs only Agent 5 against an existing run dir. Reads the target out of `manifest.json`, resets the verify checkpoint state, rehydrates `ctx.audit` from disk, runs Agent 5, writes a fresh `verify.json`. Skips commit/PR/scaffold (verify is read-only). Tight dev loop: fix by hand, verify in ~30s.
+- **`--diff-only [--diff-base <ref>]`**. Filters per-page fan-out to source files changed on the current branch vs the base. Base auto-resolves `origin/main` → `origin/master` → `main` → `master`. The flag that makes Reframe usable as a CI gate on big repos.
 - **`--post-findings`**. In `--apply-mode pr`, posts the top-3 plain-English digest as a PR conversation comment after opening the PR — GitHub sends notifications for comments but not for body edits. Off by default.
 - **`--json-summary`**. Prints a single-line JSON summary as the LAST stdout line. `tail -n 1 | jq` works without parsing markdown. Stable v1 schema with `schemaVersion: 1`.
 
@@ -31,6 +33,8 @@ Theme: **the dual-register sprint**. Every finding the pipeline emits now ships 
 - **Breakpoint strip** — buttons for Default / iPhone / iPad / Desktop. Selecting swaps the screenshot URL via `?breakpoint=`. CSS `resize: horizontal` on the preview wrapper lets reviewers drag arbitrary widths.
 - **Run Overview** (sentinel `__overview__` slug) — cross-page "criticals first" view. Severity bucket counts at the top, ranked findings list (top 50 by impact across audit + compliance), click-through to source page.
 - **Per-row Skip / Restore in Run Overview** — audit gaps AND compliance findings. Optimistic local update with rollback-on-failure. Page-level bypass dominates per-finding decisions.
+- **Per-page compliance findings card** — was missing entirely; now sits between the preview and the UX/Design spec rows. Same Skip / Restore as Run Overview. Hidden when the page has no compliance findings.
+- **Pattern insights panel** in Run Overview — driven by the new `/api/telemetry` endpoint. Surfaces dimensions and severities the reviewer has skipped ≥70% of the time across recent runs (sample ≥5). Fail-open: hidden when the endpoint errors or returns empty.
 - **`PageApproval.complianceFindings`** map — per-compliance-finding apply/skip decisions keyed by `${ruleId}::${location}`. Parity with the existing `gaps` map for audit findings.
 
 ### Added — Pull request output
@@ -42,6 +46,11 @@ Theme: **the dual-register sprint**. Every finding the pipeline emits now ships 
 - **`callJsonSchema<S extends ZodTypeAny>(schema, opts): Promise<z.infer<S>>`** on `IGeminiClient`. Validates response shape, retries once with Zod issues fed back into the prompt before failing. Catches cross-LLM drift at the wire.
 - **Zod schemas** in `src/schemas/agent-outputs.ts` for Audit, Compliance, UX, Design, Verify, Mapper, and Brand-Bootstrap outputs. Source of truth for the JSON shapes every agent emits.
 - **All JSON-emitting agents migrated** to `callJsonSchema` — Agent 1, 2, 3, 5, 6, plus the Stage 0 mapper and its brand sub-call. Agent 4 (Code) stays on `call()` since it emits raw diff text.
+
+### Added — Server / telemetry
+
+- **`/api/telemetry`** endpoint. Walks sibling run dirs (capped at 50 most-recent, 90 days back), reads each run's `audit.json` + `compliance.json` + `approvals.json`, and aggregates apply/skip decisions per dimension and per severity. Computes "insights": (axis, value) tuples with skip-rate ≥70% AND sample ≥5, each shipped with a ready-rendered headline. Page-level bypass propagates down — every finding on a bypassed page counts as skipped.
+- **Engine honors `approval.complianceFindings`** — orchestrator filters `ctx.compliance.findings` after compliance runs and before agent 4, matching the existing `approval.gaps` filter behavior. Recomputes `compliance.clean` after the filter. PR-body's approvals ledger also lists Compliance Finding Decisions.
 
 ### Added — CI integration
 

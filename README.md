@@ -134,12 +134,20 @@ Reframe rewrites **only** the approved blocks, re-verifies, and opens a PR — w
 
 ```bash
 # Bootstrap: map the app, derive a brand candidate, exit — no agents, no PR.
-# The friction-free first run. Interactively offers to pin the brand to
-# config/brand.json so the next run is fully deterministic.
+# The friction-free first run. Prints the brand summary inline and
+# interactively offers to pin to config/brand.json so the next run is fully
+# deterministic.
 npm run reframe bootstrap ./my-app
+
+# Pin a bootstrapped brand without the interactive prompt (CI / shell scripts).
+npm run reframe pin ./runs/my-app-<stamp>
 
 # Inspect a previously-bootstrapped brand without firing up the review SPA.
 npm run reframe show-brand ./runs/my-app-<stamp>
+
+# Re-run only Agent 5 against an existing run — fix a finding by hand,
+# verify in seconds without re-running the full pipeline.
+npm run reframe verify ./runs/my-app-<stamp>
 
 # Per-PR audit: only screens whose source files this branch touches.
 # The flag that makes Reframe usable as a CI gate on big repos.
@@ -258,6 +266,9 @@ Reframe is built to keep the developer, designer, *and* a non-technical client i
 - **Filter chips** — severity, dimension (functional / brand-voice / accessibility / responsive / microcopy / compliance / data-contract / …), and a confidence-threshold slider. Power-user noise reduction without losing the long tail.
 - **Threaded comments** — anyone can review screen cards and type plain-English feedback (*"make the submit button royal-blue,"* *"this disclaimer is missing"*) and toggle **Approve** / **Skip** per fix.
 - **Resume and apply** — on the apply pass, Reframe reads your decisions from `approvals.json`, rewrites **only** the approved blocks, re-verifies, and opens a PR with **the entire human conversation embedded in the PR description** and a plain-English summary at the top of the body. With `--post-findings`, also posts the top-3 digest as a PR conversation comment so subscribed reviewers actually get notified.
+- **Run Overview** — sidebar entry above the per-screen list. A cross-page "criticals first" triage view that ranks every finding across every audited page by severity × confidence, with per-row Skip / Restore that works for both audit gaps AND compliance findings. The flag that makes a 34-screen audit reviewable in 10 minutes instead of an hour.
+- **Pattern insights** — after a few runs, the Overview surfaces high-skip-rate patterns ("you've skipped 14/17 low-severity a11y findings across recent runs — consider hiding the dimension by default"). Computed cross-run by the local server; no telemetry leaves the box.
+- **Tight dev loop with `reframe verify`** — fix a finding by hand, then `reframe verify <runDir>` re-runs only Agent 5 against the existing audit results. ~30 seconds instead of the full pipeline's minutes.
 
 ```text
 audit ─→ ux ─→ design ┐
@@ -330,7 +341,7 @@ config/    models.json · brand.template.json · constraints.template.json · au
 src/
   types.ts          single source of truth — every module and agent codes against this
   config.ts         env + flags + files -> PipelineConfig
-  cli.ts            reframe rebuild | bootstrap | show-brand | init | review
+  cli.ts            reframe rebuild | bootstrap | verify | show-brand | pin | init | review
   orchestrator.ts   the DAG, the concurrency pool, resumability
   gemini.ts         swappable LLM client + callJsonSchema (Zod-validated, retry-on-failure)
   git.ts            clone · branch · commit · diff · PR · getChangedFiles · postPrComment
@@ -341,8 +352,10 @@ src/
   manifest.ts       RunManifest read/write + markdown render
   proposed-changes.ts   review-gate report + severity-weighted effort estimate
   sample-params.ts  dynamic-route ([id] / [slug] / [...rest]) resolution
-  server.ts         zero-dep server for the React review app
+  server.ts         zero-dep server for the React review app · /api/telemetry
   show-brand.ts     pretty-print the bootstrapped brand candidate from a run dir
+  pin.ts            non-interactive equivalent of `bootstrap`'s y/N pin prompt
+  verify.ts         `reframe verify` entrypoint — re-runs only Agent 5
   schemas/          Zod schemas for every JSON-emitting agent's output
   stages/           stage0-map (with static brand extraction) · stage0_5-boot · init-scaffold · final-scaffold
   agents/           agent1..6
