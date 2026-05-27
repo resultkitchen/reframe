@@ -154,9 +154,36 @@ export default function App() {
   // Connection indicator watchdog state
   const [isOfflineMock, setIsOfflineMock] = useState(false);
 
+  /**
+   * Cross-run telemetry — fetched once on mount. Surfaces patterns the
+   * reviewer can act on inside the Run Overview ("you've skipped 14/17
+   * low-severity a11y findings across recent runs — hide them by
+   * default?"). Null on fetch failure (the Overview just hides the
+   * insights panel in that case — no degradation of core functionality).
+   */
+  const [telemetry, setTelemetry] = useState<{
+    schemaVersion: number;
+    scannedRuns: number;
+    totalDecisions: number;
+    insights: Array<{
+      axis: 'dimension' | 'severity';
+      value: string;
+      applies: number;
+      skips: number;
+      skipRate: number;
+      headline: string;
+    }>;
+  } | null>(null);
+
   // Load run details on boot
   useEffect(() => {
     fetchRunData();
+    // Fire-and-forget telemetry fetch — never blocks render, fails open
+    // (the insights panel is hidden when telemetry is null or empty).
+    fetch('/api/telemetry')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((t) => { if (t && Array.isArray(t.insights)) setTelemetry(t); })
+      .catch(() => { /* fail open */ });
   }, []);
 
   const fetchRunData = async () => {
@@ -966,6 +993,39 @@ ${pmNotes}
                   );
                 })}
               </div>
+
+              {/* Cross-run pattern insights — only renders when telemetry
+                  returned actionable patterns (skip-rate >= 70% with
+                  sample >= 5). Fail-open: hidden when telemetry is null,
+                  empty, or the endpoint errored. */}
+              {telemetry && telemetry.insights.length > 0 && (
+                <div style={{
+                  marginBottom: '1.25rem',
+                  padding: '1rem 1.15rem',
+                  background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)',
+                  border: '1px solid #86efac',
+                  borderRadius: '12px',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <h3 style={{ fontSize: '0.92rem', fontWeight: 700, color: '#166534', margin: 0, letterSpacing: '-0.01em' }}>
+                      🧠 Pattern insights from {telemetry.scannedRuns} run{telemetry.scannedRuns === 1 ? '' : 's'}
+                    </h3>
+                    <span style={{ fontSize: '0.7rem', color: '#15803d', fontWeight: 500 }}>
+                      {telemetry.totalDecisions.toLocaleString()} decisions analyzed · skip-rate ≥ 70%
+                    </span>
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                    {telemetry.insights.slice(0, 4).map((ins, i) => (
+                      <li key={`${ins.axis}::${ins.value}::${i}`} style={{ fontSize: '0.82rem', lineHeight: 1.5, color: '#14532d' }}>
+                        <strong style={{ fontFamily: 'monospace', fontSize: '0.78rem', background: '#dcfce7', padding: '0.1rem 0.4rem', borderRadius: '4px', marginRight: '0.4rem' }}>
+                          {ins.axis === 'dimension' ? ins.value : `severity:${ins.value}`}
+                        </strong>
+                        {ins.headline}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
               {runOverview.items.length === 0 ? (
                 <div style={{ padding: '2.5rem', textAlign: 'center', background: '#f0fdf4', border: '1px dashed #86efac', borderRadius: '12px' }}>

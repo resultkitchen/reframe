@@ -11,6 +11,170 @@ import * as path from 'node:path';
 import { loadApprovals, saveApprovals } from './state';
 import type { ApprovalsDoc, PageApproval } from './types';
 
+/* ─────────────────────────── telemetry aggregation ─────────────────────────── */
+
+interface BucketStats {
+  apply: number;
+  skip: number;
+  /** Heads-up pill text suggested when this bucket is dominated by skips. */
+  suggestion?: string;
+}
+
+interface TelemetryResponse {
+  schemaVersion: 1;
+  scannedRuns: number;
+  totalDecisions: number;
+  /** Aggregate decisions per dimension across every scanned run. */
+  byDimension: Record<string, BucketStats>;
+  /** Aggregate decisions per severity across every scanned run. */
+  bySeverity: Record<string, BucketStats>;
+  /** High-skip-rate (>= 70%) buckets with enough sample (>= 5) to surface. */
+  insights: Array<{
+    axis: 'dimension' | 'severity';
+    value: string;
+    applies: number;
+    skips: number;
+    skipRate: number;
+    headline: string;
+  }>;
+}
+
+const TELEMETRY_RUN_CAP = 50;
+const TELEMETRY_AGE_DAYS_CAP = 90;
+const INSIGHT_MIN_SAMPLE = 5;
+const INSIGHT_SKIP_RATE_THRESHOLD = 0.7;
+
+function computeTelemetry(runsParent: string, currentRunDir: string): TelemetryResponse {
+  const result: TelemetryResponse = {
+    schemaVersion: 1,
+    scannedRuns: 0,
+    totalDecisions: 0,
+    byDimension: {},
+    bySeverity: {},
+    insights: [],
+  };
+
+  if (!fs.existsSync(runsParent) || !fs.statSync(runsParent).isDirectory()) {
+    return result;
+  }
+
+  const cutoffMs = Date.now() - TELEMETRY_AGE_DAYS_CAP * 24 * 60 * 60 * 1000;
+  const entries = fs.readdirSync(runsParent)
+    .map((name) => {
+      const abs = path.join(runsParent, name);
+      try {
+        const stat = fs.statSync(abs);
+        return stat.isDirectory() && stat.mtimeMs >= cutoffMs ? { abs, mtimeMs: stat.mtimeMs } : null;
+      } catch {
+        return null;
+      }
+    })
+    .filter((x): x is { abs: string; mtimeMs: number } => Boolean(x))
+    // Always include the current run plus the most-recent prior runs.
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    .slice(0, TELEMETRY_RUN_CAP);
+
+  // Make sure the current run is in the set even when there are >50 priors.
+  if (!entries.some((e) => e.abs === currentRunDir) && fs.existsSync(currentRunDir)) {
+    entries.unshift({ abs: currentRunDir, mtimeMs: Date.now() });
+  }
+
+  const bump = (bucket: Record<string, BucketStats>, key: string, decision: 'apply' | 'skip'): void => {
+    if (!bucket[key]) bucket[key] = { apply: 0, skip: 0 };
+    bucket[key][decision]++;
+    result.totalDecisions++;
+  };
+
+  for (const { abs: runDir } of entries) {
+    const pagesDir = path.join(runDir, 'pages');
+    if (!fs.existsSync(pagesDir)) continue;
+    const approvalsRaw = (() => {
+      try {
+        const apath = path.join(runDir, 'approvals.json');
+        return fs.existsSync(apath)
+          ? (JSON.parse(fs.readFileSync(apath, 'utf8')) as ApprovalsDoc)
+          : null;
+      } catch {
+        return null;
+      }
+    })();
+
+    let slugs: string[];
+    try {
+      slugs = fs.readdirSync(pagesDir).filter((s) => {
+        try { return fs.statSync(path.join(pagesDir, s)).isDirectory(); } catch { return false; }
+      });
+    } catch {
+      continue;
+    }
+    if (slugs.length === 0) continue;
+    result.scannedRuns++;
+
+    for (const slug of slugs) {
+      const pageDir = path.join(pagesDir, slug);
+      const pageApproval = approvalsRaw?.pages?.[slug];
+      const pageBypassed = pageApproval?.decision === 'skip';
+
+      // Audit gaps
+      try {
+        const auditPath = path.join(pageDir, 'audit.json');
+        if (fs.existsSync(auditPath)) {
+          const audit = JSON.parse(fs.readFileSync(auditPath, 'utf8'));
+          for (const gap of audit.gaps ?? []) {
+            const dec = pageBypassed || pageApproval?.gaps?.[gap.id] === 'skip' ? 'skip' : 'apply';
+            if (gap.dimension) bump(result.byDimension, gap.dimension, dec);
+            if (gap.severity) bump(result.bySeverity, gap.severity, dec);
+          }
+        }
+      } catch { /* skip malformed audit.json */ }
+
+      // Compliance findings
+      try {
+        const compliancePath = path.join(pageDir, 'compliance.json');
+        if (fs.existsSync(compliancePath)) {
+          const compliance = JSON.parse(fs.readFileSync(compliancePath, 'utf8'));
+          for (const finding of compliance.findings ?? []) {
+            const key = `${finding.ruleId}::${finding.location}`;
+            const dec = pageBypassed || pageApproval?.complianceFindings?.[key] === 'skip' ? 'skip' : 'apply';
+            if (finding.dimension) bump(result.byDimension, finding.dimension, dec);
+            if (finding.severity) bump(result.bySeverity, finding.severity, dec);
+          }
+        }
+      } catch { /* skip malformed compliance.json */ }
+    }
+  }
+
+  // Compute high-skip-rate insights — the actionable pattern the UI surfaces.
+  const buildInsights = (
+    axis: 'dimension' | 'severity',
+    bucket: Record<string, BucketStats>,
+  ): void => {
+    for (const [value, stats] of Object.entries(bucket)) {
+      const sample = stats.apply + stats.skip;
+      if (sample < INSIGHT_MIN_SAMPLE) continue;
+      const skipRate = stats.skip / sample;
+      if (skipRate < INSIGHT_SKIP_RATE_THRESHOLD) continue;
+      const pct = Math.round(skipRate * 100);
+      result.insights.push({
+        axis,
+        value,
+        applies: stats.apply,
+        skips: stats.skip,
+        skipRate,
+        headline:
+          axis === 'dimension'
+            ? `You've skipped ${stats.skip}/${sample} ${value} finding${sample === 1 ? '' : 's'} (${pct}%). Consider hiding the ${value} dimension by default.`
+            : `You've skipped ${stats.skip}/${sample} ${value}-severity finding${sample === 1 ? '' : 's'} (${pct}%). Consider raising the minimum severity filter.`,
+      });
+    }
+  };
+  buildInsights('dimension', result.byDimension);
+  buildInsights('severity', result.bySeverity);
+  result.insights.sort((a, b) => b.skipRate - a.skipRate);
+
+  return result;
+}
+
 /** Find the built SPA assets folder across dev and prod build structures. */
 function resolveStaticDir(): string {
   const candidates = [
@@ -222,6 +386,29 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
             res.end(JSON.stringify({ error: 'Malformed JSON payload' }));
           }
         });
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      }
+      return;
+    }
+
+    // 2.5. GET /api/telemetry — cross-run pattern insights.
+    //
+    // Scans every sibling run dir in the same `runs/` parent and aggregates
+    // per-finding-dimension and per-severity apply/skip decisions. Surfaces
+    // patterns the reviewer can act on ("you've skipped 14/17 low-severity
+    // a11y findings — hide them by default?") in the review app's Run
+    // Overview panel.
+    //
+    // Bounded: scans at most 50 sibling runs, capped 90 days back, so a
+    // long-lived runs/ directory doesn't slow the endpoint to a crawl.
+    if (pathname === '/api/telemetry' && req.method === 'GET') {
+      try {
+        const runsParent = path.dirname(absRunDir);
+        const insights = computeTelemetry(runsParent, absRunDir);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(insights));
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
