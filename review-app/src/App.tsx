@@ -601,6 +601,81 @@ ${pmNotes}
       : `/api/screenshot/${activePage.slug}?breakpoint=${encodeURIComponent(activeBreakpoint)}`
     : '';
 
+  /**
+   * Sentinel slug for the run-level Overview pseudo-page in the sidebar.
+   * When activeSlug equals this, the detail pane renders the cross-page
+   * "criticals first" view instead of any one page's details.
+   */
+  const OVERVIEW_SLUG = '__overview__';
+
+  /**
+   * Cross-page run overview: aggregates every finding across every page,
+   * ranks by severity × confidence, and bucket-counts by severity. Powers
+   * the run-level dashboard the Reviewer queue persona (Priya) asked for —
+   * "show me everything critical across all 34 pages, ranked".
+   */
+  const runOverview = useMemo(() => {
+    const SEVERITY_WEIGHT: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+    type OverviewItem = {
+      key: string;
+      pageSlug: string;
+      pageRoute: string;
+      severity: string;
+      dimension?: string;
+      headline: string;
+      whyItMatters?: string;
+      confidence?: number;
+      impact: number;
+      source: 'audit' | 'compliance';
+    };
+    const all: OverviewItem[] = [];
+    const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+    let pagesWithFindings = 0;
+    for (const p of data?.pages ?? []) {
+      const gaps = p.audit?.gaps ?? [];
+      const findings = p.compliance?.findings ?? [];
+      if (gaps.length > 0 || findings.length > 0) pagesWithFindings++;
+      for (const g of gaps) {
+        counts[g.severity as keyof typeof counts] =
+          (counts[g.severity as keyof typeof counts] ?? 0) + 1;
+        const sev = SEVERITY_WEIGHT[g.severity] ?? 1;
+        const conf = g.confidence ?? 0.8;
+        all.push({
+          key: `${p.slug}::audit::${g.id}`,
+          pageSlug: p.slug,
+          pageRoute: p.route,
+          severity: g.severity,
+          dimension: g.dimension,
+          headline: g.plain || g.description,
+          whyItMatters: g.whyItMatters,
+          confidence: g.confidence,
+          impact: sev * conf,
+          source: 'audit',
+        });
+      }
+      for (const f of findings) {
+        const sevKey = f.severity as keyof typeof counts;
+        if (counts[sevKey] !== undefined) counts[sevKey]++;
+        const sev = SEVERITY_WEIGHT[f.severity] ?? 1;
+        const conf = f.confidence ?? 0.8;
+        all.push({
+          key: `${p.slug}::compliance::${f.ruleId}::${f.location}`,
+          pageSlug: p.slug,
+          pageRoute: p.route,
+          severity: f.severity,
+          dimension: f.dimension,
+          headline: f.plain || f.problem,
+          whyItMatters: f.whyItMatters,
+          confidence: f.confidence,
+          impact: sev * conf,
+          source: 'compliance',
+        });
+      }
+    }
+    all.sort((a, b) => b.impact - a.impact);
+    return { items: all, counts, pagesWithFindings, totalPages: data?.pages.length ?? 0 };
+  }, [data]);
+
   return (
     <div className="app-container">
       {/* ────────────────────────── HEADER ────────────────────────── */}
@@ -638,7 +713,45 @@ ${pmNotes}
           <div className="sidebar-header">
             <h2 className="sidebar-title">Screens fan-out</h2>
           </div>
-          
+
+          {/* Run Overview — the cross-page "criticals first" view. Sits
+              above the per-screen list so reviewers land on the
+              triage dashboard before they go page-by-page. */}
+          {data && data.pages.length > 0 && (
+            <ul className="page-list" style={{ marginBottom: '0.5rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '0.5rem' }}>
+              <li
+                key={OVERVIEW_SLUG}
+                className={`page-item smooth-all ${activeSlug === OVERVIEW_SLUG ? 'active' : ''}`}
+                onClick={() => setActiveSlug(OVERVIEW_SLUG)}
+                style={{
+                  background: activeSlug === OVERVIEW_SLUG
+                    ? 'linear-gradient(135deg, #faf5ff 0%, #fdf4ff 100%)'
+                    : undefined,
+                }}
+              >
+                <span className="page-item-title" style={{ color: '#5b21b6' }}>
+                  ✨ Run Overview
+                </span>
+                <span className="page-item-subtitle" style={{ color: '#7c3aed' }}>
+                  {runOverview.items.length} finding{runOverview.items.length === 1 ? '' : 's'}
+                  {' '}across {runOverview.pagesWithFindings} of {runOverview.totalPages} screens
+                </span>
+                <div className="badge-row" style={{ marginTop: '0.35rem' }}>
+                  {runOverview.counts.critical > 0 && (
+                    <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '0.15rem 0.45rem', borderRadius: '999px', background: '#fee2e2', color: '#991b1b' }}>
+                      {runOverview.counts.critical} critical
+                    </span>
+                  )}
+                  {runOverview.counts.high > 0 && (
+                    <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '0.15rem 0.45rem', borderRadius: '999px', background: '#fed7aa', color: '#9a3412' }}>
+                      {runOverview.counts.high} high
+                    </span>
+                  )}
+                </div>
+              </li>
+            </ul>
+          )}
+
           <ul className="page-list">
             {data?.pages.map((p) => {
               const approval = data.approvals.pages[p.slug];
@@ -698,7 +811,141 @@ ${pmNotes}
             </div>
           )}
 
-          {activePage && currentApproval ? (
+          {activeSlug === OVERVIEW_SLUG ? (
+            /* ────────────────────────── RUN OVERVIEW ──────────────────────────
+               Cross-page "criticals first" view. Aggregates findings across
+               every audited page; clicking a finding jumps to that page. */
+            <div style={{ padding: '1.25rem' }}>
+              <div style={{ marginBottom: '1.25rem' }}>
+                <h1 className="active-page-title" style={{ background: 'linear-gradient(90deg, #5b21b6, #ec4899)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                  Run Overview
+                </h1>
+                <p style={{ color: '#64748b', fontSize: '0.95rem', marginTop: '0.25rem' }}>
+                  Every finding across {runOverview.totalPages} screen{runOverview.totalPages === 1 ? '' : 's'}, ranked by user impact (severity × confidence). Triage from highest-impact down.
+                </p>
+              </div>
+
+              {/* Severity bucket bar */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, 1fr)',
+                gap: '0.75rem',
+                marginBottom: '1.5rem',
+              }}>
+                {(['critical', 'high', 'medium', 'low'] as const).map(sev => {
+                  const tone = sev === 'critical' ? { bg: '#fee2e2', fg: '#991b1b' }
+                            : sev === 'high'     ? { bg: '#fed7aa', fg: '#9a3412' }
+                            : sev === 'medium'   ? { bg: '#fef3c7', fg: '#854d0e' }
+                            :                       { bg: '#e0e7ff', fg: '#3730a3' };
+                  return (
+                    <div key={sev} style={{
+                      padding: '0.85rem 1rem', borderRadius: '10px',
+                      background: tone.bg, border: `1px solid ${tone.fg}22`,
+                    }}>
+                      <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: tone.fg }}>{sev}</div>
+                      <div style={{ fontSize: '1.75rem', fontWeight: 800, color: tone.fg, lineHeight: 1.1, marginTop: '0.15rem' }}>
+                        {runOverview.counts[sev]}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {runOverview.items.length === 0 ? (
+                <div style={{ padding: '2.5rem', textAlign: 'center', background: '#f0fdf4', border: '1px dashed #86efac', borderRadius: '12px' }}>
+                  <span style={{ fontSize: '2.5rem' }}>🎉</span>
+                  <p style={{ marginTop: '0.5rem', fontSize: '1.05rem', fontWeight: 600, color: '#166534' }}>
+                    Nothing critical to triage.
+                  </p>
+                  <p style={{ fontSize: '0.85rem', color: '#15803d', margin: '0.25rem 0 0' }}>
+                    Every screen passed without findings.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                  <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#64748b', fontWeight: 700 }}>
+                    Ranked findings — top {Math.min(runOverview.items.length, 50)} of {runOverview.items.length}
+                  </div>
+                  {runOverview.items.slice(0, 50).map(item => {
+                    const tone = item.severity === 'critical' ? { bg: '#fee2e2', fg: '#991b1b' }
+                              : item.severity === 'high'     ? { bg: '#fed7aa', fg: '#9a3412' }
+                              : item.severity === 'medium'   ? { bg: '#fef3c7', fg: '#854d0e' }
+                              :                                 { bg: '#e0e7ff', fg: '#3730a3' };
+                    const confPct = typeof item.confidence === 'number' ? Math.round(item.confidence * 100) : null;
+                    return (
+                      <div
+                        key={item.key}
+                        onClick={() => setActiveSlug(item.pageSlug)}
+                        style={{
+                          padding: '0.85rem 1rem',
+                          background: '#fff',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '10px',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          display: 'flex',
+                          gap: '0.85rem',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = '#8B5CF6';
+                          e.currentTarget.style.boxShadow = '0 2px 8px rgba(139,92,246,0.12)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = '#e2e8f0';
+                          e.currentTarget.style.boxShadow = 'none';
+                        }}
+                      >
+                        <div style={{
+                          padding: '0.2rem 0.5rem', borderRadius: '4px',
+                          background: tone.bg, color: tone.fg,
+                          fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase',
+                          letterSpacing: '0.05em', height: 'fit-content', whiteSpace: 'nowrap',
+                        }}>
+                          {item.severity}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '0.85rem', color: '#1e293b', lineHeight: 1.4 }}>
+                            {item.headline}
+                          </div>
+                          <div style={{ marginTop: '0.35rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', fontSize: '0.7rem', color: '#64748b' }}>
+                            <span style={{ fontFamily: 'monospace', color: '#475569', fontWeight: 600 }}>
+                              {item.pageSlug}
+                            </span>
+                            {item.dimension && (
+                              <span style={{ padding: '0.1rem 0.4rem', borderRadius: '999px', background: '#f3e8ff', color: '#7c3aed', fontSize: '0.65rem', fontWeight: 600 }}>
+                                {item.dimension}
+                              </span>
+                            )}
+                            {item.source === 'compliance' && (
+                              <span style={{ padding: '0.1rem 0.4rem', borderRadius: '999px', background: '#fef3c7', color: '#854d0e', fontSize: '0.65rem', fontWeight: 600 }}>
+                                compliance
+                              </span>
+                            )}
+                            {confPct !== null && (
+                              <span style={{ fontFamily: 'monospace', fontSize: '0.65rem' }}>
+                                {confPct}%
+                              </span>
+                            )}
+                            {item.whyItMatters && (
+                              <span style={{ fontStyle: 'italic', color: '#64748b' }}>
+                                — {item.whyItMatters.slice(0, 80)}{item.whyItMatters.length > 80 ? '…' : ''}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ color: '#94a3b8', fontSize: '1rem', alignSelf: 'center' }}>→</div>
+                      </div>
+                    );
+                  })}
+                  {runOverview.items.length > 50 && (
+                    <div style={{ padding: '0.75rem', textAlign: 'center', fontSize: '0.8rem', color: '#64748b' }}>
+                      {runOverview.items.length - 50} more findings — open individual screens from the sidebar to see them all.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : activePage && currentApproval ? (
             (() => {
               const isPageBroken = activePage.audit?.health && !activePage.audit.health.healthy;
 
