@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Reframe — Customer Journey Map · Priya (Recovering Engineer)</title>
+<style>
+  :root {
+    --bg: #0A1424; --panel: #11192B; --panel-2: #160E26;
+    --ink: #EAF1FB; --ink-mute: #8B9DBE;
+    --teal: #34E7D6; --blue: #5BC8FF; --purple: #B07CF0;
+    --violet: #8B5CF6; --pink: #F062A6; --gold: #FFC857;
+    --grid: rgba(91, 200, 255, 0.08);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); }
+  body { color: var(--ink); font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
+         padding: 40px 28px 48px; min-width: 1680px; font-feature-settings: "ss01", "cv11"; }
+  .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 8px; padding-bottom: 18px; border-bottom: 1px solid var(--grid); }
+  h1 { font-size: 34px; margin: 0; letter-spacing: -0.025em; font-weight: 700;
+       background: linear-gradient(90deg, var(--teal), var(--blue) 40%, var(--purple) 80%, var(--pink));
+       -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--teal); font-weight: 700; margin-bottom: 6px; }
+  .subtitle { color: var(--ink-mute); font-size: 14px; margin-top: 8px; max-width: 760px; }
+  .persona { color: var(--ink-mute); font-size: 12px; text-align: right; line-height: 1.7;
+             background: var(--panel); padding: 12px 16px; border-radius: 8px; border: 1px solid var(--grid); }
+  .persona strong { color: var(--ink); font-weight: 600; }
+  .persona em { color: var(--pink); font-style: normal; font-weight: 600; }
+  .arc-wrap { margin: 28px 0; padding: 18px 28px 14px; background: var(--panel); border-radius: 10px; border: 1px solid var(--grid); }
+  .arc-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink-mute);
+               margin-bottom: 4px; display: flex; justify-content: space-between; }
+  .arc { width: 100%; height: 90px; display: block; }
+  .grid { display: grid; grid-template-columns: 140px repeat(9, 1fr); gap: 5px; margin-top: 28px; }
+  .col-h { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-mute);
+           padding: 14px 8px 12px; background: var(--panel); border-radius: 8px; text-align: center; position: relative; }
+  .col-h .stage-num { display: inline-block; width: 24px; height: 24px; line-height: 24px; border-radius: 50%;
+                      background: var(--panel-2); color: var(--ink); margin-bottom: 8px; font-size: 11px;
+                      font-family: 'SF Mono', ui-monospace, monospace; font-weight: 600; }
+  .col-h .stage-name { display: block; color: var(--ink); font-size: 13px; margin-bottom: 4px; font-weight: 700; letter-spacing: -0.01em; text-transform: none; }
+  .col-h.anxious { border-bottom: 2px solid var(--pink); }
+  .col-h.explore { border-bottom: 2px solid var(--blue); }
+  .col-h.engage  { border-bottom: 2px solid var(--purple); }
+  .col-h.triumph { border-bottom: 2px solid var(--teal); }
+  .col-h.anxious .stage-num { background: rgba(240,98,166,0.18); color: var(--pink); }
+  .col-h.explore .stage-num { background: rgba(91,200,255,0.18); color: var(--blue); }
+  .col-h.engage  .stage-num { background: rgba(176,124,240,0.18); color: var(--purple); }
+  .col-h.triumph .stage-num { background: rgba(52,231,214,0.18); color: var(--teal); }
+  .row-h { font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-mute);
+           padding: 14px 12px; background: var(--panel); border-radius: 8px; display: flex; align-items: center; font-weight: 600; }
+  .cell { background: var(--panel); border-radius: 8px; padding: 13px 12px; font-size: 12px; line-height: 1.5; color: var(--ink); min-height: 64px; }
+  .cell.mindset { color: var(--ink); font-weight: 600; font-size: 12.5px; }
+  .cell.quote { color: var(--gold); font-style: italic; font-family: 'Georgia', serif; font-size: 12.5px; }
+  .cell.quote::before { content: "“"; opacity: 0.5; margin-right: 2px; }
+  .cell.quote::after  { content: "”"; opacity: 0.5; margin-left: 2px; }
+  .cell.friction { background: rgba(240,98,166,0.07); color: #FFCFE3; border-left: 2px solid var(--pink); }
+  .cell.opportunity { background: rgba(52,231,214,0.06); color: #B5F5EB; border-left: 2px solid var(--teal); }
+  .cell.opportunity strong { color: var(--teal); font-weight: 700; }
+  .cell.friction strong { color: var(--pink); font-weight: 700; }
+  .cell.emotion { display: flex; align-items: center; gap: 8px; padding: 14px 12px; }
+  .emo-meter { flex: 1; height: 6px; background: var(--panel-2); border-radius: 3px; overflow: hidden; }
+  .emo-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--pink), var(--gold), var(--teal)); }
+  .emo-num { font-family: 'SF Mono', ui-monospace, monospace; font-size: 10px; color: var(--ink-mute); min-width: 18px; text-align: right; }
+  .marker { position: absolute; top: -28px; left: 50%; transform: translateX(-50%);
+            font-size: 9px; padding: 4px 10px; border-radius: 12px; text-transform: uppercase;
+            letter-spacing: 0.14em; font-weight: 800; white-space: nowrap; }
+  .marker.peak   { background: var(--teal); color: #051c1a; box-shadow: 0 0 20px rgba(52,231,214,0.4); }
+  .marker.valley { background: var(--pink); color: #1a0814; box-shadow: 0 0 20px rgba(240,98,166,0.4); }
+  .footer-label { margin-top: 36px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; color: var(--ink-mute); margin-bottom: 12px; }
+  .footer { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .expert { background: var(--panel); border-radius: 10px; padding: 18px 20px; border: 1px solid var(--grid); position: relative; }
+  .expert::before { content: ""; position: absolute; left: 0; top: 18px; bottom: 18px; width: 3px; border-radius: 0 3px 3px 0; }
+  .expert.linnea::before { background: var(--blue); }
+  .expert.mira::before   { background: var(--pink); }
+  .expert.rishi::before  { background: var(--teal); }
+  .expert h3 { font-size: 14px; margin: 0 0 2px; color: var(--ink); letter-spacing: -0.01em; }
+  .expert .role { color: var(--ink-mute); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 12px; font-weight: 600; }
+  .expert p { margin: 0; font-size: 12.5px; line-height: 1.65; color: var(--ink); }
+  .expert.linnea h3 { color: var(--blue); }
+  .expert.mira h3   { color: var(--pink); }
+  .expert.rishi h3  { color: var(--teal); }
+  .legend { display: flex; gap: 18px; margin-top: 14px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--ink-mute); }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="eyebrow">Persona 3 of 3 · Adjacent</div>
+    <h1>Customer Journey Map · Priya, Recovering Senior Engineer</h1>
+    <div class="subtitle">An inverted arc. She starts skeptical and stays there until Stage 6, when a real bug she would have missed earns her trust. The peak is <em>adoption into team workflow</em> — not the first run.</div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#F062A6"></span>Skeptical</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#5BC8FF"></span>Probing</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#B07CF0"></span>Engaging</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#34E7D6"></span>Convinced</div>
+    </div>
+  </div>
+  <div class="persona">
+    <strong>Persona:</strong> Priya Sundaram · 41 · Staff Engineer<br>
+    <strong>Company:</strong> Series B fintech · 140 ppl · TS/React/Postgres<br>
+    <strong>Load:</strong> 20–30 PR reviews/week, half from juniors using AI<br>
+    <strong>Trigger:</strong> A PR touching auth from a 6-month engineer<br>
+    <strong>Fear:</strong> <em>"Silently approving a regression. Production bug, my fault."</em>
+  </div>
+</div>
+
+<div class="arc-wrap">
+  <div class="arc-label">
+    <span>Emotional arc · inverted — skepticism is the baseline, not anxiety</span>
+    <span>↑ Disconfirming spike at Reveal &nbsp;·&nbsp; ↑ True peak at Adopt</span>
+  </div>
+  <svg class="arc" viewBox="0 0 900 90" preserveAspectRatio="none">
+    <line x1="0" y1="22" x2="900" y2="22" stroke="#1c2840" stroke-width="1" stroke-dasharray="2 4"/>
+    <line x1="0" y1="46" x2="900" y2="46" stroke="#1c2840" stroke-width="1" stroke-dasharray="2 4"/>
+    <line x1="0" y1="70" x2="900" y2="70" stroke="#1c2840" stroke-width="1" stroke-dasharray="2 4"/>
+    <defs>
+      <linearGradient id="emoGrad" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="#F062A6"/><stop offset="60%" stop-color="#FFC857"/><stop offset="100%" stop-color="#34E7D6"/>
+      </linearGradient>
+      <linearGradient id="emoFill" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#34E7D6" stop-opacity="0.2"/><stop offset="100%" stop-color="#0A1424" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <!-- Stages: saturation=1.5, trigger=1.0, discovery=2.0, onboard=2.5, firstrun=3.0, reveal=4.5(P1), validate=3.0(V), merge=4.5, adopt=5.0(P) -->
+    <!-- y = 70 - (val/5*60): 1.5=52, 1.0=58, 2.0=46, 2.5=40, 3.0=34, 4.5=16, 3.0=34, 4.5=16, 5.0=10 -->
+    <path d="M 50,52 L 150,58 L 250,46 L 350,40 L 450,34 L 550,16 L 650,34 L 750,16 L 850,10 L 850,90 L 50,90 Z" fill="url(#emoFill)" opacity="0.6"/>
+    <polyline points="50,52 150,58 250,46 350,40 450,34 550,16 650,34 750,16 850,10"
+              fill="none" stroke="url(#emoGrad)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="50"  cy="52" r="4" fill="#F062A6"/>
+    <circle cx="150" cy="58" r="5" fill="#F062A6"/>
+    <circle cx="250" cy="46" r="4" fill="#F062A6"/>
+    <circle cx="350" cy="40" r="4" fill="#B07CF0"/>
+    <circle cx="450" cy="34" r="4" fill="#5BC8FF"/>
+    <circle cx="550" cy="16" r="7" fill="#34E7D6" stroke="#fff" stroke-width="2"/>
+    <circle cx="650" cy="34" r="4" fill="#B07CF0"/>
+    <circle cx="750" cy="16" r="5" fill="#34E7D6"/>
+    <circle cx="850" cy="10" r="7" fill="#34E7D6" stroke="#fff" stroke-width="2"/>
+    <text x="50"  y="84" text-anchor="middle" font-size="10" fill="#8B9DBE" font-family="ui-monospace, monospace">1</text>
+    <text x="150" y="84" text-anchor="middle" font-size="10" fill="#8B9DBE" font-family="ui-monospace, monospace">2</text>
+    <text x="250" y="84" text-anchor="middle" font-size="10" fill="#8B9DBE" font-family="ui-monospace, monospace">3</text>
+    <text x="350" y="84" text-anchor="middle" font-size="10" fill="#8B9DBE" font-family="ui-monospace, monospace">4</text>
+    <text x="450" y="84" text-anchor="middle" font-size="10" fill="#8B9DBE" font-family="ui-monospace, monospace">5</text>
+    <text x="550" y="84" text-anchor="middle" font-size="10" fill="#34E7D6" font-weight="700" font-family="ui-monospace, monospace">6 ↑</text>
+    <text x="650" y="84" text-anchor="middle" font-size="10" fill="#8B9DBE" font-family="ui-monospace, monospace">7</text>
+    <text x="750" y="84" text-anchor="middle" font-size="10" fill="#8B9DBE" font-family="ui-monospace, monospace">8</text>
+    <text x="850" y="84" text-anchor="middle" font-size="10" fill="#34E7D6" font-weight="700" font-family="ui-monospace, monospace">9 ↑↑</text>
+  </svg>
+</div>
+
+<div class="grid">
+  <div></div>
+  <div class="col-h anxious"><span class="stage-num">1</span><span class="stage-name">Saturation</span>steady overload</div>
+  <div class="col-h anxious"><span class="stage-num">2</span><span class="stage-name">Trigger</span>auth PR lands</div>
+  <div class="col-h anxious"><span class="stage-num">3</span><span class="stage-name">Discovery</span>skeptical scan</div>
+  <div class="col-h engage"><span class="stage-num">4</span><span class="stage-name">Onboard</span>configs skipped</div>
+  <div class="col-h explore"><span class="stage-num">5</span><span class="stage-name">First Run</span>watching for FPs</div>
+  <div class="col-h triumph"><span class="stage-num">6</span><span class="stage-name">Reveal</span>caught a real one<span class="marker peak">↑ Surprise</span></div>
+  <div class="col-h engage"><span class="stage-num">7</span><span class="stage-name">Validate</span>hand-checks each<span class="marker valley">↓ Trust-build</span></div>
+  <div class="col-h triumph"><span class="stage-num">8</span><span class="stage-name">Merge</span>approves with notes</div>
+  <div class="col-h triumph"><span class="stage-num">9</span><span class="stage-name">Adopt</span>team + CI gate<span class="marker peak">↑ True peak</span></div>
+
+  <div class="row-h">Mindset</div>
+  <div class="cell mindset">"I cannot review all of this manually."</div>
+  <div class="cell mindset">"If this auth PR has a regression, it's on me."</div>
+  <div class="cell mindset">"Another AI tool. Sure."</div>
+  <div class="cell mindset">"I don't have time for configs."</div>
+  <div class="cell mindset">"Let me see the false-positive rate."</div>
+  <div class="cell mindset">"Wait — that broken-contract is real."</div>
+  <div class="cell mindset">"Let me confirm each one by hand. Once."</div>
+  <div class="cell mindset">"This saved me 90 minutes."</div>
+  <div class="cell mindset">"We need this in CI."</div>
+
+  <div class="row-h">Doing</div>
+  <div class="cell">14 open PRs in queue. 8 from juniors leaning hard on Cursor. Skimming, not reviewing.</div>
+  <div class="cell">PR touches the auth flow. 380 lines. Code looks plausible. She has 20 minutes before standup.</div>
+  <div class="cell">Skims README with arms folded. Scans for <code>file:line</code> evidence. Notes the language.</div>
+  <div class="cell">Runs <code>npx</code>. Skips all configs. Points at the PR branch. Watches CLI scroll.</div>
+  <div class="cell">Watches every line. Looking for hallucination. Looking for vague generalities.</div>
+  <div class="cell">Sees a <strong>broken-contract finding on a column rename</strong> — exactly what she'd have missed.</div>
+  <div class="cell">Opens each finding, jumps to <code>file:line</code>, verifies in the editor. Builds her own confidence model.</div>
+  <div class="cell">Greenlights PR with notes referencing the Reframe findings. Posts a thread on team Slack.</div>
+  <div class="cell">Adds <code>--diff-only</code> mode to the team's GitHub Action template. Pushes for org-wide adoption.</div>
+
+  <div class="row-h">She says</div>
+  <div class="cell quote">My queue is a hazard, not a workflow.</div>
+  <div class="cell quote">This is the exact kind of PR that bites you in production.</div>
+  <div class="cell quote">Show me file-line precision, not vibes.</div>
+  <div class="cell quote">I'll fill the configs after I see if it's any good.</div>
+  <div class="cell quote">If this hallucinates once, I'm out.</div>
+  <div class="cell quote">Okay. Okay. That's a real bug. Now I'm paying attention.</div>
+  <div class="cell quote">Trust is built one verified finding at a time.</div>
+  <div class="cell quote">I'd have caught half of these. I'd have missed two.</div>
+  <div class="cell quote">This should be the merge gate.</div>
+
+  <div class="row-h">Emotion</div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:30%"></div></div><div class="emo-num">1.5</div></div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:20%"></div></div><div class="emo-num">1.0</div></div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:40%"></div></div><div class="emo-num">2.0</div></div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:50%"></div></div><div class="emo-num">2.5</div></div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:60%"></div></div><div class="emo-num">3.0</div></div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:90%"></div></div><div class="emo-num">4.5</div></div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:60%"></div></div><div class="emo-num">3.0</div></div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:90%"></div></div><div class="emo-num">4.5</div></div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:100%"></div></div><div class="emo-num">5.0</div></div>
+
+  <div class="row-h">Touchpoint</div>
+  <div class="cell">PR queue · Slack · the unmaintained `team-conventions.md`.</div>
+  <div class="cell">GitHub PR view. Diff viewer. The clock.</div>
+  <div class="cell">README · GitHub stars · whether the code in <code>src/</code> is any good.</div>
+  <div class="cell">CLI flags · `--diff-only` (if it existed) · branch-scoped run.</div>
+  <div class="cell">Verbose logs · finding stream · early-warning signals.</div>
+  <div class="cell">Dashboard. The specific finding. The <code>file:line</code> link.</div>
+  <div class="cell">Editor + Reframe side-by-side. Cross-references.</div>
+  <div class="cell">PR review thread. Team Slack channel for tooling.</div>
+  <div class="cell">GitHub Action template · CI status check · org-wide rollout doc.</div>
+
+  <div class="row-h">Friction</div>
+  <div class="cell friction">No tool surfaces architectural decay at the team scale.</div>
+  <div class="cell friction">Time-boxed review. No room for an exploratory tool that might waste 20 minutes.</div>
+  <div class="cell friction"><strong>Founder-y README.</strong> She has to dig for the engineer-quality signal.</div>
+  <div class="cell friction"><strong>No `--diff-only` mode.</strong> Full-repo audit is overkill for a PR review.</div>
+  <div class="cell friction">No confidence scoring → she can't filter for high-trust findings.</div>
+  <div class="cell friction">No way to flag a finding as "false positive" → no signal back to the system.</div>
+  <div class="cell friction"><strong>Verbose finding cards.</strong> She wants compact <code>file:line</code> + 1-line rationale, keyboard-driven.</div>
+  <div class="cell friction">No way to export findings as PR review comments automatically.</div>
+  <div class="cell friction"><strong>No CI integration.</strong> No GitHub Action. No PR-comment bot mode.</div>
+
+  <div class="row-h">Opportunity</div>
+  <div class="cell opportunity"><strong>Team-tier positioning.</strong> "Catch the AI-generated regressions before they hit main."</div>
+  <div class="cell opportunity"><strong>20-minute PR mode.</strong> Hard time budget, prioritized findings only.</div>
+  <div class="cell opportunity"><strong>Eval transparency.</strong> Publish your precision/recall on a public benchmark. Engineers care.</div>
+  <div class="cell opportunity"><strong>`--diff-only` flag.</strong> Scope verification to changed files. The biggest single Priya unlock.</div>
+  <div class="cell opportunity"><strong>Confidence scoring</strong> baked into the Finding schema. Filter for ≥80% to skim, ≥95% to act.</div>
+  <div class="cell opportunity"><strong>False-positive marker</strong> on each finding. Captured in approvals.json. Telemetry feedback loop.</div>
+  <div class="cell opportunity"><strong>Power-user dense view.</strong> Keyboard nav, J/K to traverse, `f` to jump to file:line. Compact card mode.</div>
+  <div class="cell opportunity"><strong>Auto-post to PR.</strong> Reframe findings become inline review comments. Bot persona, configurable verbosity.</div>
+  <div class="cell opportunity"><strong>GitHub Action + PR-comment bot.</strong> CI-gate mode. Severity threshold. The merge-gate posture.</div>
+</div>
+
+<div class="footer-label">The trio · how they read Priya's map</div>
+<div class="footer">
+  <div class="expert linnea">
+    <h3>Linnea Park</h3>
+    <div class="role">Principal Product Designer</div>
+    <p>Priya's UI needs are the opposite of Maya's: keyboard-driven, dense, fast. Same data, third lens. Build a "dense mode" toggle that compacts every finding card to one line with <code>file:line</code>, severity, and confidence. Power users want fewer pixels per finding, not more.</p>
+  </div>
+  <div class="expert mira">
+    <h3>Mira Okonkwo</h3>
+    <div class="role">Brand & Design Director</div>
+    <p>Engineers don't want warmth, they want <em>respect</em>. The brand promise to Priya is "we won't waste your time." Every false positive damages that promise more than any feature improves it. The single most brand-positive thing you can do for her is publish your eval numbers and update them every release.</p>
+  </div>
+  <div class="expert rishi">
+    <h3>Rishi Madan</h3>
+    <div class="role">Staff ML Engineer</div>
+    <p>Priya is your eval-set author. She marks findings as false-positive in <code>approvals.json</code> — that's labeled data, free. The <strong>`--diff-only` mode + confidence scoring + FP-marker</strong> is a closed loop: she gives you the signal that makes the next run better for the next Priya. This is how the product gets sharper as it scales.</p>
+  </div>
+</div>
+
+</body>
+</html>

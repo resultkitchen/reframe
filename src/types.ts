@@ -133,6 +133,44 @@ export interface PipelineConfig {
   mocksPath?: string;
   /** Selected LLM provider, e.g. 'gemini', 'openai', 'anthropic', 'openai-compatible'. Default 'gemini' */
   llmProvider: string;
+  /**
+   * Scope verification to files changed in the working tree relative to
+   * `diffBase`. Stage 0 still maps the whole app; the per-page fan-out
+   * filters to pages whose source file appears in the diff. The flag that
+   * makes a per-PR review tractable for a power user (Priya persona).
+   */
+  diffOnly: boolean;
+  /**
+   * Git ref to diff against when `diffOnly` is true. When undefined, the
+   * engine probes `origin/main`, `origin/master`, `main`, `master` in
+   * order and uses the first that resolves.
+   */
+  diffBase?: string;
+  /**
+   * When true, runPipeline exits cleanly after Stage 0 + brand resolution
+   * without booting the dev server or running any agents. Used by the
+   * `reframe bootstrap` subcommand to produce the candidate brand spec
+   * before the operator commits to a full audit run.
+   */
+  bootstrapOnly: boolean;
+  /**
+   * When true, runPipeline skips agents 1-4 (audit/ux/design/code/compliance)
+   * and only runs Agent 5 (verify) against the resumed run's existing
+   * audit results. Used by the `reframe verify` subcommand for tight
+   * incremental dev loops — fix something by hand, re-verify in seconds
+   * without re-running the full pipeline. Implies --apply-mode propose
+   * (no commit, no PR — verify is read-only by nature).
+   */
+  verifyOnly: boolean;
+  /**
+   * In `pr` mode, also post a top-level PR conversation comment with the
+   * top-N plain-English findings — separately from the PR body, which
+   * carries the full manifest. The comment is what GitHub sends as a
+   * notification to subscribed reviewers; the body is the static
+   * reference. Default off so a run never surprises a repo with
+   * unsolicited automated comments.
+   */
+  postFindings: boolean;
 }
 
 /* ─────────────────────────── Approvals & Comments Ledger ─────────────────────────── */
@@ -142,6 +180,16 @@ export type ApprovalDecision = 'apply' | 'skip';
 export interface PageApproval {
   decision: ApprovalDecision;
   gaps?: Record<string, ApprovalDecision>; // gapId -> apply|skip
+  /**
+   * Per-compliance-finding apply/skip decisions, keyed by
+   * `${ruleId}::${location}` so multiple findings of the same rule at
+   * different locations can be decided independently. Added in v1 to
+   * give compliance findings the same per-item triage surface audit
+   * gaps already had via `gaps`. Optional — older approvals.json files
+   * without this field continue to work; absent decisions default to
+   * 'apply'.
+   */
+  complianceFindings?: Record<string, ApprovalDecision>;
   note?: string;
   comments?: string[]; // Threaded collaborator comments/notes
 }
@@ -202,7 +250,7 @@ export interface DataCall {
  * A code-vs-schema mismatch (adjustment #2): code referencing tables/columns
  * that don't exist, dead code paths, types that don't match the DB.
  */
-export interface BrokenContract {
+export interface BrokenContract extends FindingMeta {
   kind: 'missing-table' | 'missing-column' | 'dead-path' | 'type-drift' | 'orphaned-feature';
   location: string;                       // file:line
   detail: string;
@@ -295,8 +343,59 @@ export type Severity = 'critical' | 'high' | 'medium' | 'low';
 
 export type AgentName = 'audit' | 'ux' | 'design' | 'code' | 'verify' | 'compliance';
 
+/**
+ * Fine-grained classification beyond the broad `category` axis.
+ * Agents fill this when they can; review app filters/groups on it.
+ */
+export type FindingDimension =
+  | 'functional'
+  | 'ux'
+  | 'visual-hierarchy'
+  | 'brand-voice'
+  | 'microcopy'
+  | 'responsive'
+  | 'accessibility'
+  | 'performance'
+  | 'compliance'
+  | 'data-contract'
+  | 'security';
+
+export const FINDING_DIMENSIONS: readonly FindingDimension[] = [
+  'functional',
+  'ux',
+  'visual-hierarchy',
+  'brand-voice',
+  'microcopy',
+  'responsive',
+  'accessibility',
+  'performance',
+  'compliance',
+  'data-contract',
+  'security',
+] as const;
+
+/**
+ * Dual-register fields shared across every finding-shaped output (Gap,
+ * ComplianceFinding, BrokenContract).
+ *
+ * - `plain`         : the same issue written for a non-technical reader
+ *                     (founder, designer, client). No jargon, concrete impact.
+ * - `whyItMatters`  : the user-facing consequence if shipped as-is.
+ * - `confidence`    : 0..1 — how certain the agent is the issue is real.
+ *                     Reviewers filter on this; ≥0.9 = act, 0.5–0.9 = check.
+ * - `dimension`     : finer category for grouping / filtering.
+ *
+ * All optional so legacy outputs and older agent versions remain valid.
+ */
+export interface FindingMeta {
+  plain?: string;
+  whyItMatters?: string;
+  confidence?: number;
+  dimension?: FindingDimension;
+}
+
 /** A single functional/UX gap found by Agent 1. */
-export interface Gap {
+export interface Gap extends FindingMeta {
   id: string;                             // stable id, referenced by verify
   category: 'functional' | 'ux';
   severity: Severity;
@@ -318,6 +417,13 @@ export interface AuditResult {
   /** Honest health of the page as driven (auth-redirect / error-overlay /
    * HTTP-error detection). Present whenever the page was driven. */
   health?: PageHealth;
+  /**
+   * Map of breakpoint name -> relative path of screenshot file
+   * (e.g. `{ mobile: 'audit-mobile.png', tablet: 'audit-tablet.png', ... }`).
+   * Captured by Agent 1 at multiple viewport sizes so the review app can
+   * show responsive behavior side-by-side without a separate run.
+   */
+  breakpointScreenshots?: Record<string, string>;
 }
 
 /** Agent 2 — UX proposal. */
@@ -338,7 +444,7 @@ export interface DesignSpec {
 }
 
 /** Agent 6 — Compliance. */
-export interface ComplianceFinding {
+export interface ComplianceFinding extends FindingMeta {
   ruleId: string;
   domain: string;
   severity: Severity;
@@ -457,10 +563,32 @@ export interface GeminiCallOptions {
   timeoutMs?: number;
 }
 
-/** Public surface of the Gemini client (implemented in src/gemini.ts). */
+/**
+ * Public surface of the Gemini client (implemented in src/gemini.ts).
+ *
+ * `callJsonSchema` is the modern entry point: it calls the LLM, validates
+ * the response against the supplied Zod schema, and on validation failure
+ * appends the issues to the prompt and retries ONCE. Use it for any new
+ * agent. `callJson<T>` is the legacy unvalidated form — still supported
+ * but the caller carries all the burden of trust.
+ *
+ * The schema parameter takes a real `ZodSchema<T>` so TypeScript can infer
+ * T from the schema at the call site (a structural surrogate wouldn't).
+ * zod is already a runtime dep — no new transitive cost on consumers.
+ */
 export interface IGeminiClient {
   call(opts: GeminiCallOptions): Promise<string>;
   callJson<T>(opts: GeminiCallOptions): Promise<T>;
+  /**
+   * Generic is constrained to ZodTypeAny so TypeScript infers the OUTPUT
+   * type via `z.infer<S>` at the call site — without this pattern, T
+   * collapses to `{}` and every field access on the response becomes a
+   * compile error. (Confirmed against TS 5.4 / 5.6 / 5.7.)
+   */
+  callJsonSchema<S extends import('zod').ZodTypeAny>(
+    schema: S,
+    opts: GeminiCallOptions,
+  ): Promise<import('zod').infer<S>>;
   /** Timeout/failure alerts accumulated during the run. */
   readonly alerts: string[];
 }

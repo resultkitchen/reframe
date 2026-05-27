@@ -22,6 +22,10 @@ import type {
   PipelineConfig,
   ScopeDoc,
 } from '../types';
+import {
+  BrandBootstrapOutputSchema,
+  MapperOutputSchema,
+} from '../schemas/agent-outputs';
 
 /* ───────────────────────── tuning constants ───────────────────────── */
 
@@ -253,19 +257,198 @@ function detectSchemaSources(files: WalkedFile[]): SchemaSource[] {
 
 /* ───────────────────────── brand bootstrap ───────────────────────── */
 
-/** Find tailwind/theme/CSS files worth feeding to the brand bootstrapper. */
+/**
+ * Find every file worth feeding to the brand bootstrapper. The set is
+ * intentionally broad — false positives cost a few KB of context, false
+ * negatives produce a generic, useless candidate brand.
+ *
+ * Covers:
+ *  - Tailwind configs (every JS module variant)
+ *  - shadcn-ui's components.json (radius preference + style)
+ *  - Global, theme, tokens, palette, colors, brand stylesheets
+ *  - Design-token JSON files
+ *  - Pure-JS color/palette/brand modules
+ *  - Any stylesheet inside a top-level `styles/` directory
+ *  - Next.js app-router root CSS (`app/globals.css`, `app/layout.css`)
+ */
 function collectThemeFiles(files: WalkedFile[]): WalkedFile[] {
   return files.filter((f) => {
     const base = f.rel.split('/').pop() ?? '';
+    const rel = f.rel;
     if (/^tailwind\.config\.(js|cjs|mjs|ts)$/.test(base)) return true;
     if (/^theme\.(t|j)sx?$/.test(base)) return true;
-    if (/(globals?|index|app|theme)\.(css|scss)$/.test(base)) return true;
+    if (base === 'components.json') return true;                                     // shadcn-ui
+    if (/(globals?|index|app|theme|tokens?|palette|colors?|brand)\.(css|scss|sass)$/.test(base)) return true;
     if (base === 'tokens.json' || base === 'design-tokens.json') return true;
+    if (/^(colors?|palette|brand)\.(js|ts|mjs|cjs|json)$/.test(base)) return true;
+    if (/(^|\/)styles\/.*\.(css|scss|sass)$/.test(rel)) return true;
+    if (/(^|\/)app\/(globals?|layout|theme)\.(css|scss)$/.test(rel)) return true;
     return false;
   });
 }
 
-/** Fallback brand when the model can't / doesn't return one. */
+/* ───── static token extraction ─────
+ * Cheap, regex-only extractors run BEFORE the LLM brand call. We hand the
+ * model already-extracted tokens (with the source files as context) so it
+ * doesn't have to do the parse — it normalizes naming and fills the gaps.
+ * This is the single biggest quality lift over "throw raw files at the LLM."
+ */
+
+interface ExtractedTokens {
+  /** UI framework if we can identify one from package.json. */
+  framework?: string;
+  /** token name -> hex (or rgb) value. */
+  colors: Record<string, string>;
+  /** CSS custom-property -> raw value (everything after the colon). */
+  cssVars: Record<string, string>;
+  /** Distinct font-family stacks discovered. */
+  fontFamilies: string[];
+  /** shadcn-ui's "radius" preference, if components.json is present. */
+  shadcnRadius?: string;
+}
+
+function isPlausibleColor(v: string): boolean {
+  const trimmed = v.trim();
+  if (/^#[0-9a-fA-F]{3,8}$/.test(trimmed)) return true;
+  if (/^rgba?\(/i.test(trimmed)) return true;
+  if (/^hsla?\(/i.test(trimmed)) return true;
+  return false;
+}
+
+/** Detect the dominant UI framework from package.json deps. */
+function detectFramework(
+  pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> } | null,
+): string | undefined {
+  const deps = { ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) };
+  if (deps['tailwindcss']) return 'tailwindcss';
+  if (deps['@mui/material']) return 'mui';
+  if (deps['@chakra-ui/react']) return 'chakra';
+  if (deps['@mantine/core']) return 'mantine';
+  if (deps['antd']) return 'antd';
+  if (deps['daisyui']) return 'daisyui';
+  if (deps['styled-components']) return 'styled-components';
+  if (deps['@emotion/react'] || deps['@emotion/styled']) return 'emotion';
+  return undefined;
+}
+
+/**
+ * Pull tokens out of the theme files we just located. Pure regex — no
+ * dynamic require/import — so it works on untrusted user code without a
+ * sandbox. We accept some noise (we'll filter against `isPlausibleColor`)
+ * in exchange for catching every common Tailwind / CSS variable pattern.
+ */
+function extractStaticTokens(
+  themeFiles: WalkedFile[],
+  pkg: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> } | null,
+): ExtractedTokens {
+  const tokens: ExtractedTokens = {
+    framework: detectFramework(pkg),
+    colors: {},
+    cssVars: {},
+    fontFamilies: [],
+  };
+
+  for (const f of themeFiles) {
+    const content = safeRead(f.abs);
+    if (!content) continue;
+    const base = f.rel.split('/').pop() ?? '';
+
+    // shadcn-ui components.json — radius preference + base color.
+    if (base === 'components.json') {
+      try {
+        const parsed = JSON.parse(content) as {
+          tailwind?: { baseColor?: string; cssVariables?: boolean };
+          style?: string;
+        };
+        if (parsed.tailwind?.baseColor) {
+          tokens.colors['base'] = parsed.tailwind.baseColor;
+        }
+      } catch {
+        /* malformed components.json — skip, content is regex-scanned below */
+      }
+    }
+
+    // 1. "tokenName": "#hexvalue"  — Tailwind config + JS palette files.
+    //    Permissive enough to match nested objects without parsing the AST.
+    const objectColorRe = /["']?([\w-]+)["']?\s*:\s*["'](#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsla?\([^)]+\))["']/g;
+    let oc: RegExpExecArray | null;
+    while ((oc = objectColorRe.exec(content)) !== null) {
+      const [, name, value] = oc;
+      // Reject keys that are obviously NOT a color (heuristic: skip very long
+      // keys and known non-color JSON keys to dampen noise).
+      if (name.length > 30) continue;
+      if (['url', 'href', 'src', 'type', 'kind'].includes(name)) continue;
+      if (!tokens.colors[name]) tokens.colors[name] = value;
+    }
+
+    // 2. CSS custom properties: --foo: value;
+    const cssVarRe = /--([\w-]+)\s*:\s*([^;}\n]+);/g;
+    let cv: RegExpExecArray | null;
+    while ((cv = cssVarRe.exec(content)) !== null) {
+      const [, name, raw] = cv;
+      const value = raw.trim();
+      if (!tokens.cssVars[name]) tokens.cssVars[name] = value;
+      // Color-looking vars also feed the colors map.
+      if (isPlausibleColor(value) && !tokens.colors[name]) {
+        tokens.colors[name] = value;
+      }
+    }
+
+    // 3. font-family declarations
+    const fontRe = /font-family\s*:\s*['"]([^'"]+)['"]/g;
+    let fm: RegExpExecArray | null;
+    while ((fm = fontRe.exec(content)) !== null) {
+      const family = fm[1].split(',')[0].trim();
+      if (family && !tokens.fontFamilies.includes(family)) {
+        tokens.fontFamilies.push(family);
+      }
+    }
+  }
+
+  return tokens;
+}
+
+/**
+ * Pull sample copy (headlines, button labels) from page source so the LLM
+ * has real product voice to characterize, not just file paths. Capped at
+ * `limit` distinct samples to keep the prompt bounded.
+ */
+function collectVoiceSamples(files: WalkedFile[], limit = 12): string[] {
+  const samples: string[] = [];
+  // Patterns that frequently hold user-visible copy in JSX/TSX.
+  const patterns: RegExp[] = [
+    /<h1[^>]*>\s*([^<{][^<]*?)\s*<\/h1>/gi,
+    /<h2[^>]*>\s*([^<{][^<]*?)\s*<\/h2>/gi,
+    /<button[^>]*>\s*([^<{][^<]*?)\s*<\/button>/gi,
+    /<Button[^>]*>\s*([^<{][^<]*?)\s*<\/Button>/g,
+    /title=["']([^"']{4,120})["']/g,
+    /headline=["']([^"']{4,120})["']/g,
+  ];
+
+  for (const f of files) {
+    if (samples.length >= limit) break;
+    if (!/\.(t|j)sx?$/.test(f.rel)) continue;
+    if (!/(^|\/)(app|pages|components|src)\//.test(f.rel)) continue;
+    if (f.size > 80_000) continue;
+
+    const content = safeRead(f.abs);
+    if (!content) continue;
+
+    for (const re of patterns) {
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(content)) !== null && samples.length < limit) {
+        const text = m[1].trim().replace(/\s+/g, ' ');
+        if (text.length < 4 || text.length > 200) continue;
+        if (/^\{\s*/.test(text)) continue;          // JSX expression, not literal
+        if (samples.includes(text)) continue;
+        samples.push(text);
+      }
+    }
+  }
+  return samples;
+}
+
+/** Fallback brand when no theme files exist and the LLM produces nothing. */
 function defaultBrand(projectSlug: string): BrandSpec {
   return {
     name: projectSlug,
@@ -780,7 +963,7 @@ export async function runStage0(
 
   let raw: MapperResponse;
   try {
-    raw = await gemini.callJson<MapperResponse>({
+    raw = (await gemini.callJsonSchema(MapperOutputSchema, {
       role: 'mapper',
       json: true,
       // Big monorepo digests take far longer than the default 120s.
@@ -793,7 +976,7 @@ export async function runStage0(
         clientRoutes,
         schemaSources,
       ),
-    });
+    })) as MapperResponse;
   } catch (err) {
     // The mapper failing should not crash the run — degrade to a static scope.
     // (gemini.ts already records the failure into gemini.alerts.)
@@ -805,28 +988,120 @@ export async function runStage0(
     raw = {};
   }
 
-  // 5. If the model returned no brand, do one focused mechanical sub-call
-  //    against just the theme files so the brand bootstrap isn't empty.
-  if (!raw.bootstrappedBrand && collectThemeFiles(files).length > 0) {
-    const themeFiles = collectThemeFiles(files).slice(0, 8);
+  // 5. Brand bootstrap. Pre-extract tokens from theme files using regex (no
+  //    sandboxed import of user code), gather voice samples from page source,
+  //    and hand the LLM the STRUCTURED findings rather than raw file dumps.
+  //    The model normalizes naming, characterizes voice, and fills gaps —
+  //    work it does well — instead of doing the parse — work it does poorly.
+  //
+  //    Run unconditionally now (was previously only when the mapper omitted
+  //    the field) so the extracted-token enrichment lands on every run.
+  const themeFiles = collectThemeFiles(files);
+  if (themeFiles.length > 0) {
+    const extracted = extractStaticTokens(themeFiles, pkg);
+    const voiceSamples = collectVoiceSamples(files);
     const themeDigest = themeFiles
+      .slice(0, 8)
       .map((f) => `--- ${f.rel} ---\n${truncate(safeRead(f.abs), FILE_TRUNCATE)}`)
       .join('\n\n');
+
+    const extractedSummary = [
+      extracted.framework ? `Framework detected: ${extracted.framework}` : 'No UI framework detected from package.json.',
+      Object.keys(extracted.colors).length > 0
+        ? `Colors statically extracted from theme files (${Object.keys(extracted.colors).length}):\n` +
+            Object.entries(extracted.colors)
+              .slice(0, 40)
+              .map(([k, v]) => `  ${k}: ${v}`)
+              .join('\n')
+        : 'No color tokens could be statically extracted.',
+      Object.keys(extracted.cssVars).length > 0
+        ? `CSS custom properties (${Object.keys(extracted.cssVars).length}):\n` +
+            Object.entries(extracted.cssVars)
+              .slice(0, 40)
+              .map(([k, v]) => `  --${k}: ${v}`)
+              .join('\n')
+        : 'No CSS custom properties extracted.',
+      extracted.fontFamilies.length > 0
+        ? `Font families:\n${extracted.fontFamilies.map((f) => `  ${f}`).join('\n')}`
+        : 'No font-family declarations found.',
+      voiceSamples.length > 0
+        ? `Sample copy from page headlines and buttons (use to characterize voice):\n` +
+            voiceSamples.map((s) => `  "${s}"`).join('\n')
+        : 'No sample copy could be collected from page source.',
+    ].join('\n\n');
+
+    const projectNameHint = (pkg && (pkg as { name?: string }).name) || config.projectSlug;
+
     try {
-      const brand = await gemini.callJson<Partial<BrandSpec>>({
+      const brand = await gemini.callJsonSchema(BrandBootstrapOutputSchema, {
         role: 'mechanical',
         json: true,
-        systemInstruction:
-          'Extract a candidate brand spec from these theme/CSS/Tailwind ' +
-          'files. Return ONLY JSON with keys: name, colors, typeScale, ' +
-          'spacing, radii, voice, componentStyle.',
-        prompt: themeDigest,
+        systemInstruction: [
+          'You are extracting a candidate BrandSpec from a codebase. You will',
+          'receive:',
+          ' 1. Color tokens already STATICALLY extracted from theme files',
+          ' 2. CSS custom properties already extracted',
+          ' 3. Font families found in stylesheets',
+          ' 4. The UI framework detected (if any)',
+          ' 5. Sample copy from page headlines and buttons (real product voice)',
+          ' 6. Raw theme file contents (context only — do not re-parse)',
+          '',
+          'Your job is to NORMALIZE and CHARACTERIZE, not to parse:',
+          '- "colors": use the extracted tokens. Clean up the naming if needed',
+          '  (e.g. fold "primary-500", "brand-primary", "color-primary" into a',
+          '  single `primary`). DO NOT invent colors that were not extracted.',
+          '  If no colors were extracted, return an empty object — never fall',
+          '  back to generic blue/white/gray.',
+          '- "typeScale": derive from font families + any size tokens in raw',
+          '  theme content. Format values as "size/lineheight" strings (e.g.',
+          '  "16px/1.5"). Sensible defaults are OK here.',
+          '- "spacing": derive from spacing/size tokens or use sensible defaults',
+          '  (sm/md/lg at 8/16/24px is a safe baseline).',
+          '- "radii": use shadcn-ui base if present, else infer from any',
+          '  border-radius tokens. Defaults OK.',
+          '- "voice": INFER FROM THE SAMPLE COPY. Be specific and committed.',
+          '  Lead with a tone descriptor ("Direct, founder-led" / "Premium and',
+          '  technical" / "Friendly, casual professional") and then one sentence',
+          '  of color about word choice or sentence structure. If samples are',
+          '  empty or generic, say so honestly — do not fake confidence.',
+          '- "componentStyle": describe layout/visual style based on the',
+          '  framework + extracted tokens. One sentence.',
+          '- "name": prefer the package.json name field if it looks branded;',
+          '  otherwise the project slug. Format as Title Case if it is lowercase',
+          '  and obviously a brand name.',
+          '',
+          'Return STRICT JSON. No prose, no markdown fences.',
+        ].join('\n'),
+        prompt: [
+          `Project name hint: ${projectNameHint}`,
+          '',
+          extractedSummary,
+          '',
+          '=== RAW THEME FILE CONTENTS (context only) ===',
+          themeDigest,
+        ].join('\n'),
       });
       raw.bootstrappedBrand = brand;
     } catch (err) {
       console.error(
         `[stage0] brand bootstrap sub-call failed: ${(err as Error).message}`,
       );
+      // Fall back to the statically-extracted tokens directly — better than
+      // generic defaults when the LLM is unavailable. Voice we can't infer
+      // without the model, so use a neutral placeholder.
+      if (Object.keys(extracted.colors).length > 0) {
+        raw.bootstrappedBrand = {
+          name: projectNameHint,
+          colors: extracted.colors,
+          ...(extracted.fontFamilies.length > 0
+            ? { typeScale: { base: `16px/1.5 ${extracted.fontFamilies[0]}` } }
+            : {}),
+          voice: 'Voice could not be characterized — review the candidate and edit before pinning.',
+          componentStyle: extracted.framework
+            ? `Built with ${extracted.framework}.`
+            : '',
+        };
+      }
     }
   }
 

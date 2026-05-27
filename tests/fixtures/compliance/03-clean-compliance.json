@@ -1,0 +1,40 @@
+{
+  "name": "clean-compliance",
+  "agent": "compliance",
+  "description": "A pricing page with both an FTC-compliant savings claim (named competitor, methodology, source link) and TCPA-compliant phone-capture disclosure. Compliance must return zero findings — calibration against false positives.",
+
+  "input": {
+    "page": {
+      "slug": "pricing",
+      "route": "/pricing",
+      "filePath": "app/pricing/page.tsx",
+      "purpose": "Public pricing page with optional callback request.",
+      "userFunction": "Visitor evaluates plans and optionally requests a sales callback."
+    },
+    "matchedRules": [
+      {
+        "id": "tcpa-express-consent",
+        "domain": "TCPA",
+        "description": "Forms collecting a phone number for marketing SMS or autodialed calls MUST display an express written consent disclosure adjacent to the submit control.",
+        "appliesTo": "*",
+        "severity": "high"
+      },
+      {
+        "id": "ftc-substantiated-savings",
+        "domain": "FTC",
+        "description": "Quantified savings claims MUST be substantiated by a clear basis disclosed on the same page.",
+        "appliesTo": "*",
+        "severity": "high"
+      }
+    ],
+    "source": "1: export default function Pricing() {\n2:   return (\n3:     <main>\n4:       <h1>Up to 42% lower than DenticonPMS based on their published 2025 rates for a 5-user plan</h1>\n5:       <PriceGrid />\n6:       <form action=\"/api/leads\" method=\"post\">\n7:         <label htmlFor=\"phone\">Phone for callback</label>\n8:         <input id=\"phone\" name=\"phone\" type=\"tel\" required />\n9:         <button type=\"submit\">Request a callback</button>\n10:         <p className=\"text-xs text-slate-500\">\n11:           By submitting, you agree that Acme Dental may contact you at the phone number provided,\n12:           including by SMS and autodialed calls, for marketing purposes. Consent is not a condition\n13:           of purchase. Message and data rates may apply.\n14:         </p>\n15:       </form>\n16:     </main>\n17:   );\n18: }"
+  },
+
+  "expected": {
+    "findings": []
+  },
+
+  "assertions": [
+    { "kind": "noFindings" }
+  ]
+}

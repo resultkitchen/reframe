@@ -12,6 +12,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { AgentContext, UxProposal } from '../types';
+import { UxOutputSchema } from '../schemas/agent-outputs';
 
 interface UxModelResponse {
   asciiWireframe?: string;
@@ -143,7 +144,7 @@ export async function runUx(ctx: AgentContext): Promise<UxProposal> {
   let rejected: string[] = [];
 
   try {
-    const response = await ctx.gemini.callJson<UxModelResponse>({
+    const response = await ctx.gemini.callJsonSchema(UxOutputSchema, {
       role: 'agent2_ux',
       systemInstruction: SYSTEM_INSTRUCTION,
       prompt: buildPrompt(ctx),

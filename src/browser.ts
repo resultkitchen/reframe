@@ -17,6 +17,27 @@ import type { AuthConfig, AuthRole, PageHealth } from './types';
 const DESTRUCTIVE_LABEL =
   /\b(delete|remove|destroy|drop|send|submit|pay|payment|purchase|buy|checkout|charge|order|subscribe|unsubscribe|confirm|save|update|publish|deactivate|disable|archive|cancel|approve|reject|decline|invite|sign\s*out|log\s*out|logout)\b/i;
 
+/**
+ * A named viewport at which to capture a screenshot. Agent 1 walks
+ * `DEFAULT_BREAKPOINTS` after the main audit to produce a responsive strip
+ * the review app shows side-by-side — so reviewers can see what every page
+ * looks like on iPhone, iPad, and laptop without re-running.
+ */
+export interface Breakpoint {
+  /** Filesystem-safe id (used in `audit-<name>.png`). */
+  name: string;
+  /** Human-friendly label rendered in the review UI. */
+  label: string;
+  width: number;
+  height: number;
+}
+
+export const DEFAULT_BREAKPOINTS: readonly Breakpoint[] = [
+  { name: 'mobile',  label: 'iPhone 14',  width: 390,  height: 844  },
+  { name: 'tablet',  label: 'iPad',       width: 768,  height: 1024 },
+  { name: 'desktop', label: 'Desktop',    width: 1440, height: 900  },
+] as const;
+
 export class PageDriver {
   private readonly browser: Browser;
 
@@ -432,6 +453,37 @@ export class PageDriver {
     } catch (err) {
       this.consoleErrors.push(
         `[screenshot] failed: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+      return '';
+    }
+  }
+
+  /**
+   * Resize the viewport and capture a fresh full-page screenshot at that size.
+   *
+   * Used by Agent 1 to produce the breakpoint strip (mobile / tablet /
+   * desktop) without re-navigating — same page, same state, just a reflow.
+   * Most responsive layouts pick up the new size on the next paint; a brief
+   * settle delay covers transitions and content-driven height changes.
+   */
+  async screenshotAt(width: number, height: number): Promise<string> {
+    try {
+      await this.page.setViewportSize({ width, height });
+      // Brief settle so responsive media queries reflow before capture.
+      await this.page.waitForTimeout(250);
+      const buf = await promiseWithTimeout<Buffer | null>(
+        this.page.screenshot({ fullPage: true, type: 'png' }),
+        15000,
+        null,
+      );
+      if (!buf) {
+        throw new Error(`Screenshot at ${width}x${height} timed out after 15000ms`);
+      }
+      return buf.toString('base64');
+    } catch (err) {
+      this.consoleErrors.push(
+        `[screenshot ${width}x${height}] failed: ` +
           (err instanceof Error ? err.message : String(err)),
       );
       return '';

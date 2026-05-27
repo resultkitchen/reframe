@@ -18,10 +18,33 @@ import type {
   ComplianceFinding,
   ComplianceResult,
   ConstraintRule,
+  FindingDimension,
   Severity,
 } from '../types';
+import { FINDING_DIMENSIONS } from '../types';
+import { ComplianceOutputSchema } from '../schemas/agent-outputs';
 
 const VALID_SEVERITY: Severity[] = ['critical', 'high', 'medium', 'low'];
+
+function coerceConfidence(value: unknown): number | undefined {
+  let n: number;
+  if (typeof value === 'number') n = value;
+  else if (typeof value === 'string') {
+    const t = value.trim().replace(/%$/, '');
+    n = parseFloat(t);
+    if (Number.isNaN(n)) return undefined;
+    if (value.includes('%') || n > 1) n = n / 100;
+  } else return undefined;
+  if (!Number.isFinite(n)) return undefined;
+  return Math.max(0, Math.min(1, n));
+}
+
+function coerceDimension(value: unknown): FindingDimension | undefined {
+  if (typeof value !== 'string') return undefined;
+  return (FINDING_DIMENSIONS as readonly string[]).includes(value)
+    ? (value as FindingDimension)
+    : undefined;
+}
 
 /** Does a constraint rule apply to this page? */
 function ruleApplies(rule: ConstraintRule, route: string, slug: string): boolean {
@@ -118,6 +141,88 @@ function writeArtifacts(ctx: AgentContext, result: ComplianceResult, matchedRule
   }
 }
 
+/**
+ * System instruction for Agent 6. Exported so the live-LLM eval harness
+ * (tests/eval/run.ts --live) exercises the exact production prompt.
+ */
+export const COMPLIANCE_SYSTEM_INSTRUCTION =
+  'You are a domain-compliance and factual-correctness auditor for web pages. ' +
+  'You catch the failure class: a page that RENDERS FINE and RUNS CLEAN but is ' +
+  'LEGALLY or FACTUALLY WRONG — e.g. missing or non-compliant consent / opt-in ' +
+  'text (TCPA/GDPR), missing required disclosures (FTC, HIPAA), fabricated or ' +
+  'unsubstantiated claims, misrepresented pricing or guarantees, dark patterns. ' +
+  'Evaluate ONLY against the supplied rules. Do not invent rules. Report a ' +
+  'finding only when there is a concrete violation in the supplied source.\n\n' +
+  'DUAL-REGISTER OUTPUT — for EVERY finding, also emit:\n' +
+  '- "plain":       the same violation, in plain English, for a non-technical ' +
+  'reader (founder / client / product owner). NO acronyms (or expand inline). ' +
+  'Lead with the user-visible or legal consequence, not the rule id.\n' +
+  '- "whyItMatters": the real-world consequence if shipped — what regulator / ' +
+  'user / partner is affected, when, and how. Avoid restating the problem.\n' +
+  '- "confidence":   a number in [0, 1] reflecting how certain you are the ' +
+  'violation is real. Be honest — overconfidence damages trust.\n' +
+  '- "dimension":    one of: compliance | brand-voice | microcopy | ' +
+  'accessibility | security. Use the most specific applicable dimension.\n\n' +
+  'Respond with STRICT JSON only — no prose, no markdown fences.';
+
+/**
+ * Build the compliance prompt. Exported so the live-LLM eval harness
+ * can call the exact production prompt with fixture inputs (matchedRules
+ * and source come from the fixture, not from disk).
+ */
+export function buildCompliancePrompt(
+  pageId: string,
+  purpose: string,
+  userFunction: string,
+  filePath: string,
+  matchedRules: ConstraintRule[],
+  source: string,
+): string {
+  const rulesBlock = matchedRules
+    .map(
+      (r) =>
+        `- id: ${r.id}\n  domain: ${r.domain}\n  severity: ${r.severity}\n  rule: ${r.description}`,
+    )
+    .join('\n');
+
+  return [
+    `Page: ${pageId}`,
+    `Purpose: ${purpose}`,
+    `User function: ${userFunction}`,
+    `Source file: ${filePath}`,
+    '',
+    'Compliance rules in force for this page:',
+    rulesBlock,
+    '',
+    'Page source (line-numbered):',
+    '```',
+    source
+      .split('\n')
+      .map((l, i) => `${i + 1}: ${l}`)
+      .join('\n'),
+    '```',
+    '',
+    'For EACH violation you find, emit one finding object. Output JSON exactly:',
+    '{',
+    '  "findings": [',
+    '    {',
+    '      "ruleId": "<id of the violated rule, must be one of the rule ids above>",',
+    '      "domain": "<the rule domain>",',
+    '      "dimension": "compliance|brand-voice|microcopy|accessibility|security",',
+    '      "severity": "critical|high|medium|low",',
+    '      "confidence": 0.95,',
+    '      "location": "<file:line, e.g. ' + filePath + ':42>",',
+    '      "problem":      "<TECHNICAL: what is legally/factually wrong, concretely (engineer-facing)>",',
+    '      "plain":        "<PLAIN ENGLISH: same violation for a non-technical reader. No jargon.>",',
+    '      "whyItMatters": "<real-world consequence if shipped. Who is affected and how.>",',
+    '      "requiredFix":  "<the specific change that makes it compliant>"',
+    '    }',
+    '  ]',
+    '}',
+    '"plain", "whyItMatters", "confidence", and "dimension" are REQUIRED for every finding. If there are no violations, return {"findings": []}.',
+  ].join('\n');
+}
+
 interface ComplianceJsonResponse {
   findings?: Array<{
     ruleId?: unknown;
@@ -126,7 +231,52 @@ interface ComplianceJsonResponse {
     location?: unknown;
     problem?: unknown;
     requiredFix?: unknown;
+    plain?: unknown;
+    whyItMatters?: unknown;
+    confidence?: unknown;
+    dimension?: unknown;
   }>;
+}
+
+/**
+ * Normalize a raw compliance-model finding into a contract-valid ComplianceFinding.
+ *
+ * Exported so the live-LLM eval harness can apply the identical normalization
+ * to a live model response before scoring against assertions. Also filters
+ * findings that reference rules not in scope (hallucination guard) and drops
+ * findings whose `problem` is empty.
+ */
+export function normaliseComplianceFinding(
+  raw: NonNullable<ComplianceJsonResponse['findings']>[number],
+  matchedRules: ConstraintRule[],
+  defaultPath: string,
+): ComplianceFinding {
+  const ruleId = typeof raw.ruleId === 'string' ? raw.ruleId : 'unknown';
+  const rule = matchedRules.find((r) => r.id === ruleId);
+  const finding: ComplianceFinding = {
+    ruleId,
+    domain:
+      typeof raw.domain === 'string' && raw.domain !== ''
+        ? raw.domain
+        : rule?.domain ?? 'unknown',
+    severity: coerceSeverity(raw.severity),
+    location:
+      typeof raw.location === 'string' && raw.location !== ''
+        ? raw.location
+        : defaultPath,
+    problem: typeof raw.problem === 'string' ? raw.problem : '',
+    requiredFix: typeof raw.requiredFix === 'string' ? raw.requiredFix : '',
+  };
+  if (typeof raw.plain === 'string' && raw.plain.trim()) finding.plain = raw.plain.trim();
+  if (typeof raw.whyItMatters === 'string' && raw.whyItMatters.trim()) {
+    finding.whyItMatters = raw.whyItMatters.trim();
+  }
+  const conf = coerceConfidence(raw.confidence);
+  if (conf !== undefined) finding.confidence = conf;
+  const dim = coerceDimension(raw.dimension);
+  if (dim) finding.dimension = dim;
+  if (!finding.dimension) finding.dimension = 'compliance';
+  return finding;
 }
 
 export async function runCompliance(ctx: AgentContext): Promise<ComplianceResult> {
@@ -154,86 +304,25 @@ export async function runCompliance(ctx: AgentContext): Promise<ComplianceResult
     return result;
   }
 
-  const rulesBlock = matchedRules
-    .map(
-      (r) =>
-        `- id: ${r.id}\n  domain: ${r.domain}\n  severity: ${r.severity}\n  rule: ${r.description}`,
-    )
-    .join('\n');
-
-  const systemInstruction =
-    'You are a domain-compliance and factual-correctness auditor for web pages. ' +
-    'You catch the failure class: a page that RENDERS FINE and RUNS CLEAN but is ' +
-    'LEGALLY or FACTUALLY WRONG — e.g. missing or non-compliant consent / opt-in ' +
-    'text (TCPA/GDPR), missing required disclosures (FTC, HIPAA), fabricated or ' +
-    'unsubstantiated claims, misrepresented pricing or guarantees, dark patterns. ' +
-    'Evaluate ONLY against the supplied rules. Do not invent rules. Report a ' +
-    'finding only when there is a concrete violation in the supplied source. ' +
-    'Respond with STRICT JSON only — no prose, no markdown fences.';
-
-  const prompt = [
-    `Page: ${pageId}`,
-    `Purpose: ${ctx.page.purpose}`,
-    `User function: ${ctx.page.userFunction}`,
-    `Source file: ${ctx.page.filePath}`,
-    '',
-    'Compliance rules in force for this page:',
-    rulesBlock,
-    '',
-    'Page source (line-numbered):',
-    '```',
-    source
-      .split('\n')
-      .map((l, i) => `${i + 1}: ${l}`)
-      .join('\n'),
-    '```',
-    '',
-    'For EACH violation you find, emit one finding object. Output JSON exactly:',
-    '{',
-    '  "findings": [',
-    '    {',
-    '      "ruleId": "<id of the violated rule, must be one of the rule ids above>",',
-    '      "domain": "<the rule domain>",',
-    '      "severity": "critical|high|medium|low",',
-    '      "location": "<file:line, e.g. ' + ctx.page.filePath + ':42>",',
-    '      "problem": "<what is legally/factually wrong, concretely>",',
-    '      "requiredFix": "<the specific change that makes it compliant>"',
-    '    }',
-    '  ]',
-    '}',
-    'If there are no violations, return {"findings": []}.',
-  ].join('\n');
+  const systemInstruction = COMPLIANCE_SYSTEM_INSTRUCTION;
+  const prompt = buildCompliancePrompt(pageId, ctx.page.purpose, ctx.page.userFunction, ctx.page.filePath, matchedRules, source);
 
   let findings: ComplianceFinding[] = [];
   try {
-    const response = await ctx.gemini.callJson<ComplianceJsonResponse>({
+    // Schema-validated call — ComplianceOutputSchema enforces the findings
+    // array shape; on a validation failure the client retries once with
+    // the issues appended to the prompt before surfacing the error.
+    const response = await ctx.gemini.callJsonSchema(ComplianceOutputSchema, {
       role: 'agent6_compliance',
       systemInstruction,
       prompt,
       json: true,
     });
 
-    const raw = Array.isArray(response?.findings) ? response.findings : [];
+    const raw = response.findings as ComplianceJsonResponse['findings'] ?? [];
     const validIds = new Set(matchedRules.map((r) => r.id));
     findings = raw
-      .map((f): ComplianceFinding => {
-        const ruleId = typeof f.ruleId === 'string' ? f.ruleId : 'unknown';
-        const rule = matchedRules.find((r) => r.id === ruleId);
-        return {
-          ruleId,
-          domain:
-            typeof f.domain === 'string' && f.domain !== ''
-              ? f.domain
-              : rule?.domain ?? 'unknown',
-          severity: coerceSeverity(f.severity),
-          location:
-            typeof f.location === 'string' && f.location !== ''
-              ? f.location
-              : ctx.page.filePath,
-          problem: typeof f.problem === 'string' ? f.problem : '',
-          requiredFix: typeof f.requiredFix === 'string' ? f.requiredFix : '',
-        };
-      })
+      .map((f) => normaliseComplianceFinding(f, matchedRules, ctx.page.filePath))
       // Drop hallucinated findings that reference rules not in scope.
       .filter((f) => f.ruleId === 'unknown' || validIds.has(f.ruleId))
       .filter((f) => f.problem !== '');

@@ -16,6 +16,7 @@ import type { AgentContext, Gap, VerifyResult, PageHealth } from '../types';
 import { PageDriver } from '../browser';
 import { matchAuthRole } from '../auth';
 import { resolveRoutePath } from '../sample-params';
+import { VerifyOutputSchema } from '../schemas/agent-outputs';
 
 /** Render the human-readable verify report. */
 function renderMd(
@@ -319,7 +320,7 @@ export async function runVerify(ctx: AgentContext): Promise<VerifyResult> {
   let regressions: string[] = [];
 
   try {
-    const response = await ctx.gemini.callJson<VerifyJsonResponse>({
+    const response = await ctx.gemini.callJsonSchema(VerifyOutputSchema, {
       role: 'agent5_verify',
       systemInstruction,
       prompt,

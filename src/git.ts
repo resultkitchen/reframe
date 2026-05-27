@@ -131,6 +131,77 @@ export async function getDiff(
   return git.diff(['HEAD']);
 }
 
+/**
+ * The fallback chain of refs to probe when `--diff-base` isn't set. Order
+ * matters: remote tracking refs first (fresher), local branch names last.
+ */
+const DEFAULT_BASE_CANDIDATES = ['origin/main', 'origin/master', 'main', 'master'] as const;
+
+/**
+ * Resolve the base ref to diff against. Returns `explicit` when set, else
+ * probes the fallback chain and returns the first ref `git rev-parse` can
+ * resolve. Throws when nothing resolves so the caller can surface a clear
+ * error rather than silently producing an empty diff.
+ */
+async function resolveDiffBase(git: SimpleGit, explicit?: string): Promise<string> {
+  if (explicit && explicit.trim()) {
+    // Verify the explicit ref resolves so we fail fast with a clear error
+    // instead of returning every file as "changed" against a missing ref.
+    try {
+      await git.revparse([explicit.trim()]);
+      return explicit.trim();
+    } catch (err) {
+      throw new Error(
+        `--diff-base "${explicit}" could not be resolved by git: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
+  }
+  for (const candidate of DEFAULT_BASE_CANDIDATES) {
+    try {
+      await git.revparse([candidate]);
+      return candidate;
+    } catch {
+      /* try the next candidate */
+    }
+  }
+  throw new Error(
+    `Could not resolve a default diff base — tried ${DEFAULT_BASE_CANDIDATES.join(', ')}. ` +
+      `Pass --diff-base <ref> explicitly.`,
+  );
+}
+
+/**
+ * List the workspace-relative file paths changed on the current branch
+ * relative to `diffBase` (or the auto-resolved default). Uses the symmetric
+ * 3-dot diff (`base...HEAD`) so the result is "what the current branch
+ * introduces" rather than "everything that diverges in either direction" —
+ * the right shape for a per-PR audit.
+ *
+ * Returns paths exactly as git emits them (POSIX separators, repo-relative).
+ * Empty array when nothing has changed. Throws when the work tree is not a
+ * git repo or when no base ref can be resolved.
+ */
+export async function getChangedFiles(
+  workDir: string,
+  diffBase?: string,
+): Promise<{ base: string; files: string[] }> {
+  const git: SimpleGit = simpleGit(workDir);
+  const isRepo = await git.checkIsRepo().catch(() => false);
+  if (!isRepo) {
+    throw new Error(
+      `--diff-only requires a git repository at ${workDir}, but no .git directory was found.`,
+    );
+  }
+  const base = await resolveDiffBase(git, diffBase);
+  const raw = await git.diff([`${base}...HEAD`, '--name-only']);
+  const files = raw
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return { base, files };
+}
+
 /* ─────────────────────────── PR via gh CLI ─────────────────────────── */
 
 /** Run `gh` with args in `cwd`; resolve { stdout, code }. */
@@ -226,4 +297,36 @@ export async function openPr(
   // gh prints the PR URL on stdout.
   const url = result.stdout.trim().split(/\r?\n/).filter(Boolean).pop() ?? '';
   return /^https?:\/\//i.test(url) ? url : '';
+}
+
+/**
+ * Post a top-level conversation comment on an existing PR.
+ *
+ * `prNumberOrUrl` accepts either a numeric PR number (e.g. "42") or the
+ * full PR URL `openPr` returns. Uses the same `gh` CLI auth + remote
+ * detection as `openPr` — no separate token handling.
+ *
+ * Returns `true` on success, `false` on failure (with a console.error).
+ * Caller decides whether to abort or continue; the engine continues
+ * because finding-posting is a notification convenience, not a
+ * correctness requirement.
+ */
+export async function postPrComment(
+  workDir: string,
+  prNumberOrUrl: string,
+  body: string,
+): Promise<boolean> {
+  if (!prNumberOrUrl) return false;
+  const result = await runGh(
+    ['pr', 'comment', prNumberOrUrl, '--body', body],
+    workDir,
+  );
+  if (result.code !== 0) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[git] gh pr comment failed (exit ${result.code}): ${result.stderr.trim()}`,
+    );
+    return false;
+  }
+  return true;
 }

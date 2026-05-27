@@ -1,0 +1,50 @@
+{
+  "name": "missing-tcpa-consent",
+  "agent": "compliance",
+  "description": "Lead-capture form collects a phone number for SMS outreach but is missing the express written consent disclosure TCPA (Telephone Consumer Protection Act) requires. Compliance agent must flag and locate it.",
+
+  "input": {
+    "page": {
+      "slug": "landing",
+      "route": "/",
+      "filePath": "app/page.tsx",
+      "purpose": "Lead-capture: phone-number form for SMS follow-up callbacks.",
+      "userFunction": "Visitor submits their phone number to receive a callback or text from the company."
+    },
+    "matchedRules": [
+      {
+        "id": "tcpa-express-consent",
+        "domain": "TCPA",
+        "description": "Forms collecting a phone number for marketing SMS or autodialed calls MUST display an express written consent disclosure adjacent to the submit control, naming the company and stating that consent is not a condition of purchase.",
+        "appliesTo": "*",
+        "severity": "high"
+      }
+    ],
+    "source": "1: import { useState } from 'react';\n2: export default function Landing() {\n3:   const [phone, setPhone] = useState('');\n4:   return (\n5:     <form action=\"/api/leads\" method=\"post\">\n6:       <label htmlFor=\"phone\">Phone</label>\n7:       <input id=\"phone\" name=\"phone\" type=\"tel\" required />\n8:       <button type=\"submit\">Get a free quote</button>\n9:     </form>\n10:   );\n11: }"
+  },
+
+  "expected": {
+    "findings": [
+      {
+        "ruleId": "tcpa-express-consent",
+        "domain": "TCPA",
+        "dimension": "compliance",
+        "severity": "high",
+        "confidence": 0.95,
+        "location": "app/page.tsx:8",
+        "problem": "The phone-collecting form has no TCPA express written consent disclosure adjacent to the submit button. The form posts to /api/leads which is positioned for marketing SMS/voice follow-up.",
+        "plain": "Your contact form asks for a phone number but doesn't include the legally required note that says 'by submitting, you consent to be contacted by company name'. The TCPA — a US law that governs marketing calls and texts — requires this on every form like this one.",
+        "whyItMatters": "Submitting marketing texts or autodialed calls to a number captured without this disclosure exposes the business to TCPA suits with statutory damages of $500–$1,500 per call or text. The risk scales with every lead the form collects.",
+        "requiredFix": "Add a checkbox or visible disclosure adjacent to the submit button along the lines of: 'By clicking Submit, you agree that <Company Name> may contact you at the phone number provided, including by SMS and autodialed calls, for marketing purposes. Consent is not a condition of any purchase. Message and data rates may apply.'"
+      }
+    ]
+  },
+
+  "assertions": [
+    { "kind": "minFindings", "value": 1 },
+    { "kind": "severityAtLeast", "id": "tcpa-express-consent", "value": "high" },
+    { "kind": "fieldPresent", "id": "tcpa-express-consent", "path": "plain" },
+    { "kind": "fieldPresent", "id": "tcpa-express-consent", "path": "whyItMatters" },
+    { "kind": "mentionsAny", "id": "tcpa-express-consent", "values": ["tcpa", "consent", "phone"] }
+  ]
+}

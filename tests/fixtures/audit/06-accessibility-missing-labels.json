@@ -1,0 +1,77 @@
+{
+  "name": "accessibility-missing-labels",
+  "agent": "audit",
+  "description": "A search form with an unlabeled icon-only submit button and an input without an associated <label>. Marcus — the accessibility persona — must flag both as `accessibility` dimension findings with concrete WCAG references.",
+
+  "input": {
+    "page": {
+      "slug": "leads",
+      "route": "/admin/leads",
+      "filePath": "app/admin/leads/page.tsx",
+      "purpose": "Operations team searches the lead database.",
+      "userFunction": "Type a query, submit, view filtered results.",
+      "dataDependencies": [
+        { "page": "/admin/leads", "kind": "query", "target": "leads", "description": "Filter by search query." }
+      ],
+      "libraries": ["react", "tailwind"]
+    },
+    "brand": {
+      "name": "Acme",
+      "voice": "Direct, professional.",
+      "componentStyle": "Flat, accent-colored CTAs.",
+      "pinned": true
+    },
+    "snapshot": "Leads\n[input, no label]\n[icon button: 🔍 (no aria-label)]\n[table: 142 rows]",
+    "interactions": [
+      "focus: input#0",
+      "click: clickable#1"
+    ],
+    "consoleErrors": [],
+    "health": {
+      "status": "ok",
+      "healthy": true,
+      "finalUrl": "http://localhost:3000/admin/leads",
+      "httpStatus": 200,
+      "detail": "Page loaded successfully."
+    }
+  },
+
+  "expected": {
+    "gaps": [
+      {
+        "id": "g1",
+        "category": "ux",
+        "dimension": "accessibility",
+        "severity": "high",
+        "confidence": 0.95,
+        "description": "Search input lacks an associated <label> or aria-label. Screen readers will announce it as 'edit, blank' with no purpose hint. Violates WCAG 2.2 SC 3.3.2 (Labels or Instructions).",
+        "plain": "The search box at the top of the leads table has no name. A blind user with a screen reader won't know what to type there — the page will just say 'edit, blank' and stop.",
+        "whyItMatters": "Roughly 2% of working-age users rely on screen readers daily. An unlabeled search input on your primary admin tool means those users can't do their job. It's also the first thing an accessibility audit catches in any compliance review.",
+        "recommendation": "Add aria-label=\"Search active leads\" to the input, or wrap it with a visible <label htmlFor=\"search\">Search leads</label> linked by id.",
+        "evidence": ["input#0 had no associated label"]
+      },
+      {
+        "id": "g2",
+        "category": "ux",
+        "dimension": "accessibility",
+        "severity": "high",
+        "confidence": 0.95,
+        "description": "Icon-only submit button (🔍) has no aria-label or visible text. Screen readers will announce it as 'button' with no purpose. Violates WCAG 2.2 SC 4.1.2 (Name, Role, Value).",
+        "plain": "The search button is just a magnifying-glass icon with no text. A screen reader will announce it as 'button' — the user has no way to know what tapping it will do.",
+        "whyItMatters": "Icon-only buttons without text are the single most common screen-reader blocker in production SaaS apps. This particular one gates access to the search itself, so it compounds the missing-label finding.",
+        "recommendation": "Add aria-label=\"Submit search\" to the button. If the icon is meaningful sighted-only, also add a sr-only span with the text label.",
+        "evidence": ["clickable#1 had no accessible name"]
+      }
+    ]
+  },
+
+  "assertions": [
+    { "kind": "minFindings", "value": 2 },
+    { "kind": "dimensionIn", "id": "g1", "values": ["accessibility"] },
+    { "kind": "dimensionIn", "id": "g2", "values": ["accessibility"] },
+    { "kind": "severityAtLeast", "id": "g1", "value": "high" },
+    { "kind": "fieldPresent", "id": "g1", "path": "plain" },
+    { "kind": "mentionsAny", "id": "g1", "values": ["screen reader", "label", "wcag", "aria"] },
+    { "kind": "mentionsAny", "id": "g2", "values": ["icon", "aria", "label", "name"] }
+  ]
+}

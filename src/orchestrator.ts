@@ -14,10 +14,11 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as readline from 'node:readline';
 import { spawnSync } from 'node:child_process';
 
 import { GeminiClient } from './gemini';
-import { cloneRepo, createRunBranch, commitAll, openPr } from './git';
+import { cloneRepo, createRunBranch, commitAll, openPr, getChangedFiles, postPrComment } from './git';
 import { prepareScratch, cleanupScratch, checkDisk } from './scratch';
 import { newRunState, loadState, saveState, loadApprovals } from './state';
 import { writeManifest } from './manifest';
@@ -53,6 +54,7 @@ import type {
   VerifyResult,
   PageOutcome,
   AuditResult,
+  ComplianceResult,
 } from './types';
 
 /* ───────────────────────────── helpers ───────────────────────────── */
@@ -263,6 +265,44 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       console.log(`[reframe] ${msg}`);
     }
 
+    /* (5.5) --diff-only: filter to pages whose source file is changed on
+       this branch relative to the configured base (origin/main by default).
+       Runs AFTER role + page-cap filters so all selectors compose. Pages
+       are matched by absolute and workspace-relative file path so it works
+       whether stage 0 emitted absolute or repo-relative paths. */
+    if (config.diffOnly) {
+      try {
+        const { base, files: changedFiles } = await getChangedFiles(
+          config.workDir,
+          config.diffBase,
+        );
+        const changedSet = new Set<string>();
+        for (const f of changedFiles) {
+          changedSet.add(f);
+          // Normalize POSIX separators on Windows for cross-platform match.
+          changedSet.add(f.replace(/\\/g, '/'));
+        }
+        const originalLength = scope.pages.length;
+        scope.pages = scope.pages.filter((p) => {
+          if (!p.filePath) return false;
+          const rel = path.isAbsolute(p.filePath)
+            ? path.relative(config.workDir, p.filePath).replace(/\\/g, '/')
+            : p.filePath.replace(/\\/g, '/');
+          return changedSet.has(rel);
+        });
+        const msg = changedFiles.length === 0
+          ? `Diff-only against ${base}: no files changed on this branch — nothing to audit.`
+          : `Diff-only against ${base}: ${scope.pages.length} of ${originalLength} pages match the ${changedFiles.length} changed file(s).`;
+        extraAlerts.push(msg);
+        console.log(`[reframe] ${msg}`);
+      } catch (err) {
+        extraAlerts.push(`--diff-only failed: ${errMsg(err)}`);
+        console.error(`[reframe] --diff-only failed: ${errMsg(err)}`);
+        // Continue with the full scope rather than aborting — the operator
+        // gets a clear alert in the manifest and a usable run.
+      }
+    }
+
     /* If we had no state yet (fresh run, or resume without file), build it
        now that we know the page slugs. */
     if (!state) {
@@ -281,6 +321,88 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
     /* (6) BRAND PIN GATE. */
     const brand = resolveBrand(config, scope, extraAlerts);
     const constraints = resolveConstraints(config, scope.productGoal);
+
+    /* (6.5) --bootstrap-only: produce the candidate brand spec and exit
+       without booting the dev server or running any agents. Used by the
+       `reframe bootstrap` subcommand so an operator can review and pin
+       the brand before committing to a full audit run. */
+    if (config.bootstrapOnly) {
+      const brandCandidatePath = path.join(config.runDir, 'brand.candidate.json');
+      // resolveBrand already wrote brand.resolved.json; also write a copy
+      // at the more discoverable name `brand.candidate.json` so the operator
+      // doesn't have to interpret "resolved" vs "candidate" wording.
+      try {
+        fs.writeFileSync(brandCandidatePath, JSON.stringify(brand, null, 2), 'utf8');
+      } catch (err) {
+        extraAlerts.push(`Could not write brand.candidate.json: ${errMsg(err)}`);
+      }
+
+      // Pretty-print the brand candidate inline so the operator sees what
+      // they're about to pin without having to run a follow-up command.
+      // The `reframe show-brand` subcommand renders the same block out of
+      // a completed run dir, so the experience is consistent.
+      console.log('');
+      console.log(`[reframe] BOOTSTRAP COMPLETE — ${scope.pages.length} pages mapped.`);
+      try {
+        const { renderBrand } = await import('./show-brand');
+        console.log(renderBrand(brand, 'brand.candidate.json', config.runDir));
+      } catch (err) {
+        console.error(`[reframe] could not render brand summary: ${errMsg(err)}`);
+      }
+
+      // Interactive pin: if stdin is a TTY (a human is at the keyboard, not
+      // CI), offer to write config/brand.json directly so the operator can
+      // pin and re-run in one step. Silent in non-TTY contexts (CI / pipes).
+      if (process.stdin.isTTY && process.stdout.isTTY) {
+        const targetDir = config.isLocalPath
+          ? path.resolve(config.target)
+          : process.cwd();
+        const pinPath = path.join(targetDir, 'config', 'brand.json');
+        const answer = await promptYesNo(
+          `Pin this brand to ${pinPath} now? (y/N) `,
+        );
+        if (answer) {
+          try {
+            const pinnedBrand = { ...brand, pinned: true };
+            fs.mkdirSync(path.dirname(pinPath), { recursive: true });
+            fs.writeFileSync(pinPath, JSON.stringify(pinnedBrand, null, 2), 'utf8');
+            console.log('');
+            console.log(`[reframe] ✓ pinned to ${pinPath}`);
+            console.log(`[reframe]   re-run with:  reframe rebuild ${config.target} --brand ${pinPath}`);
+            console.log('');
+          } catch (err) {
+            extraAlerts.push(`Interactive pin to ${pinPath} failed: ${errMsg(err)}`);
+            console.error(`[reframe] could not write ${pinPath}: ${errMsg(err)}`);
+          }
+        }
+      }
+
+      // Clean scratch and write a minimal manifest so downstream tooling
+      // (the review UI, CI) can detect a bootstrap run via its empty
+      // pagesProcessed list and the dedicated alert below.
+      const cleaned = await safeCleanup(config);
+      const geminiAlerts = gemini ? gemini.alerts : [];
+      const manifest: RunManifest = {
+        project: config.projectSlug,
+        target: config.target,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        wallClockMs: Date.now() - startedAtMs,
+        bootStatus: 'no-server',
+        pagesProcessed: [],
+        testUsers: [],
+        applyMode: config.applyMode,
+        scratchCleaned: cleaned,
+        alerts: [
+          ...geminiAlerts,
+          ...extraAlerts,
+          `Bootstrap-only run — brand candidate at ${brandCandidatePath}. Pin and re-run for a full audit.`,
+        ],
+      };
+      writeManifest(config.runDir, manifest);
+      scratchCleaned = true;
+      return manifest;
+    }
 
     /* (7) Stage 0.5 — boot gate. Always re-run, even on resume: scratch (with
        node_modules AND the running dev server) is deleted at the end of every
@@ -423,22 +545,60 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
 
       console.log(`[${page.slug}] starting (${page.route}).`);
 
-      // DAG: audit → (ux → design); compliance ∥ that chain; then code; then verify.
-      const auditChain = (async () => {
-        ctx.audit = (await runAgent('audit', () => runAudit(ctx))) ?? ctx.audit;
-        ctx.ux = (await runAgent('ux', () => runUx(ctx))) ?? ctx.ux;
-        ctx.design = (await runAgent('design', () => runDesign(ctx))) ?? ctx.design;
-      })();
-      const complianceChain = (async () => {
-        ctx.compliance =
-          (await runAgent('compliance', () => runCompliance(ctx))) ?? ctx.compliance;
-      })();
-      await Promise.all([auditChain, complianceChain]);
+      // --verify-only: skip the upstream DAG entirely and re-hydrate audit
+      // (and optionally compliance) from the resumed run's on-disk artifacts.
+      // Agent 5 needs ctx.audit.gaps to know what to verify against — without
+      // it, verify falls back to "trivially pass if the page drives clean",
+      // which isn't what `reframe verify` asks for.
+      if (config.verifyOnly) {
+        const pageDir = path.join(config.runDir, 'pages', page.slug);
+        const auditJsonPath = path.join(pageDir, 'audit.json');
+        if (fs.existsSync(auditJsonPath)) {
+          try {
+            ctx.audit = JSON.parse(fs.readFileSync(auditJsonPath, 'utf8')) as AuditResult;
+          } catch (err) {
+            extraAlerts.push(
+              `[${page.slug}] could not load audit.json for --verify-only: ${errMsg(err)}`,
+            );
+          }
+        }
+        const complianceJsonPath = path.join(pageDir, 'compliance.json');
+        if (fs.existsSync(complianceJsonPath)) {
+          try {
+            ctx.compliance = JSON.parse(fs.readFileSync(complianceJsonPath, 'utf8')) as ComplianceResult;
+          } catch {
+            /* compliance is optional for verify; ignore parse errors */
+          }
+        }
+        // Skip-mark every upstream agent so the page state reflects what
+        // we actually did (only verify ran).
+        mark('audit', ctx.audit ? 'done' : 'skipped');
+        mark('ux', 'skipped');
+        mark('design', 'skipped');
+        mark('code', 'skipped');
+        mark('compliance', ctx.compliance ? 'done' : 'skipped');
+      } else {
+        // DAG: audit → (ux → design); compliance ∥ that chain; then code; then verify.
+        const auditChain = (async () => {
+          ctx.audit = (await runAgent('audit', () => runAudit(ctx))) ?? ctx.audit;
+          ctx.ux = (await runAgent('ux', () => runUx(ctx))) ?? ctx.ux;
+          ctx.design = (await runAgent('design', () => runDesign(ctx))) ?? ctx.design;
+        })();
+        const complianceChain = (async () => {
+          ctx.compliance =
+            (await runAgent('compliance', () => runCompliance(ctx))) ?? ctx.compliance;
+        })();
+        await Promise.all([auditChain, complianceChain]);
+      }
 
       // 'review' mode stops at the four review agents: no code, no verify —
       // the operator approves proposed-changes.md before any apply pass.
+      // --verify-only skips the gap-filter + code agent and goes straight
+      // to verify against the rehydrated audit results.
       let verify: VerifyResult | undefined;
-      if (config.applyMode !== 'review') {
+      if (config.verifyOnly) {
+        verify = await runAgent('verify', () => runVerify(ctx));
+      } else if (config.applyMode !== 'review') {
         if (ctx.audit && approval?.gaps) {
           const originalGapCount = ctx.audit.gaps.length;
           ctx.audit.gaps = ctx.audit.gaps.filter(g => {
@@ -452,6 +612,37 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
           const skippedCount = originalGapCount - ctx.audit.gaps.length;
           if (skippedCount > 0) {
             console.log(`[${page.slug}] filtered gaps: ${originalGapCount} -> ${ctx.audit.gaps.length} (${skippedCount} skipped)`);
+          }
+        }
+
+        // Mirror the gap-skip flow for compliance findings the reviewer
+        // marked as skip from the Run Overview. Keyed `${ruleId}::${location}`
+        // so multiple findings of the same rule at different lines can be
+        // decided independently. Findings that were dismissed don't flow
+        // into agent 4's prompt (which reads ctx.compliance.findings) and
+        // therefore don't pull code changes for them.
+        if (ctx.compliance && approval?.complianceFindings) {
+          const originalCount = ctx.compliance.findings.length;
+          ctx.compliance.findings = ctx.compliance.findings.filter((f) => {
+            const key = `${f.ruleId}::${f.location}`;
+            if (approval.complianceFindings?.[key] === 'skip') {
+              console.log(`[${page.slug}] skipping compliance finding ${key} per approvals.json`);
+              return false;
+            }
+            return true;
+          });
+          const skipped = originalCount - ctx.compliance.findings.length;
+          if (skipped > 0) {
+            console.log(
+              `[${page.slug}] filtered compliance findings: ${originalCount} -> ` +
+                `${ctx.compliance.findings.length} (${skipped} skipped)`,
+            );
+            // Recompute the clean flag — a previously-dirty page becomes
+            // clean if every remaining finding is below the critical/high
+            // bar (matches agent6-compliance's own clean computation).
+            ctx.compliance.clean = !ctx.compliance.findings.some(
+              (f) => f.severity === 'critical' || f.severity === 'high',
+            );
           }
         }
 
@@ -529,9 +720,11 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       .map((p) => pageEntries.find((e) => e.slug === p.slug))
       .filter((e): e is PageManifestEntry => Boolean(e));
 
-    /* (10) Commit + PR in 'pr' mode. */
+    /* (10) Commit + PR in 'pr' mode. Skipped on --verify-only: verify
+       writes no code changes, so there is nothing to commit and a PR
+       would be empty noise. */
     let prUrl: string | undefined;
-    if (config.applyMode === 'pr') {
+    if (config.applyMode === 'pr' && !config.verifyOnly) {
       const passCount = orderedEntries.filter((e) => e.pass).length;
       const commitMsg =
         `reframe: ${passCount}/${orderedEntries.length} pages passing`;
@@ -549,6 +742,26 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
         console.log(
           prUrl ? `[reframe] PR: ${prUrl}` : `[reframe] no GitHub remote — PR skipped.`,
         );
+
+        // --post-findings: also post the top-N plain-English digest as a
+        // top-level PR conversation comment. GitHub sends conversation
+        // comments as notifications to subscribed reviewers; the PR body
+        // does not. This is the wake-up signal for Priya's reviewer queue.
+        // Opt-in by default so an automated run never surprises a repo.
+        if (prUrl && config.postFindings) {
+          const commentBody = buildPrComment(config.runDir, orderedEntries);
+          if (commentBody) {
+            console.log(`[reframe] posting findings digest to PR...`);
+            const posted = await postPrComment(config.workDir, prUrl, commentBody);
+            if (!posted) {
+              extraAlerts.push(
+                `--post-findings: gh pr comment failed for ${prUrl} (see logs).`,
+              );
+            }
+          } else {
+            console.log(`[reframe] --post-findings: nothing to post (clean run).`);
+          }
+        }
       } catch (err) {
         extraAlerts.push(`Commit/PR step failed: ${errMsg(err)}`);
         console.error(`[reframe] commit/PR failed: ${errMsg(err)}`);
@@ -564,10 +777,12 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
     /* (11) Test scaffold. Skipped in review mode — a review pass applies no
        code and (under --real-env) must not seed accounts into a real backend. */
     let testUsers: TestUser[] = [];
-    if (config.applyMode === 'review') {
+    if (config.applyMode === 'review' || config.verifyOnly) {
       state.testScaffold = 'skipped';
       saveState(config.runDir, state);
-      console.log(`[reframe] review mode — test scaffold skipped.`);
+      console.log(
+        `[reframe] ${config.verifyOnly ? '--verify-only' : 'review mode'} — test scaffold skipped.`,
+      );
     } else if (
       resuming &&
       state.testScaffold === 'done' &&
@@ -791,6 +1006,196 @@ function usersJsonExists(runDir: string): boolean {
   return fs.existsSync(path.join(runDir, 'test-scaffold', 'users.json'));
 }
 
+/**
+ * Read this page's audit + compliance JSON from the run dir, if present.
+ * Returns nulls on missing/malformed files — buildPrBody falls back to
+ * the manifest counts in that case rather than throwing.
+ */
+function loadPageAgentArtifacts(
+  runDir: string,
+  slug: string,
+): { audit: AuditResult | null; compliance: ComplianceResult | null } {
+  const pageDir = path.join(runDir, 'pages', slug);
+  let audit: AuditResult | null = null;
+  let compliance: ComplianceResult | null = null;
+  try {
+    const auditPath = path.join(pageDir, 'audit.json');
+    if (fs.existsSync(auditPath)) {
+      audit = JSON.parse(fs.readFileSync(auditPath, 'utf8')) as AuditResult;
+    }
+  } catch {
+    /* malformed audit.json — fall through with null */
+  }
+  try {
+    const compliancePath = path.join(pageDir, 'compliance.json');
+    if (fs.existsSync(compliancePath)) {
+      compliance = JSON.parse(fs.readFileSync(compliancePath, 'utf8')) as ComplianceResult;
+    }
+  } catch {
+    /* malformed compliance.json — fall through with null */
+  }
+  return { audit, compliance };
+}
+
+/**
+ * Build the plain-English summary block at the top of the PR body — the
+ * reviewer-facing version of the run, in the language a non-technical
+ * reader can act on. Reads agent artifacts directly off disk and ranks
+ * findings by severity x confidence across audit + compliance.
+ *
+ * Returns an empty string when no findings of consequence were emitted,
+ * so the PR body stays tight on clean runs.
+ */
+function buildPlainEnglishSummary(
+  runDir: string,
+  entries: PageManifestEntry[],
+  maxItems = 5,
+): string {
+  const SEVERITY_WEIGHT: Record<string, number> = {
+    critical: 4, high: 3, medium: 2, low: 1,
+  };
+  type DigestItem = {
+    pageSlug: string;
+    pageRoute: string;
+    severity: string;
+    headline: string;
+    whyItMatters?: string;
+    impact: number;
+  };
+  const items: DigestItem[] = [];
+
+  for (const entry of entries) {
+    const { audit, compliance } = loadPageAgentArtifacts(runDir, entry.slug);
+    for (const gap of audit?.gaps ?? []) {
+      const sev = SEVERITY_WEIGHT[gap.severity] ?? 1;
+      const conf = gap.confidence ?? 0.8;
+      items.push({
+        pageSlug: entry.slug,
+        pageRoute: entry.route,
+        severity: gap.severity,
+        headline: gap.plain || gap.description,
+        whyItMatters: gap.whyItMatters,
+        impact: sev * conf,
+      });
+    }
+    for (const f of compliance?.findings ?? []) {
+      const sev = SEVERITY_WEIGHT[f.severity] ?? 1;
+      const conf = f.confidence ?? 0.8;
+      items.push({
+        pageSlug: entry.slug,
+        pageRoute: entry.route,
+        severity: f.severity,
+        headline: f.plain || f.problem,
+        whyItMatters: f.whyItMatters,
+        impact: sev * conf,
+      });
+    }
+  }
+
+  if (items.length === 0) return '';
+
+  items.sort((a, b) => b.impact - a.impact);
+  const top = items.slice(0, maxItems);
+
+  const lines: string[] = [
+    '### ✨ What changed, in plain English',
+    '',
+    `The ${top.length === 1 ? 'one thing' : `${top.length} things`} most likely to land hardest with a real user — ranked by impact across every reviewed page:`,
+    '',
+  ];
+  for (const item of top) {
+    lines.push(`1. **[${item.severity}]** \`${item.pageSlug}\` — ${item.headline}`);
+    if (item.whyItMatters) {
+      lines.push(`   _Why it matters_: ${item.whyItMatters}`);
+    }
+  }
+  if (items.length > top.length) {
+    lines.push('', `_${items.length - top.length} additional findings below — see the manifest._`);
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
+/**
+ * Build the standalone PR conversation comment posted when --post-findings
+ * is set. Distinct in shape from the PR body: shorter, action-oriented,
+ * framed as a notification. Skips the manifest table (already in the body)
+ * and goes straight to the top 3 findings with severity pills + plain text.
+ *
+ * Returns '' on a clean run so the caller skips the comment entirely
+ * instead of posting an empty "nothing to see here" notification.
+ */
+function buildPrComment(
+  runDir: string,
+  entries: PageManifestEntry[],
+): string {
+  const SEVERITY_WEIGHT: Record<string, number> = {
+    critical: 4, high: 3, medium: 2, low: 1,
+  };
+  type DigestItem = {
+    pageSlug: string;
+    severity: string;
+    headline: string;
+    whyItMatters?: string;
+    impact: number;
+  };
+  const items: DigestItem[] = [];
+
+  for (const entry of entries) {
+    const { audit, compliance } = loadPageAgentArtifacts(runDir, entry.slug);
+    for (const gap of audit?.gaps ?? []) {
+      const sev = SEVERITY_WEIGHT[gap.severity] ?? 1;
+      const conf = gap.confidence ?? 0.8;
+      items.push({
+        pageSlug: entry.slug,
+        severity: gap.severity,
+        headline: gap.plain || gap.description,
+        whyItMatters: gap.whyItMatters,
+        impact: sev * conf,
+      });
+    }
+    for (const f of compliance?.findings ?? []) {
+      const sev = SEVERITY_WEIGHT[f.severity] ?? 1;
+      const conf = f.confidence ?? 0.8;
+      items.push({
+        pageSlug: entry.slug,
+        severity: f.severity,
+        headline: f.plain || f.problem,
+        whyItMatters: f.whyItMatters,
+        impact: sev * conf,
+      });
+    }
+  }
+
+  if (items.length === 0) return '';
+
+  items.sort((a, b) => b.impact - a.impact);
+  const top = items.slice(0, 3);
+  const passCount = entries.filter((e) => e.pass).length;
+
+  const lines: string[] = [
+    `🤖 **Reframe review summary**`,
+    '',
+    `${passCount}/${entries.length} pages passing on this branch. The ${top.length === 1 ? 'item' : `${top.length} items`} most likely to land hardest with a real user:`,
+    '',
+  ];
+  for (const item of top) {
+    lines.push(`**\`[${item.severity}]\` \`${item.pageSlug}\`** — ${item.headline}`);
+    if (item.whyItMatters) {
+      lines.push(`_Why it matters_: ${item.whyItMatters}`);
+    }
+    lines.push('');
+  }
+  if (items.length > top.length) {
+    lines.push(
+      `📖 Plus ${items.length - top.length} more finding${items.length - top.length === 1 ? '' : 's'} in the PR description above.`,
+    );
+  } else {
+    lines.push(`📖 Full manifest and per-page detail in the PR description above.`);
+  }
+  return lines.join('\n');
+}
+
 function buildPrBody(
   config: PipelineConfig,
   entries: PageManifestEntry[],
@@ -801,11 +1206,19 @@ function buildPrBody(
     '',
     `**${passCount}/${entries.length} pages passing.**`,
     '',
+  ];
+
+  const plainSummary = buildPlainEnglishSummary(config.runDir, entries);
+  if (plainSummary) {
+    lines.push(plainSummary);
+  }
+
+  lines.push(
     '### Page Manifest Summary',
     '',
     '| Page | Route | Pass | Gaps found | Gaps closed | Compliance findings |',
     '| ---- | ----- | ---- | ---------- | ----------- | ------------------- |',
-  ];
+  );
   for (const e of entries) {
     lines.push(
       `| ${e.slug} | ${e.route} | ${e.pass ? '✅' : '❌'} | ` +
@@ -834,6 +1247,12 @@ function buildPrBody(
           .join(', ');
         lines.push(`  - **Gap Decisions**: ${gapDecisions}`);
       }
+      if (approval.complianceFindings && Object.keys(approval.complianceFindings).length > 0) {
+        const complianceDecisions = Object.entries(approval.complianceFindings)
+          .map(([key, dec]) => `\`${key}\`: ${dec === 'apply' ? 'apply' : 'skip'}`)
+          .join(', ');
+        lines.push(`  - **Compliance Finding Decisions**: ${complianceDecisions}`);
+      }
     }
   }
 
@@ -843,4 +1262,26 @@ function buildPrBody(
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Ask a yes/no question on stdin. Resolves true on y/Y/yes (any case),
+ * false on anything else — including empty input. Treats the answer as
+ * "no" by default so accidental Enter never auto-pins.
+ *
+ * Caller is responsible for first checking process.stdin.isTTY — calling
+ * this in CI / piped contexts would hang waiting for input.
+ */
+function promptYesNo(question: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    rl.question(question, (answer) => {
+      rl.close();
+      const trimmed = answer.trim().toLowerCase();
+      resolve(trimmed === 'y' || trimmed === 'yes');
+    });
+  });
 }

@@ -1,0 +1,67 @@
+{
+  "name": "broken-submit-button",
+  "agent": "audit",
+  "description": "Patient-intake form's Submit button is wired to a removed handler. Clicking does nothing, console logs a TypeError, and the audit must catch it as critical functional damage with a plain-English explanation a non-technical reader can act on.",
+
+  "input": {
+    "page": {
+      "slug": "patient-intake",
+      "route": "/intake/new",
+      "filePath": "app/intake/new/page.tsx",
+      "purpose": "New patient signs up and submits their contact information.",
+      "userFunction": "Fill out a contact form and submit to create a patient record.",
+      "dataDependencies": [
+        { "page": "/intake/new", "kind": "mutation", "target": "patients", "description": "Insert a new patient row." }
+      ],
+      "libraries": ["react", "react-hook-form", "tailwind"]
+    },
+    "snapshot": "<form>\n  <label>Full name</label> <input name=\"fullName\" />\n  <label>Phone</label> <input name=\"phone\" type=\"tel\" />\n  <label>Email</label> <input name=\"email\" type=\"email\" />\n  <button type=\"submit\">Submit</button>\n</form>",
+    "interactions": [
+      "focus: fullName",
+      "focus: phone",
+      "focus: email",
+      "click: Submit"
+    ],
+    "consoleErrors": [
+      "[pageerror] TypeError: handleSubmit is not a function",
+      "[console.error] Form submission aborted"
+    ],
+    "health": {
+      "status": "ok",
+      "healthy": true,
+      "finalUrl": "http://localhost:3000/intake/new",
+      "httpStatus": 200,
+      "detail": "Page loaded successfully."
+    }
+  },
+
+  "expected": {
+    "gaps": [
+      {
+        "id": "g1",
+        "category": "functional",
+        "dimension": "functional",
+        "severity": "critical",
+        "confidence": 0.97,
+        "description": "Form submit handler is undefined — `handleSubmit` is not a function. Clicking Submit throws TypeError and no `patients` insert is attempted.",
+        "plain": "The Submit button on the patient intake form doesn't actually do anything. When a new patient clicks it, nothing happens and an error is logged behind the scenes — no record is created.",
+        "whyItMatters": "Every new patient who tries to sign up will get a silent dead end. They'll think the form is broken, leave the site, and your team will never see their information.",
+        "recommendation": "Wire the form's submit prop to a real handler — react-hook-form's `handleSubmit(onSubmit)` — that calls the patients insert mutation.",
+        "evidence": [
+          "[pageerror] TypeError: handleSubmit is not a function",
+          "click: Submit"
+        ]
+      }
+    ]
+  },
+
+  "assertions": [
+    { "kind": "minFindings", "value": 1 },
+    { "kind": "severityAtLeast", "id": "g1", "value": "critical" },
+    { "kind": "categoryEquals", "id": "g1", "value": "functional" },
+    { "kind": "fieldPresent", "id": "g1", "path": "plain" },
+    { "kind": "fieldPresent", "id": "g1", "path": "whyItMatters" },
+    { "kind": "confidenceAtLeast", "id": "g1", "value": 0.8 },
+    { "kind": "mentionsAny", "id": "g1", "values": ["submit", "handler", "patient"] }
+  ]
+}

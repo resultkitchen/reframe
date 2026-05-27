@@ -10,18 +10,35 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { PageDriver } from '../browser';
+import { PageDriver, DEFAULT_BREAKPOINTS } from '../browser';
 import { matchAuthRole } from '../auth';
 import { resolveRoutePath } from '../sample-params';
-import type { AgentContext, AuditResult, Gap, Severity, PageHealth } from '../types';
+import type {
+  AgentContext,
+  AuditResult,
+  Gap,
+  Severity,
+  PageHealth,
+  FindingDimension,
+} from '../types';
+import { FINDING_DIMENSIONS } from '../types';
+import { AuditOutputSchema } from '../schemas/agent-outputs';
 
-/** Shape the model must return — kept narrow so parsing is robust. */
+/**
+ * Shape the model must return — also enforced at runtime by AuditOutputSchema
+ * (src/schemas/agent-outputs.ts). The Zod schema is the source of truth; this
+ * interface mirrors it for the TS-only normalization path below.
+ */
 interface AuditModelResponse {
   gaps: Array<{
     id?: string;
     category?: string;
+    dimension?: string;
     severity?: string;
+    confidence?: number | string;
     description?: string;
+    plain?: string;
+    whyItMatters?: string;
     recommendation?: string;
     evidence?: string[];
   }>;
@@ -41,8 +58,44 @@ function coerceCategory(value: unknown): 'functional' | 'ux' {
     : 'functional';
 }
 
-/** Normalise a raw model gap into a contract-valid Gap. */
-function normaliseGap(raw: AuditModelResponse['gaps'][number], index: number): Gap {
+function coerceDimension(value: unknown): FindingDimension | undefined {
+  if (typeof value !== 'string') return undefined;
+  return (FINDING_DIMENSIONS as readonly string[]).includes(value)
+    ? (value as FindingDimension)
+    : undefined;
+}
+
+/**
+ * Coerce a raw confidence value to [0, 1]. Accepts numbers and numeric
+ * strings ("0.9", "90%"). Returns undefined for anything we can't parse —
+ * letting callers fall through to a sensible default in the UI.
+ */
+function coerceConfidence(value: unknown): number | undefined {
+  let n: number;
+  if (typeof value === 'number') {
+    n = value;
+  } else if (typeof value === 'string') {
+    const trimmed = value.trim().replace(/%$/, '');
+    n = parseFloat(trimmed);
+    if (Number.isNaN(n)) return undefined;
+    // Treat "85" as 0.85, "0.85" as 0.85.
+    if (value.includes('%') || n > 1) n = n / 100;
+  } else {
+    return undefined;
+  }
+  if (!Number.isFinite(n)) return undefined;
+  return Math.max(0, Math.min(1, n));
+}
+
+/**
+ * Normalise a raw model gap into a contract-valid Gap.
+ *
+ * Exported so the live-LLM eval harness (tests/eval/run.ts --live)
+ * can apply the exact same normalization to real agent output before
+ * scoring against assertions — without having to drive the browser
+ * or write to a runDir.
+ */
+export function normaliseGap(raw: AuditModelResponse['gaps'][number], index: number): Gap {
   const gap: Gap = {
     id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : `g${index + 1}`,
     category: coerceCategory(raw.category),
@@ -59,6 +112,16 @@ function normaliseGap(raw: AuditModelResponse['gaps'][number], index: number): G
   if (Array.isArray(raw.evidence) && raw.evidence.length > 0) {
     gap.evidence = raw.evidence.filter((e): e is string => typeof e === 'string');
   }
+  if (typeof raw.plain === 'string' && raw.plain.trim()) {
+    gap.plain = raw.plain.trim();
+  }
+  if (typeof raw.whyItMatters === 'string' && raw.whyItMatters.trim()) {
+    gap.whyItMatters = raw.whyItMatters.trim();
+  }
+  const conf = coerceConfidence(raw.confidence);
+  if (conf !== undefined) gap.confidence = conf;
+  const dim = coerceDimension(raw.dimension);
+  if (dim) gap.dimension = dim;
   return gap;
 }
 
@@ -94,9 +157,21 @@ function renderMd(result: AuditResult): string {
     lines.push('_No gaps identified._');
   } else {
     for (const gap of result.gaps) {
-      lines.push(`### ${gap.id} — ${gap.category} / ${gap.severity}`);
+      const conf = typeof gap.confidence === 'number'
+        ? ` · confidence ${Math.round(gap.confidence * 100)}%`
+        : '';
+      const dim = gap.dimension ? ` · ${gap.dimension}` : '';
+      lines.push(`### ${gap.id} — ${gap.category}${dim} / ${gap.severity}${conf}`);
       lines.push('');
-      lines.push(`**Description:** ${gap.description}`);
+      if (gap.plain) {
+        lines.push(`**In plain English:** ${gap.plain}`);
+        lines.push('');
+      }
+      if (gap.whyItMatters) {
+        lines.push(`**Why it matters:** ${gap.whyItMatters}`);
+        lines.push('');
+      }
+      lines.push(`**Technical:** ${gap.description}`);
       lines.push('');
       lines.push(`**Recommendation:** ${gap.recommendation}`);
       if (gap.evidence && gap.evidence.length > 0) {
@@ -107,10 +182,24 @@ function renderMd(result: AuditResult): string {
       lines.push('');
     }
   }
+
+  if (result.breakpointScreenshots && Object.keys(result.breakpointScreenshots).length > 0) {
+    lines.push('## Responsive screenshots');
+    for (const [name, file] of Object.entries(result.breakpointScreenshots)) {
+      lines.push(`- ${name}: \`${file}\``);
+    }
+    lines.push('');
+  }
   return lines.join('\n');
 }
 
-function writeOutputs(ctx: AgentContext, result: AuditResult, screenshot?: string, html?: string): void {
+function writeOutputs(
+  ctx: AgentContext,
+  result: AuditResult,
+  screenshot?: string,
+  html?: string,
+  breakpointShots?: Record<string, string>,
+): void {
   fs.mkdirSync(ctx.pageDir, { recursive: true });
   fs.writeFileSync(
     path.join(ctx.pageDir, 'audit.json'),
@@ -125,6 +214,21 @@ function writeOutputs(ctx: AgentContext, result: AuditResult, screenshot?: strin
       console.error(`[agent1-audit] failed to write screenshot to disk: ${String(err)}`);
     }
   }
+  if (breakpointShots) {
+    for (const [name, b64] of Object.entries(breakpointShots)) {
+      if (!b64) continue;
+      try {
+        fs.writeFileSync(
+          path.join(ctx.pageDir, `audit-${name}.png`),
+          Buffer.from(b64, 'base64'),
+        );
+      } catch (err) {
+        console.error(
+          `[agent1-audit] failed to write breakpoint screenshot ${name}: ${String(err)}`,
+        );
+      }
+    }
+  }
   if (html) {
     try {
       fs.writeFileSync(path.join(ctx.pageDir, 'audit.html'), html, 'utf8');
@@ -134,23 +238,62 @@ function writeOutputs(ctx: AgentContext, result: AuditResult, screenshot?: strin
   }
 }
 
-const SYSTEM_INSTRUCTION = `You are a collaborative panel of three world-class expert personas representing diverse but related fields, cooperating to audit this web page:
+export const AUDIT_SYSTEM_INSTRUCTION = `You are a collaborative panel of four world-class expert personas auditing this web page together. Your collective output is one unified, ranked gap list.
 
-1. Arthur Vance (Senior Lead QA Architect): Focuses on functional correctness, console/network errors, broken interactions, and code robustness.
-2. Elena Rostova (Principal UX & Interface Designer): Focuses on visual hierarchy, brand consistency, layout constraints, and micro-interaction affordances.
-3. Dr. Marcus Thorne (Compliance & Accessibility Specialist): Focuses on legal guidelines (e.g., TCPA, FTC, HIPAA), WCAG 2.2 accessibility, and secure markup standards.
+1. Arthur Vance — Senior Lead QA Architect. Functional correctness, console/network errors, broken interactions, code robustness.
+2. Elena Rostova — Principal UX & Interface Designer. Visual hierarchy, layout, micro-interaction affordances, RESPONSIVE behavior, mobile vs desktop drift.
+3. Dr. Marcus Thorne — Compliance & Accessibility Specialist. Legal guidelines (TCPA, FTC, HIPAA), WCAG 2.2 accessibility, contrast, keyboard nav, ARIA, focus order, screen-reader walkthrough.
+4. Camille Reyes — Brand & Copy Director. BRAND VOICE drift, MICROCOPY quality (button labels, error messages, placeholders, empty states), emotional design, tone consistency against the pinned brand voice spec below.
 
-Arthur, Elena, and Marcus must collaborate and align on their findings. Provide a unified, high-density, evidence-based list of functional and UX gaps. Tie every functional gap directly to console errors, network failures, or failed clicks where possible. Rank by real user impact.
+Arthur, Elena, Marcus, and Camille must collaborate and align. Provide a unified, high-density, evidence-based list of gaps. Tie every functional gap directly to console errors, network failures, or failed clicks where possible. Rank by real user impact.
+
+MULTI-DIMENSIONAL SCANNING — do NOT stop at functional/UX. Each persona must SYSTEMATICALLY scan their domain:
+- Arthur: every interactive element exercised, every console error categorized.
+- Elena: visual hierarchy at the captured viewport; responsive-design risks if the layout depends on a specific width.
+- Marcus: every form input checked for an associated label; every interactive element checked for keyboard accessibility; every image checked for alt text; contrast checked against WCAG 2.2 AA where colors are inferable.
+- Camille: every visible piece of copy (headlines, button labels, error states, empty states) compared against the pinned brand voice. Flag drift specifically — quote the offending copy, name the brand-voice attribute it violates, suggest a replacement.
+
+DUAL-REGISTER OUTPUT — for EVERY gap, write BOTH:
+- "description": the technical statement for an engineer (file:line where possible, terms of art OK)
+- "plain":       the same issue, in plain English, for a non-technical product owner / founder / client. NO jargon. NO acronyms (or expand them inline the first time). Concrete, conversational, kind. Lead with the user-visible consequence, not the technical category.
+
+For EVERY gap also write:
+- "whyItMatters": the concrete real-world consequence if shipped unfixed. Who is affected, when, and how. One or two sentences. Avoid restating the description.
+- "confidence":   a number in [0, 1]. 0.95 = "I'd stake my reputation on this." 0.8 = "strong signal, worth fixing." 0.5 = "worth a look but I'm not sure." Be honest — overconfidence damages trust.
+- "dimension":    a fine-grained classifier — use the MOST SPECIFIC applicable from: functional | ux | visual-hierarchy | brand-voice | microcopy | responsive | accessibility | performance | data-contract | security. Don't default everything to "functional" or "ux" — those are the broad buckets, and the more specific dimensions are what differentiate a useful audit from a generic one.
+
+TONE — write findings the way a senior designer gives a junior a crit: warm, specific, opinionated, never blame-y. Use "Try" not "Fix." Lead with the user, never with the code.
 
 Return STRICT JSON only — no prose, no markdown fences.`;
 
-function buildPrompt(
+/**
+ * Build the audit prompt. Exported so the live-LLM eval harness can
+ * exercise the exact production prompt against fixture inputs without
+ * driving a real browser. Keep the signature stable — eval imports it.
+ */
+export function buildAuditPrompt(
   ctx: AgentContext,
   snapshot: string,
   interactions: string[],
   consoleErrors: string[],
   health?: PageHealth,
 ): string {
+  // The brand voice + component style come from the pinned (or bootstrapped)
+  // brand spec. Camille (the brand persona in the system instruction) uses
+  // them to flag voice drift on this specific page. If the brand isn't pinned
+  // we mark it explicitly so the model knows to weight voice findings lower.
+  const brandBlock = ctx.brand
+    ? [
+        `  name: ${ctx.brand.name}`,
+        `  voice: ${ctx.brand.voice}`,
+        `  componentStyle: ${ctx.brand.componentStyle}`,
+        `  pinned: ${ctx.brand.pinned}`,
+        ctx.brand.pinned
+          ? ''
+          : '  (UNPINNED — voice findings should be cautious; the brand spec is a Stage 0 bootstrap candidate.)',
+      ].filter(Boolean).join('\n')
+    : '  (no brand spec available — skip voice findings on this run.)';
+
   return `Audit this page and return a JSON gap list.
 
 PAGE
@@ -159,6 +302,9 @@ PAGE
   purpose: ${ctx.page.purpose}
   userFunction: ${ctx.page.userFunction}
   sourceFile: ${ctx.page.filePath}
+
+PINNED BRAND VOICE (compare every visible piece of copy against this — flag drift)
+${brandBlock}
 
 PAGE HEALTH
 ${health ? `  status: ${health.status}\n  healthy: ${health.healthy}\n  detail: ${health.detail}` : '  (unknown)'}
@@ -183,14 +329,18 @@ Return JSON of EXACTLY this shape:
     {
       "id": "g1",                       // stable id: g1, g2, g3, ...
       "category": "functional" | "ux",
+      "dimension": "functional" | "ux" | "visual-hierarchy" | "brand-voice" | "microcopy" | "responsive" | "accessibility" | "performance" | "data-contract" | "security",
       "severity": "critical" | "high" | "medium" | "low",
-      "description": "what is wrong, observed concretely",
-      "recommendation": "what to change to fix it",
+      "confidence": 0.95,               // your honest confidence in [0, 1] that this is a real issue
+      "description": "TECHNICAL: what is wrong, observed concretely (for an engineer)",
+      "plain":       "PLAIN ENGLISH: same issue, no jargon, written for a non-technical reader. Lead with the user-visible consequence.",
+      "whyItMatters":"Concrete real-world consequence if shipped unfixed. Who is affected and how.",
+      "recommendation": "What to change to fix it",
       "evidence": ["console error text or exercised interaction that proves it"]
     }
   ]
 }
-Use sequential ids starting at g1. "evidence" is optional but include it whenever a console error or interaction supports the gap. If the page is fully sound, return {"gaps": []}.`;
+Use sequential ids starting at g1. "evidence" is optional but include it whenever a console error or interaction supports the gap. "plain", "whyItMatters", "confidence", and "dimension" are REQUIRED for every gap. If the page is fully sound, return {"gaps": []}.`;
 }
 
 export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
@@ -241,6 +391,8 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
   let authRole: string | undefined;
   let loginNote: string | undefined;
   let health: PageHealth | undefined;
+  const breakpointShots: Record<string, string> = {};
+  const breakpointFiles: Record<string, string> = {};
 
   try {
     driver = await PageDriver.launch({
@@ -293,6 +445,26 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
     }
 
     health = await driver.health(routePath, ctx.config.auth?.loginUrl);
+
+    // Multi-breakpoint capture. Walk DEFAULT_BREAKPOINTS in order; each call
+    // resizes the viewport on the live page (no re-navigation) and captures a
+    // full-page screenshot at that size. A failure on one breakpoint never
+    // aborts the rest — partial coverage is more useful than none.
+    if (screenshot) {
+      for (const bp of DEFAULT_BREAKPOINTS) {
+        try {
+          const shot = await driver.screenshotAt(bp.width, bp.height);
+          if (shot) {
+            breakpointShots[bp.name] = shot;
+            breakpointFiles[bp.name] = `audit-${bp.name}.png`;
+          }
+        } catch (err) {
+          console.error(
+            `[agent1-audit] breakpoint capture failed for ${bp.name}: ${String(err)}`,
+          );
+        }
+      }
+    }
   } catch (err) {
     driveError = `Failed to drive page: ${String(err)}`;
   } finally {
@@ -336,16 +508,20 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
   let gaps: Gap[] = [];
 
   try {
-    const response = await ctx.gemini.callJson<AuditModelResponse>({
+    // Schema-validated call: the LLM's gap array shape is enforced by
+    // AuditOutputSchema. On a first-attempt validation failure the client
+    // appends the Zod issues to the prompt and retries once before throwing.
+    // Either way, the data reaching normaliseGap conforms to the contract.
+    const response = await ctx.gemini.callJsonSchema(AuditOutputSchema, {
       role: 'agent1_audit',
-      systemInstruction: SYSTEM_INSTRUCTION,
-      prompt: buildPrompt(ctx, snapshot, interactions, consoleErrors, health),
+      systemInstruction: AUDIT_SYSTEM_INSTRUCTION,
+      prompt: buildAuditPrompt(ctx, snapshot, interactions, consoleErrors, health),
       json: true,
       images: screenshot ? [screenshot] : undefined,
     });
 
-    const rawGaps = Array.isArray(response?.gaps) ? response.gaps : [];
-    gaps = rawGaps.map((raw, i) => normaliseGap(raw, i));
+    const rawGaps = response.gaps;
+    gaps = (rawGaps as AuditModelResponse['gaps']).map((raw, i) => normaliseGap(raw, i));
   } catch (err) {
     // Gemini failure — write a minimal valid result rather than crashing.
     gaps = [
@@ -370,8 +546,11 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
     interactionsExercised: interactions,
     gaps,
     ...(authRole ? { authRole } : {}),
+    ...(Object.keys(breakpointFiles).length > 0
+      ? { breakpointScreenshots: breakpointFiles }
+      : {}),
   };
 
-  writeOutputs(ctx, result, screenshot, html);
+  writeOutputs(ctx, result, screenshot, html, breakpointShots);
   return result;
 }

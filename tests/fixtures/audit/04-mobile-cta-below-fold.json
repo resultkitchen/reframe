@@ -1,0 +1,58 @@
+{
+  "name": "mobile-cta-below-fold",
+  "agent": "audit",
+  "description": "Lead-gen landing page works on desktop but pushes the primary CTA below the fold on iPhone SE because the hero image consumes the full viewport. The audit must flag this as a `responsive` dimension finding with user-impact framing.",
+
+  "input": {
+    "page": {
+      "slug": "landing",
+      "route": "/",
+      "filePath": "app/page.tsx",
+      "purpose": "Acquisition landing page; primary goal is form submission to /api/leads.",
+      "userFunction": "Visitor reads a value proposition and submits their phone number to get a callback.",
+      "dataDependencies": [
+        { "page": "/", "kind": "mutation", "target": "leads", "description": "Insert a new lead row." }
+      ],
+      "libraries": ["react", "tailwind", "next-image"]
+    },
+    "snapshot": "[hero image, full viewport]\nDirect Mail Marketing for Lawyers\n[scroll]\nGet a free quote\n[input: phone]\n[button: Send quote]",
+    "interactions": [
+      "focus: phone",
+      "click: Send quote"
+    ],
+    "consoleErrors": [],
+    "health": {
+      "status": "ok",
+      "healthy": true,
+      "finalUrl": "http://localhost:3000/",
+      "httpStatus": 200,
+      "detail": "Page loaded successfully."
+    }
+  },
+
+  "expected": {
+    "gaps": [
+      {
+        "id": "g1",
+        "category": "ux",
+        "dimension": "responsive",
+        "severity": "high",
+        "confidence": 0.88,
+        "description": "On mobile breakpoints (≤ 414px wide) the full-viewport hero image pushes the quote-form CTA below the fold. Users must scroll past the hero to reach the primary conversion target.",
+        "plain": "On an iPhone, the big photo at the top of the page fills the whole screen — so the 'get a free quote' form is invisible until you scroll down. Most people won't scroll.",
+        "whyItMatters": "This is your primary lead-capture surface and your highest-intent screen. A CTA below the mobile fold typically cuts conversion 30–50%. Every visit you're paying for is leaving with worse odds of converting on phones than on laptops.",
+        "recommendation": "Either cap the hero image height at ~60vh on small screens, or stack the form above the hero on widths < 768px. Test at 375×667 (iPhone SE) — the worst-case viewport in your audience.",
+        "evidence": []
+      }
+    ]
+  },
+
+  "assertions": [
+    { "kind": "minFindings", "value": 1 },
+    { "kind": "severityAtLeast", "id": "g1", "value": "medium" },
+    { "kind": "dimensionIn", "id": "g1", "values": ["responsive", "ux", "visual-hierarchy"] },
+    { "kind": "fieldPresent", "id": "g1", "path": "plain" },
+    { "kind": "fieldPresent", "id": "g1", "path": "whyItMatters" },
+    { "kind": "mentionsAny", "id": "g1", "values": ["mobile", "fold", "responsive", "iphone", "viewport"] }
+  ]
+}

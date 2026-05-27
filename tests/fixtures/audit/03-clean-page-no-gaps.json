@@ -1,0 +1,37 @@
+{
+  "name": "clean-page-no-gaps",
+  "agent": "audit",
+  "description": "A simple marketing page that loads cleanly, exercises without errors, and has no functional or UX problems. The audit must return an empty gap list — calibration against overconfidence and finding-inflation.",
+
+  "input": {
+    "page": {
+      "slug": "about",
+      "route": "/about",
+      "filePath": "app/about/page.tsx",
+      "purpose": "Static company-overview page with team photo and mission.",
+      "userFunction": "Reader learns what the company does.",
+      "dataDependencies": [],
+      "libraries": ["react", "next-image"]
+    },
+    "snapshot": "About Acme\nWe build tools that help dental practices schedule efficiently.\nOur team is based in Austin, TX.\n[Photo: team]\nContact us",
+    "interactions": [
+      "click: Contact us"
+    ],
+    "consoleErrors": [],
+    "health": {
+      "status": "ok",
+      "healthy": true,
+      "finalUrl": "http://localhost:3000/about",
+      "httpStatus": 200,
+      "detail": "Page loaded successfully."
+    }
+  },
+
+  "expected": {
+    "gaps": []
+  },
+
+  "assertions": [
+    { "kind": "noFindings" }
+  ]
+}

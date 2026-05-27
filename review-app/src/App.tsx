@@ -1,11 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 
+/**
+ * Dual-register fields emitted by every engine v0.2+ finding:
+ * `plain`         — same issue, written for a non-technical reader
+ * `whyItMatters`  — concrete user-facing consequence if shipped
+ * `confidence`    — 0..1, agent confidence the issue is real
+ * `dimension`     — finer-grained classification for filter chips
+ */
 interface Gap {
   id: string;
   category: 'functional' | 'ux';
   severity: 'critical' | 'high' | 'medium' | 'low';
   description: string;
   recommendation: string;
+  plain?: string;
+  whyItMatters?: string;
+  confidence?: number;
+  dimension?: string;
 }
 
 interface Finding {
@@ -15,6 +26,10 @@ interface Finding {
   location: string;
   problem: string;
   requiredFix: string;
+  plain?: string;
+  whyItMatters?: string;
+  confidence?: number;
+  dimension?: string;
 }
 
 interface PageData {
@@ -29,6 +44,12 @@ interface PageData {
       status: string;
       detail: string;
     };
+    /**
+     * Per-breakpoint screenshot file map written by Agent 1 alongside
+     * `audit.png`. Keys match the names in DEFAULT_BREAKPOINTS on the
+     * engine side: typically `mobile`, `tablet`, `desktop`.
+     */
+    breakpointScreenshots?: Record<string, string>;
   };
   ux?: {
     asciiWireframe: string;
@@ -52,6 +73,11 @@ interface PageData {
 interface PageApproval {
   decision: 'apply' | 'skip';
   gaps?: Record<string, 'apply' | 'skip'>;
+  /**
+   * Per-compliance-finding decisions, keyed `${ruleId}::${location}`.
+   * Mirrors the engine's PageApproval shape (see src/types.ts).
+   */
+  complianceFindings?: Record<string, 'apply' | 'skip'>;
   note?: string;
   comments?: string[];
 }
@@ -107,12 +133,64 @@ export default function App() {
   // Preview mode: 'iframe' or 'screenshot'
   const [previewMode, setPreviewMode] = useState<'iframe' | 'screenshot'>('screenshot');
 
+  // Language register for finding text — 'plain' is the default so vibe-coders
+  // and non-technical reviewers get readable findings up front; engineers can
+  // flip to 'technical' for file:line precision. Either way, BOTH versions are
+  // available in the finding card (the other becomes a collapsible).
+  const [languageRegister, setLanguageRegister] = useState<'plain' | 'technical'>('plain');
+
+  // Filter chips — applied to the gap/finding list. Empty set = no filter.
+  const [severityFilter, setSeverityFilter] = useState<Set<string>>(new Set());
+  const [dimensionFilter, setDimensionFilter] = useState<Set<string>>(new Set());
+  // Confidence threshold: only show findings with confidence >= this (0..1).
+  // 0 = show everything (including findings without a confidence score).
+  const [minConfidence, setMinConfidence] = useState<number>(0);
+
+  // EXCLUSION filters set by clicking "Apply" on a pattern-insight card.
+  // Independent from the inclusion chips above — applied as an additional
+  // "and then drop anything in here" pass. Persists for the session;
+  // dismissable via the same insight card or the chips above.
+  const [hiddenDimensions, setHiddenDimensions] = useState<Set<string>>(new Set());
+  const [hiddenSeverities, setHiddenSeverities] = useState<Set<string>>(new Set());
+
+  // Active breakpoint for the preview surface. 'default' uses the engine's
+  // canonical audit.png; named keys map to audit-<name>.png served by the
+  // /api/screenshot endpoint's ?breakpoint= query param.
+  const [activeBreakpoint, setActiveBreakpoint] = useState<string>('default');
+
   // Connection indicator watchdog state
   const [isOfflineMock, setIsOfflineMock] = useState(false);
+
+  /**
+   * Cross-run telemetry — fetched once on mount. Surfaces patterns the
+   * reviewer can act on inside the Run Overview ("you've skipped 14/17
+   * low-severity a11y findings across recent runs — hide them by
+   * default?"). Null on fetch failure (the Overview just hides the
+   * insights panel in that case — no degradation of core functionality).
+   */
+  const [telemetry, setTelemetry] = useState<{
+    schemaVersion: number;
+    scannedRuns: number;
+    totalDecisions: number;
+    insights: Array<{
+      axis: 'dimension' | 'severity';
+      value: string;
+      applies: number;
+      skips: number;
+      skipRate: number;
+      headline: string;
+    }>;
+  } | null>(null);
 
   // Load run details on boot
   useEffect(() => {
     fetchRunData();
+    // Fire-and-forget telemetry fetch — never blocks render, fails open
+    // (the insights panel is hidden when telemetry is null or empty).
+    fetch('/api/telemetry')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((t) => { if (t && Array.isArray(t.insights)) setTelemetry(t); })
+      .catch(() => { /* fail open */ });
   }, []);
 
   const fetchRunData = async () => {
@@ -210,10 +288,13 @@ export default function App() {
   // Sync current selection when active page changes
   useEffect(() => {
     if (!data || !activeSlug) return;
-    
+
     const page = data.pages.find(p => p.slug === activeSlug);
     if (page) {
       setPreviewMode(page.hasScreenshot ? 'screenshot' : 'iframe');
+      // Reset the breakpoint to the default capture when switching pages —
+      // a fresh page starts with its primary screenshot showing.
+      setActiveBreakpoint('default');
     }
 
     const existing = data.approvals.pages[activeSlug];
@@ -455,6 +536,305 @@ ${pmNotes}
 
   const activePage = data?.pages.find(p => p.slug === activeSlug);
 
+  /**
+   * Apply the toolbar filter chips (severity / dimension / confidence
+   * threshold) to the active page's gap list. Memoized so changing an
+   * unrelated state field doesn't re-filter on every render.
+   */
+  const filteredGaps = useMemo<Gap[]>(() => {
+    const all = activePage?.audit?.gaps ?? [];
+    return all.filter(gap => {
+      if (severityFilter.size > 0 && !severityFilter.has(gap.severity)) return false;
+      if (dimensionFilter.size > 0 && (!gap.dimension || !dimensionFilter.has(gap.dimension))) return false;
+      if (minConfidence > 0 && (gap.confidence ?? 1) < minConfidence) return false;
+      if (hiddenDimensions.size > 0 && gap.dimension && hiddenDimensions.has(gap.dimension)) return false;
+      if (hiddenSeverities.size > 0 && hiddenSeverities.has(gap.severity)) return false;
+      return true;
+    });
+  }, [activePage, severityFilter, dimensionFilter, minConfidence, hiddenDimensions, hiddenSeverities]);
+
+  /**
+   * Set of dimensions present on the current page — used to render only
+   * the chips that would actually do something. Hiding empty chips keeps
+   * the toolbar clean per-page.
+   */
+  const availableDimensions = useMemo<string[]>(() => {
+    const set = new Set<string>();
+    for (const g of activePage?.audit?.gaps ?? []) {
+      if (g.dimension) set.add(g.dimension);
+    }
+    for (const f of activePage?.compliance?.findings ?? []) {
+      if (f.dimension) set.add(f.dimension);
+    }
+    return Array.from(set).sort();
+  }, [activePage]);
+
+  /**
+   * Top findings across audit + compliance for the active page, ranked
+   * by impact = severity_weight × confidence. Powers the Founder Digest
+   * at the top of the detail pane — the "fix these first" view that
+   * the vibe-coding founder sees before the full list.
+   */
+  const founderDigest = useMemo(() => {
+    if (!activePage) return [] as Array<{
+      key: string;
+      severity: string;
+      headline: string;
+      whyItMatters?: string;
+      source: 'audit' | 'compliance';
+    }>;
+    const SEVERITY_WEIGHT: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+    const items: Array<{
+      key: string;
+      severity: string;
+      headline: string;
+      whyItMatters?: string;
+      impact: number;
+      source: 'audit' | 'compliance';
+    }> = [];
+    for (const g of activePage.audit?.gaps ?? []) {
+      const sev = SEVERITY_WEIGHT[g.severity] ?? 1;
+      const conf = g.confidence ?? 0.8;
+      items.push({
+        key: `audit-${g.id}`,
+        severity: g.severity,
+        headline: g.plain || g.description,
+        whyItMatters: g.whyItMatters,
+        impact: sev * conf,
+        source: 'audit',
+      });
+    }
+    for (const f of activePage.compliance?.findings ?? []) {
+      const sev = SEVERITY_WEIGHT[f.severity] ?? 1;
+      const conf = f.confidence ?? 0.8;
+      items.push({
+        key: `compliance-${f.ruleId}-${f.location}`,
+        severity: f.severity,
+        headline: f.plain || f.problem,
+        whyItMatters: f.whyItMatters,
+        impact: sev * conf,
+        source: 'compliance',
+      });
+    }
+    return items
+      .sort((a, b) => b.impact - a.impact)
+      .slice(0, 5)
+      .map(({ impact: _impact, ...rest }) => rest);
+  }, [activePage]);
+
+  /** Toggle helper used by severity and dimension chips. */
+  const toggleInSet = (set: Set<string>, value: string): Set<string> => {
+    const next = new Set(set);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    return next;
+  };
+
+  /**
+   * Resolve the screenshot URL for the currently active page +
+   * breakpoint selection. The 'default' key uses the engine's primary
+   * audit.png; named keys (mobile / tablet / desktop) request the
+   * corresponding audit-<name>.png via the server's breakpoint query.
+   */
+  const screenshotUrl = activePage
+    ? activeBreakpoint === 'default'
+      ? `/api/screenshot/${activePage.slug}`
+      : `/api/screenshot/${activePage.slug}?breakpoint=${encodeURIComponent(activeBreakpoint)}`
+    : '';
+
+  /**
+   * Sentinel slug for the run-level Overview pseudo-page in the sidebar.
+   * When activeSlug equals this, the detail pane renders the cross-page
+   * "criticals first" view instead of any one page's details.
+   */
+  const OVERVIEW_SLUG = '__overview__';
+
+  /**
+   * Tracks which Overview rows are "in flight" to /api/approvals so the
+   * UI can disable the button + show a subtle spinner during the write.
+   * Keyed by the same `item.key` the Overview list uses for React keys.
+   */
+  const [overviewWriting, setOverviewWriting] = useState<Set<string>>(new Set());
+
+  /**
+   * Set a finding's apply/skip decision from the Run Overview WITHOUT
+   * navigating to its page. Works for both audit gaps and compliance
+   * findings — the `target` parameter is a discriminated union that
+   * points the decision at the right slot inside PageApproval.
+   *
+   * Reads the existing approval for that page (or builds a default one),
+   * patches just this finding's decision, then POSTs the whole
+   * page-approval. The local data state is updated optimistically; a
+   * failed POST rolls back so the UI never disagrees with disk.
+   */
+  const setOverviewFindingDecision = async (
+    pageSlug: string,
+    target:
+      | { kind: 'audit'; gapId: string }
+      | { kind: 'compliance'; complianceFindingKey: string },
+    decision: 'apply' | 'skip',
+    itemKey: string,
+  ): Promise<void> => {
+    if (!data) return;
+    setOverviewWriting((prev) => new Set(prev).add(itemKey));
+
+    const existing = data.approvals.pages[pageSlug];
+    const updatedApproval: PageApproval = {
+      decision: existing?.decision ?? 'apply',
+      gaps:
+        target.kind === 'audit'
+          ? { ...(existing?.gaps ?? {}), [target.gapId]: decision }
+          : existing?.gaps,
+      complianceFindings:
+        target.kind === 'compliance'
+          ? {
+              ...(existing?.complianceFindings ?? {}),
+              [target.complianceFindingKey]: decision,
+            }
+          : existing?.complianceFindings,
+      note: existing?.note ?? '',
+      comments: existing?.comments ?? [],
+    };
+
+    // Optimistic local update — instant feedback in the Overview row.
+    const priorPages = data.approvals.pages;
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            approvals: {
+              ...prev.approvals,
+              pages: { ...prev.approvals.pages, [pageSlug]: updatedApproval },
+            },
+          }
+        : prev,
+    );
+
+    try {
+      const res = await fetch('/api/approvals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: pageSlug, approval: updatedApproval }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // Sync currentApproval if the user happens to be on this page —
+      // keeps the per-page card consistent with the Overview decision.
+      if (activeSlug === pageSlug) {
+        setCurrentApproval(updatedApproval);
+      }
+    } catch (err) {
+      // Roll back the optimistic local change so the UI never lies.
+      setData((prev) =>
+        prev ? { ...prev, approvals: { ...prev.approvals, pages: priorPages } } : prev,
+      );
+      const label =
+        target.kind === 'audit'
+          ? `${pageSlug}::${target.gapId}`
+          : `${pageSlug}::${target.complianceFindingKey}`;
+      alert(
+        `Could not save decision for ${label}: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    } finally {
+      setOverviewWriting((prev) => {
+        const next = new Set(prev);
+        next.delete(itemKey);
+        return next;
+      });
+    }
+  };
+
+  /**
+   * Cross-page run overview: aggregates every finding across every page,
+   * ranks by severity × confidence, and bucket-counts by severity. Powers
+   * the run-level dashboard the Reviewer queue persona (Priya) asked for —
+   * "show me everything critical across all 34 pages, ranked".
+   */
+  const runOverview = useMemo(() => {
+    const SEVERITY_WEIGHT: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+    type OverviewItem = {
+      key: string;
+      pageSlug: string;
+      pageRoute: string;
+      severity: string;
+      dimension?: string;
+      headline: string;
+      whyItMatters?: string;
+      confidence?: number;
+      impact: number;
+      source: 'audit' | 'compliance';
+      /**
+       * Audit gap id (g1, g2, …). Present only for audit items — used
+       * by the per-row Skip/Approve buttons to address the right gap
+       * inside the page's approvals.gaps map.
+       */
+      gapId?: string;
+      /**
+       * Stable key for compliance findings, `${ruleId}::${location}`.
+       * Present only for compliance items — used to address the
+       * finding inside approvals.complianceFindings.
+       */
+      complianceFindingKey?: string;
+    };
+    const all: OverviewItem[] = [];
+    const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+    let pagesWithFindings = 0;
+    for (const p of data?.pages ?? []) {
+      const gaps = p.audit?.gaps ?? [];
+      const findings = p.compliance?.findings ?? [];
+      if (gaps.length > 0 || findings.length > 0) pagesWithFindings++;
+      for (const g of gaps) {
+        counts[g.severity as keyof typeof counts] =
+          (counts[g.severity as keyof typeof counts] ?? 0) + 1;
+        const sev = SEVERITY_WEIGHT[g.severity] ?? 1;
+        const conf = g.confidence ?? 0.8;
+        all.push({
+          key: `${p.slug}::audit::${g.id}`,
+          pageSlug: p.slug,
+          pageRoute: p.route,
+          severity: g.severity,
+          dimension: g.dimension,
+          headline: g.plain || g.description,
+          whyItMatters: g.whyItMatters,
+          confidence: g.confidence,
+          impact: sev * conf,
+          source: 'audit',
+          gapId: g.id,
+        });
+      }
+      for (const f of findings) {
+        const sevKey = f.severity as keyof typeof counts;
+        if (counts[sevKey] !== undefined) counts[sevKey]++;
+        const sev = SEVERITY_WEIGHT[f.severity] ?? 1;
+        const conf = f.confidence ?? 0.8;
+        const complianceKey = `${f.ruleId}::${f.location}`;
+        all.push({
+          key: `${p.slug}::compliance::${complianceKey}`,
+          pageSlug: p.slug,
+          pageRoute: p.route,
+          severity: f.severity,
+          dimension: f.dimension,
+          headline: f.plain || f.problem,
+          whyItMatters: f.whyItMatters,
+          confidence: f.confidence,
+          impact: sev * conf,
+          source: 'compliance',
+          complianceFindingKey: complianceKey,
+        });
+      }
+    }
+    all.sort((a, b) => b.impact - a.impact);
+    // Apply the same exclusion-filters that the per-page card respects, so
+    // hides set by "Apply" on a pattern insight take effect cross-page too.
+    const visible = all.filter((item) => {
+      if (item.dimension && hiddenDimensions.has(item.dimension)) return false;
+      if (hiddenSeverities.has(item.severity)) return false;
+      return true;
+    });
+    return { items: visible, counts, pagesWithFindings, totalPages: data?.pages.length ?? 0, totalUnfiltered: all.length };
+  }, [data, hiddenDimensions, hiddenSeverities]);
+
   return (
     <div className="app-container">
       {/* ────────────────────────── HEADER ────────────────────────── */}
@@ -492,7 +872,45 @@ ${pmNotes}
           <div className="sidebar-header">
             <h2 className="sidebar-title">Screens fan-out</h2>
           </div>
-          
+
+          {/* Run Overview — the cross-page "criticals first" view. Sits
+              above the per-screen list so reviewers land on the
+              triage dashboard before they go page-by-page. */}
+          {data && data.pages.length > 0 && (
+            <ul className="page-list" style={{ marginBottom: '0.5rem', borderBottom: '1px solid #e2e8f0', paddingBottom: '0.5rem' }}>
+              <li
+                key={OVERVIEW_SLUG}
+                className={`page-item smooth-all ${activeSlug === OVERVIEW_SLUG ? 'active' : ''}`}
+                onClick={() => setActiveSlug(OVERVIEW_SLUG)}
+                style={{
+                  background: activeSlug === OVERVIEW_SLUG
+                    ? 'linear-gradient(135deg, #faf5ff 0%, #fdf4ff 100%)'
+                    : undefined,
+                }}
+              >
+                <span className="page-item-title" style={{ color: '#5b21b6' }}>
+                  ✨ Run Overview
+                </span>
+                <span className="page-item-subtitle" style={{ color: '#7c3aed' }}>
+                  {runOverview.items.length} finding{runOverview.items.length === 1 ? '' : 's'}
+                  {' '}across {runOverview.pagesWithFindings} of {runOverview.totalPages} screens
+                </span>
+                <div className="badge-row" style={{ marginTop: '0.35rem' }}>
+                  {runOverview.counts.critical > 0 && (
+                    <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '0.15rem 0.45rem', borderRadius: '999px', background: '#fee2e2', color: '#991b1b' }}>
+                      {runOverview.counts.critical} critical
+                    </span>
+                  )}
+                  {runOverview.counts.high > 0 && (
+                    <span style={{ fontSize: '0.65rem', fontWeight: 700, padding: '0.15rem 0.45rem', borderRadius: '999px', background: '#fed7aa', color: '#9a3412' }}>
+                      {runOverview.counts.high} high
+                    </span>
+                  )}
+                </div>
+              </li>
+            </ul>
+          )}
+
           <ul className="page-list">
             {data?.pages.map((p) => {
               const approval = data.approvals.pages[p.slug];
@@ -552,7 +970,319 @@ ${pmNotes}
             </div>
           )}
 
-          {activePage && currentApproval ? (
+          {activeSlug === OVERVIEW_SLUG ? (
+            /* ────────────────────────── RUN OVERVIEW ──────────────────────────
+               Cross-page "criticals first" view. Aggregates findings across
+               every audited page; clicking a finding jumps to that page. */
+            <div style={{ padding: '1.25rem' }}>
+              <div style={{ marginBottom: '1.25rem' }}>
+                <h1 className="active-page-title" style={{ background: 'linear-gradient(90deg, #5b21b6, #ec4899)', WebkitBackgroundClip: 'text', backgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                  Run Overview
+                </h1>
+                <p style={{ color: '#64748b', fontSize: '0.95rem', marginTop: '0.25rem' }}>
+                  Every finding across {runOverview.totalPages} screen{runOverview.totalPages === 1 ? '' : 's'}, ranked by user impact (severity × confidence). Triage from highest-impact down.
+                </p>
+              </div>
+
+              {/* Severity bucket bar */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, 1fr)',
+                gap: '0.75rem',
+                marginBottom: '1.5rem',
+              }}>
+                {(['critical', 'high', 'medium', 'low'] as const).map(sev => {
+                  const tone = sev === 'critical' ? { bg: '#fee2e2', fg: '#991b1b' }
+                            : sev === 'high'     ? { bg: '#fed7aa', fg: '#9a3412' }
+                            : sev === 'medium'   ? { bg: '#fef3c7', fg: '#854d0e' }
+                            :                       { bg: '#e0e7ff', fg: '#3730a3' };
+                  return (
+                    <div key={sev} style={{
+                      padding: '0.85rem 1rem', borderRadius: '10px',
+                      background: tone.bg, border: `1px solid ${tone.fg}22`,
+                    }}>
+                      <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: tone.fg }}>{sev}</div>
+                      <div style={{ fontSize: '1.75rem', fontWeight: 800, color: tone.fg, lineHeight: 1.1, marginTop: '0.15rem' }}>
+                        {runOverview.counts[sev]}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Cross-run pattern insights — only renders when telemetry
+                  returned actionable patterns (skip-rate >= 70% with
+                  sample >= 5). Each insight has an "Apply" button that
+                  adds the offending dimension / severity to the
+                  exclusion set, making subsequent views drop those
+                  findings automatically. Fail-open: hidden when
+                  telemetry is null, empty, or the endpoint errored. */}
+              {telemetry && telemetry.insights.length > 0 && (
+                <div style={{
+                  marginBottom: '1.25rem',
+                  padding: '1rem 1.15rem',
+                  background: 'linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%)',
+                  border: '1px solid #86efac',
+                  borderRadius: '12px',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <h3 style={{ fontSize: '0.92rem', fontWeight: 700, color: '#166534', margin: 0, letterSpacing: '-0.01em' }}>
+                      🧠 Pattern insights from {telemetry.scannedRuns} run{telemetry.scannedRuns === 1 ? '' : 's'}
+                    </h3>
+                    <span style={{ fontSize: '0.7rem', color: '#15803d', fontWeight: 500 }}>
+                      {telemetry.totalDecisions.toLocaleString()} decisions analyzed · skip-rate ≥ 70%
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {telemetry.insights.slice(0, 4).map((ins, i) => {
+                      const isApplied =
+                        ins.axis === 'dimension'
+                          ? hiddenDimensions.has(ins.value)
+                          : hiddenSeverities.has(ins.value);
+                      const toggle = () => {
+                        if (ins.axis === 'dimension') {
+                          setHiddenDimensions((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(ins.value)) next.delete(ins.value);
+                            else next.add(ins.value);
+                            return next;
+                          });
+                        } else {
+                          setHiddenSeverities((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(ins.value)) next.delete(ins.value);
+                            else next.add(ins.value);
+                            return next;
+                          });
+                        }
+                      };
+                      return (
+                        <div
+                          key={`${ins.axis}::${ins.value}::${i}`}
+                          style={{
+                            display: 'flex', gap: '0.6rem', alignItems: 'center',
+                            padding: '0.5rem 0.6rem',
+                            background: isApplied ? '#fff' : 'transparent',
+                            border: isApplied ? '1px solid #bbf7d0' : '1px solid transparent',
+                            borderRadius: '6px',
+                          }}
+                        >
+                          <strong style={{ fontFamily: 'monospace', fontSize: '0.72rem', background: '#dcfce7', padding: '0.15rem 0.45rem', borderRadius: '4px', whiteSpace: 'nowrap' }}>
+                            {ins.axis === 'dimension' ? ins.value : `severity:${ins.value}`}
+                          </strong>
+                          <span style={{ flex: 1, fontSize: '0.82rem', lineHeight: 1.5, color: '#14532d' }}>
+                            {ins.headline}
+                          </span>
+                          <button
+                            onClick={toggle}
+                            style={{
+                              padding: '0.3rem 0.65rem', fontSize: '0.72rem', fontWeight: 600,
+                              borderRadius: '6px', cursor: 'pointer', whiteSpace: 'nowrap',
+                              border: '1px solid ' + (isApplied ? '#34d399' : '#86efac'),
+                              background: isApplied ? '#ecfdf5' : '#fff',
+                              color: isApplied ? '#065f46' : '#166534',
+                            }}
+                            title={isApplied ? 'Restore — show these findings again' : 'Hide these findings from every view in this session'}
+                          >
+                            {isApplied ? '✓ Applied' : 'Apply hide'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {(hiddenDimensions.size > 0 || hiddenSeverities.size > 0) && (
+                    <div style={{
+                      marginTop: '0.65rem', paddingTop: '0.6rem',
+                      borderTop: '1px solid #bbf7d0',
+                      display: 'flex', alignItems: 'center', gap: '0.4rem',
+                      fontSize: '0.72rem', color: '#15803d', flexWrap: 'wrap',
+                    }}>
+                      <span style={{ fontWeight: 600 }}>Currently hidden:</span>
+                      {Array.from(hiddenDimensions).map((d) => (
+                        <button
+                          key={`hd::${d}`}
+                          onClick={() => setHiddenDimensions((prev) => { const n = new Set(prev); n.delete(d); return n; })}
+                          style={{ padding: '0.1rem 0.4rem', borderRadius: '999px', border: '1px solid #86efac', background: '#fff', cursor: 'pointer', color: '#166534', fontWeight: 600 }}
+                          title={`Restore ${d}`}
+                        >{d} ×</button>
+                      ))}
+                      {Array.from(hiddenSeverities).map((s) => (
+                        <button
+                          key={`hs::${s}`}
+                          onClick={() => setHiddenSeverities((prev) => { const n = new Set(prev); n.delete(s); return n; })}
+                          style={{ padding: '0.1rem 0.4rem', borderRadius: '999px', border: '1px solid #86efac', background: '#fff', cursor: 'pointer', color: '#166534', fontWeight: 600 }}
+                          title={`Restore severity:${s}`}
+                        >severity:{s} ×</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {runOverview.items.length === 0 ? (
+                <div style={{ padding: '2.5rem', textAlign: 'center', background: '#f0fdf4', border: '1px dashed #86efac', borderRadius: '12px' }}>
+                  <span style={{ fontSize: '2.5rem' }}>🎉</span>
+                  <p style={{ marginTop: '0.5rem', fontSize: '1.05rem', fontWeight: 600, color: '#166534' }}>
+                    Nothing critical to triage.
+                  </p>
+                  <p style={{ fontSize: '0.85rem', color: '#15803d', margin: '0.25rem 0 0' }}>
+                    Every screen passed without findings.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                  <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#64748b', fontWeight: 700 }}>
+                    Ranked findings — top {Math.min(runOverview.items.length, 50)} of {runOverview.items.length}
+                  </div>
+                  {runOverview.items.slice(0, 50).map(item => {
+                    const tone = item.severity === 'critical' ? { bg: '#fee2e2', fg: '#991b1b' }
+                              : item.severity === 'high'     ? { bg: '#fed7aa', fg: '#9a3412' }
+                              : item.severity === 'medium'   ? { bg: '#fef3c7', fg: '#854d0e' }
+                              :                                 { bg: '#e0e7ff', fg: '#3730a3' };
+                    const confPct = typeof item.confidence === 'number' ? Math.round(item.confidence * 100) : null;
+                    // Per-row apply/skip state — works for both audit gaps
+                    // (via approvals.gaps[gapId]) and compliance findings
+                    // (via approvals.complianceFindings[complianceFindingKey]).
+                    // A bypassed page overrides any per-finding decisions.
+                    const pageApproval = data?.approvals.pages[item.pageSlug];
+                    const pageBypassed = pageApproval?.decision === 'skip';
+                    let perItemSkipped = false;
+                    if (item.source === 'audit' && item.gapId) {
+                      perItemSkipped = pageApproval?.gaps?.[item.gapId] === 'skip';
+                    } else if (item.source === 'compliance' && item.complianceFindingKey) {
+                      perItemSkipped =
+                        pageApproval?.complianceFindings?.[item.complianceFindingKey] === 'skip';
+                    }
+                    const isSkipped = pageBypassed || perItemSkipped;
+                    const canTriage =
+                      !pageBypassed &&
+                      ((item.source === 'audit' && !!item.gapId) ||
+                        (item.source === 'compliance' && !!item.complianceFindingKey));
+                    const writing = overviewWriting.has(item.key);
+                    return (
+                      <div
+                        key={item.key}
+                        onClick={() => setActiveSlug(item.pageSlug)}
+                        style={{
+                          padding: '0.85rem 1rem',
+                          background: isSkipped ? '#fafafa' : '#fff',
+                          border: '1px solid ' + (isSkipped ? '#e2e8f0' : '#e2e8f0'),
+                          borderRadius: '10px',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease',
+                          display: 'flex',
+                          gap: '0.85rem',
+                          opacity: isSkipped ? 0.55 : 1,
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = '#8B5CF6';
+                          e.currentTarget.style.boxShadow = '0 2px 8px rgba(139,92,246,0.12)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = '#e2e8f0';
+                          e.currentTarget.style.boxShadow = 'none';
+                        }}
+                      >
+                        <div style={{
+                          padding: '0.2rem 0.5rem', borderRadius: '4px',
+                          background: tone.bg, color: tone.fg,
+                          fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase',
+                          letterSpacing: '0.05em', height: 'fit-content', whiteSpace: 'nowrap',
+                        }}>
+                          {item.severity}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            fontSize: '0.85rem', color: '#1e293b', lineHeight: 1.4,
+                            textDecoration: isSkipped ? 'line-through' : 'none',
+                          }}>
+                            {item.headline}
+                          </div>
+                          <div style={{ marginTop: '0.35rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', fontSize: '0.7rem', color: '#64748b' }}>
+                            <span style={{ fontFamily: 'monospace', color: '#475569', fontWeight: 600 }}>
+                              {item.pageSlug}
+                            </span>
+                            {item.dimension && (
+                              <span style={{ padding: '0.1rem 0.4rem', borderRadius: '999px', background: '#f3e8ff', color: '#7c3aed', fontSize: '0.65rem', fontWeight: 600 }}>
+                                {item.dimension}
+                              </span>
+                            )}
+                            {item.source === 'compliance' && (
+                              <span style={{ padding: '0.1rem 0.4rem', borderRadius: '999px', background: '#fef3c7', color: '#854d0e', fontSize: '0.65rem', fontWeight: 600 }}>
+                                compliance
+                              </span>
+                            )}
+                            {confPct !== null && (
+                              <span style={{ fontFamily: 'monospace', fontSize: '0.65rem' }}>
+                                {confPct}%
+                              </span>
+                            )}
+                            {isSkipped && (
+                              <span style={{ padding: '0.1rem 0.4rem', borderRadius: '999px', background: '#fef3c7', color: '#854d0e', fontSize: '0.65rem', fontWeight: 700 }}>
+                                {pageBypassed ? 'page bypassed' : 'skipped'}
+                              </span>
+                            )}
+                            {item.whyItMatters && (
+                              <span style={{ fontStyle: 'italic', color: '#64748b' }}>
+                                — {item.whyItMatters.slice(0, 80)}{item.whyItMatters.length > 80 ? '…' : ''}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Per-row Skip / Restore — works for audit gaps AND
+                            compliance findings now. Click doesn't propagate
+                            to the row (which would jump pages). When the
+                            page is wholesale-bypassed, the per-finding
+                            button is hidden in favor of the jump arrow,
+                            since per-finding decisions are dominated by
+                            the page-level bypass anyway. */}
+                        {canTriage ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (writing) return;
+                              const target =
+                                item.source === 'audit'
+                                  ? { kind: 'audit' as const, gapId: item.gapId! }
+                                  : { kind: 'compliance' as const, complianceFindingKey: item.complianceFindingKey! };
+                              setOverviewFindingDecision(
+                                item.pageSlug,
+                                target,
+                                isSkipped ? 'apply' : 'skip',
+                                item.key,
+                              );
+                            }}
+                            disabled={writing}
+                            style={{
+                              alignSelf: 'center', padding: '0.3rem 0.6rem',
+                              fontSize: '0.72rem', fontWeight: 600, borderRadius: '6px',
+                              cursor: writing ? 'wait' : 'pointer',
+                              border: '1px solid ' + (isSkipped ? '#34d399' : '#fda4af'),
+                              background: isSkipped ? '#ecfdf5' : '#fff1f2',
+                              color: isSkipped ? '#065f46' : '#9f1239',
+                              whiteSpace: 'nowrap',
+                              opacity: writing ? 0.6 : 1,
+                            }}
+                            title={isSkipped ? 'Restore this finding to the apply set' : 'Skip this finding without opening the page'}
+                          >
+                            {writing ? '…' : isSkipped ? '↩ Restore' : '✕ Skip'}
+                          </button>
+                        ) : (
+                          <div style={{ color: '#94a3b8', fontSize: '1rem', alignSelf: 'center' }}>→</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {runOverview.items.length > 50 && (
+                    <div style={{ padding: '0.75rem', textAlign: 'center', fontSize: '0.8rem', color: '#64748b' }}>
+                      {runOverview.items.length - 50} more findings — open individual screens from the sidebar to see them all.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : activePage && currentApproval ? (
             (() => {
               const isPageBroken = activePage.audit?.health && !activePage.audit.health.healthy;
 
@@ -668,6 +1398,58 @@ ${pmNotes}
 
                       return (
                         <>
+                          {/* ────────────────────────── FOUNDER DIGEST ──────────────────────────
+                              The "fix these first" view a non-technical reviewer sees before the
+                              full findings list. Ranks findings across audit + compliance by
+                              severity × confidence. Empty when the page has no findings. */}
+                          {founderDigest.length > 0 && (
+                            <div style={{
+                              background: 'linear-gradient(135deg, #fdf4ff 0%, #faf5ff 100%)',
+                              border: '1px solid #ddd6fe',
+                              borderRadius: '12px',
+                              padding: '1rem 1.25rem',
+                              marginBottom: '1rem',
+                              boxShadow: '0 1px 2px rgba(139, 92, 246, 0.04)',
+                            }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#5b21b6', margin: 0, letterSpacing: '-0.01em' }}>
+                                  ✨ What to fix first
+                                </h3>
+                                <span style={{ fontSize: '0.7rem', color: '#7c3aed', fontWeight: 500 }}>
+                                  Top {founderDigest.length} by user impact &middot; severity × confidence
+                                </span>
+                              </div>
+                              <p style={{ fontSize: '0.8rem', color: '#6b21a8', marginTop: 0, marginBottom: '0.85rem', lineHeight: 1.5 }}>
+                                The {founderDigest.length === 1 ? 'one thing' : `${founderDigest.length} things`} most likely to embarrass you when a real user lands here — in plain English, ranked.
+                              </p>
+                              <ol style={{ margin: 0, paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+                                {founderDigest.map(item => (
+                                  <li key={item.key} style={{ fontSize: '0.82rem', lineHeight: 1.5, color: '#1e293b' }}>
+                                    <span style={{
+                                      display: 'inline-block', fontSize: '0.65rem', fontWeight: 700,
+                                      textTransform: 'uppercase', letterSpacing: '0.05em',
+                                      padding: '0.1rem 0.4rem', borderRadius: '3px', marginRight: '0.4rem',
+                                      background:
+                                        item.severity === 'critical' ? '#fee2e2' :
+                                        item.severity === 'high' ? '#fed7aa' :
+                                        item.severity === 'medium' ? '#fef3c7' : '#e0e7ff',
+                                      color:
+                                        item.severity === 'critical' ? '#991b1b' :
+                                        item.severity === 'high' ? '#9a3412' :
+                                        item.severity === 'medium' ? '#854d0e' : '#3730a3',
+                                    }}>{item.severity}</span>
+                                    {item.headline}
+                                    {item.whyItMatters && (
+                                      <div style={{ marginTop: '0.2rem', fontSize: '0.75rem', color: '#64748b', fontStyle: 'italic' }}>
+                                        Why it matters: {item.whyItMatters}
+                                      </div>
+                                    )}
+                                  </li>
+                                ))}
+                              </ol>
+                            </div>
+                          )}
+
                           {/* Redesigned grid flow: ELEVATED TWO-COLUMN HORIZONTAL DASHBOARD FLOW */}
                           <div className="horizontal-dashboard">
                             
@@ -699,41 +1481,202 @@ ${pmNotes}
                                   </div>
                                 )}
                             {activePage.audit && activePage.audit.gaps.length > 0 ? (
-                              <div className="gaps-list compact-gaps">
-                                {activePage.audit.gaps.map((gap) => {
-                                  const isSkipped = currentApproval.gaps?.[gap.id] === 'skip';
-
-                                  return (
-                                    <div 
-                                      key={gap.id} 
-                                      className={`gap-item-row smooth-all ${!isSkipped ? 'gap-apply' : 'gap-skip'}`}
-                                      onClick={() => handleGapToggle(gap.id)}
-                                    >
-                                      <div className="gap-row-check">
-                                        <input 
-                                          type="checkbox" 
-                                          className="gap-checkbox-tactile"
-                                          checked={!isSkipped}
-                                          onChange={() => {}} // toggled by row click
-                                        />
-                                      </div>
-                                      <div className="gap-row-content">
-                                        <div className="gap-row-header">
-                                          <span className={`gap-row-tag tag-${gap.severity}`}>{gap.severity}</span>
-                                          <span className="gap-row-category">{gap.category}</span>
-                                          <span className={`gap-row-pill ${!isSkipped ? 'pill-green' : 'pill-orange'}`}>
-                                            {!isSkipped ? '🟢 WILL APPLY FIX' : '🟡 WILL SKIP FIX'}
-                                          </span>
-                                        </div>
-                                        <p className="gap-row-desc">{gap.description}</p>
-                                        {gap.recommendation && (
-                                          <p className="gap-row-rec"><strong>Fix Strategy:</strong> {gap.recommendation}</p>
-                                        )}
-                                      </div>
+                              <>
+                                {/* ─── Toolbar: read register + filter chips ─── */}
+                                <div className="findings-toolbar" style={{
+                                  display: 'flex', flexDirection: 'column', gap: '0.5rem',
+                                  marginBottom: '0.75rem', padding: '0.65rem',
+                                  background: '#f8fafc', border: '1px solid #e2e8f0',
+                                  borderRadius: '8px',
+                                }}>
+                                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <span style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#64748b', fontWeight: 700 }}>Read as</span>
+                                    <div style={{ display: 'inline-flex', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '2px' }}>
+                                      <button
+                                        onClick={() => setLanguageRegister('plain')}
+                                        style={{
+                                          padding: '0.3rem 0.65rem', fontSize: '0.75rem', fontWeight: 600,
+                                          border: 'none', borderRadius: '4px', cursor: 'pointer',
+                                          background: languageRegister === 'plain' ? '#2563eb' : 'transparent',
+                                          color: languageRegister === 'plain' ? '#fff' : '#475569',
+                                        }}
+                                      >Plain English</button>
+                                      <button
+                                        onClick={() => setLanguageRegister('technical')}
+                                        style={{
+                                          padding: '0.3rem 0.65rem', fontSize: '0.75rem', fontWeight: 600,
+                                          border: 'none', borderRadius: '4px', cursor: 'pointer',
+                                          background: languageRegister === 'technical' ? '#2563eb' : 'transparent',
+                                          color: languageRegister === 'technical' ? '#fff' : '#475569',
+                                        }}
+                                      >Technical</button>
                                     </div>
-                                  );
-                                })}
-                              </div>
+
+                                    <span style={{ marginLeft: '0.5rem', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#64748b', fontWeight: 700 }}>Severity</span>
+                                    {(['critical', 'high', 'medium', 'low'] as const).map(sev => {
+                                      const active = severityFilter.has(sev);
+                                      return (
+                                        <button
+                                          key={sev}
+                                          onClick={() => setSeverityFilter(toggleInSet(severityFilter, sev))}
+                                          style={{
+                                            padding: '0.25rem 0.55rem', fontSize: '0.7rem', fontWeight: 600,
+                                            border: '1px solid ' + (active ? '#2563eb' : '#cbd5e1'),
+                                            borderRadius: '999px', cursor: 'pointer',
+                                            background: active ? '#dbeafe' : '#fff',
+                                            color: active ? '#1e40af' : '#475569',
+                                            textTransform: 'capitalize',
+                                          }}
+                                        >{sev}</button>
+                                      );
+                                    })}
+
+                                    <span style={{ marginLeft: '0.5rem', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#64748b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                      Min confidence
+                                    </span>
+                                    <input
+                                      type="range" min={0} max={1} step={0.05}
+                                      value={minConfidence}
+                                      onChange={(e) => setMinConfidence(parseFloat(e.target.value))}
+                                      style={{ width: '90px' }}
+                                    />
+                                    <span style={{ fontSize: '0.75rem', color: '#475569', fontFamily: 'monospace', minWidth: '32px' }}>
+                                      {Math.round(minConfidence * 100)}%
+                                    </span>
+                                  </div>
+
+                                  {availableDimensions.length > 0 && (
+                                    <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                      <span style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#64748b', fontWeight: 700 }}>Dimension</span>
+                                      {availableDimensions.map(dim => {
+                                        const active = dimensionFilter.has(dim);
+                                        return (
+                                          <button
+                                            key={dim}
+                                            onClick={() => setDimensionFilter(toggleInSet(dimensionFilter, dim))}
+                                            style={{
+                                              padding: '0.2rem 0.5rem', fontSize: '0.7rem', fontWeight: 500,
+                                              border: '1px solid ' + (active ? '#8B5CF6' : '#e2e8f0'),
+                                              borderRadius: '999px', cursor: 'pointer',
+                                              background: active ? '#ede9fe' : '#fff',
+                                              color: active ? '#5b21b6' : '#475569',
+                                            }}
+                                          >{dim}</button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+
+                                  {filteredGaps.length !== activePage.audit.gaps.length && (
+                                    <div style={{ fontSize: '0.7rem', color: '#64748b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <span>Showing {filteredGaps.length} of {activePage.audit.gaps.length} findings.</span>
+                                      <button
+                                        onClick={() => { setSeverityFilter(new Set()); setDimensionFilter(new Set()); setMinConfidence(0); }}
+                                        style={{ background: 'transparent', border: 'none', color: '#2563eb', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600, textDecoration: 'underline' }}
+                                      >Clear filters</button>
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div className="gaps-list compact-gaps">
+                                  {filteredGaps.length === 0 ? (
+                                    <p className="no-gaps-placeholder" style={{ fontSize: '0.85rem' }}>
+                                      No findings match the current filters. <button
+                                        onClick={() => { setSeverityFilter(new Set()); setDimensionFilter(new Set()); setMinConfidence(0); }}
+                                        style={{ background: 'transparent', border: 'none', color: '#2563eb', cursor: 'pointer', textDecoration: 'underline' }}
+                                      >Clear filters</button>
+                                    </p>
+                                  ) : filteredGaps.map((gap) => {
+                                    const isSkipped = currentApproval.gaps?.[gap.id] === 'skip';
+                                    // Dual-register text resolution: in plain mode prefer the
+                                    // plain-English `plain` field, falling back to description
+                                    // when the agent didn't emit it. Technical mode shows the
+                                    // engineer-facing description, with `plain` as a collapsible.
+                                    const mainText = languageRegister === 'plain' && gap.plain
+                                      ? gap.plain
+                                      : gap.description;
+                                    const confPct = typeof gap.confidence === 'number'
+                                      ? Math.round(gap.confidence * 100)
+                                      : null;
+                                    // Color-code the confidence chip: ≥90% = strong (teal),
+                                    // 70–90% = moderate (blue), <70% = soft (slate).
+                                    const confColor = confPct === null
+                                      ? null
+                                      : confPct >= 90 ? { bg: '#ccfbf1', fg: '#0f766e' }
+                                      : confPct >= 70 ? { bg: '#dbeafe', fg: '#1e40af' }
+                                      : { bg: '#f1f5f9', fg: '#475569' };
+
+                                    return (
+                                      <div
+                                        key={gap.id}
+                                        className={`gap-item-row smooth-all ${!isSkipped ? 'gap-apply' : 'gap-skip'}`}
+                                        onClick={() => handleGapToggle(gap.id)}
+                                      >
+                                        <div className="gap-row-check">
+                                          <input
+                                            type="checkbox"
+                                            className="gap-checkbox-tactile"
+                                            checked={!isSkipped}
+                                            onChange={() => {}}
+                                          />
+                                        </div>
+                                        <div className="gap-row-content">
+                                          <div className="gap-row-header" style={{ gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                                            <span className={`gap-row-tag tag-${gap.severity}`}>{gap.severity}</span>
+                                            {gap.dimension ? (
+                                              <span style={{
+                                                fontSize: '0.65rem', fontWeight: 600, textTransform: 'lowercase',
+                                                padding: '0.15rem 0.45rem', borderRadius: '999px',
+                                                background: '#f3e8ff', color: '#7c3aed', border: '1px solid #ddd6fe',
+                                              }}>{gap.dimension}</span>
+                                            ) : (
+                                              <span className="gap-row-category">{gap.category}</span>
+                                            )}
+                                            {confColor && (
+                                              <span
+                                                title="Agent confidence this finding is real"
+                                                style={{
+                                                  fontSize: '0.65rem', fontWeight: 700, fontFamily: 'monospace',
+                                                  padding: '0.15rem 0.45rem', borderRadius: '4px',
+                                                  background: confColor.bg, color: confColor.fg,
+                                                }}
+                                              >{confPct}%</span>
+                                            )}
+                                            <span className={`gap-row-pill ${!isSkipped ? 'pill-green' : 'pill-orange'}`}>
+                                              {!isSkipped ? '🟢 WILL APPLY FIX' : '🟡 WILL SKIP FIX'}
+                                            </span>
+                                          </div>
+                                          <p className="gap-row-desc">{mainText}</p>
+                                          {gap.whyItMatters && languageRegister === 'plain' && (
+                                            <p style={{
+                                              fontStyle: 'italic', color: '#64748b', fontSize: '0.8rem',
+                                              marginTop: '0.35rem', marginBottom: 0,
+                                            }}>
+                                              <strong style={{ fontStyle: 'normal', color: '#475569' }}>Why it matters:</strong> {gap.whyItMatters}
+                                            </p>
+                                          )}
+                                          {languageRegister === 'technical' && gap.plain && (
+                                            <details style={{ marginTop: '0.35rem', fontSize: '0.75rem', color: '#64748b' }}>
+                                              <summary style={{ cursor: 'pointer', userSelect: 'none', fontWeight: 600 }}>
+                                                Plain-English version
+                                              </summary>
+                                              <p style={{ marginTop: '0.25rem', marginBottom: 0 }}>{gap.plain}</p>
+                                              {gap.whyItMatters && (
+                                                <p style={{ marginTop: '0.25rem', marginBottom: 0, fontStyle: 'italic' }}>
+                                                  <strong style={{ fontStyle: 'normal' }}>Why it matters:</strong> {gap.whyItMatters}
+                                                </p>
+                                              )}
+                                            </details>
+                                          )}
+                                          {gap.recommendation && (
+                                            <p className="gap-row-rec"><strong>Fix Strategy:</strong> {gap.recommendation}</p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </>
                             ) : (
                               <p className="no-gaps-placeholder">🎉 No visual or functional blockers detected on this screen!</p>
                             )}
@@ -939,7 +1882,7 @@ ${pmNotes}
 
                       {/* Simplified Workspace Preview Pane */}
                       <div className="workspace-preview-area full-layout">
-                        
+
                         {/* Visual Preview Device Container */}
                         <div className="preview-card">
                           <div className="browser-chrome-header">
@@ -971,43 +1914,285 @@ ${pmNotes}
                             </div>
                           </div>
 
-                          <div className="preview-viewport-scroll fit-scroll">
-                            {previewMode === 'iframe' && activePage.hasHtml ? (
-                              <iframe
-                                src={`/api/html/${activePage.slug}`}
-                                sandbox="allow-scripts"
-                                title={`Static preview of ${activePage.slug}`}
-                                className="preview-iframe-snapshot"
-                                style={{ height: '800px' }}
-                              />
-                            ) : activePage.hasScreenshot ? (
-                              <img
-                                className="screenshot-img-refactored"
-                                src={`/api/screenshot/${activePage.slug}`}
-                                alt={`Rendered screenshot of ${activePage.slug}`}
-                                onError={(e) => {
-                                  // gracefull fallback for missing image (e.g. mock slug mismatch)
-                                  e.currentTarget.style.display = 'none';
-                                  const parent = e.currentTarget.parentElement;
-                                  if (parent) {
-                                    const placeholder = document.createElement('div');
-                                    placeholder.className = 'screenshot-placeholder-mock';
-                                    placeholder.innerHTML = '🖼️ Mock Preview Asset Loaded';
-                                    parent.appendChild(placeholder);
-                                  }
-                                }}
-                              />
-                            ) : (
-                              <div className="no-screenshot">
-                                <span style={{ fontSize: '2.5rem' }}>🖼️</span>
-                                <p>No preview asset available for this page.</p>
+                          {/* ─── Breakpoint strip ───────────────────────────────────────
+                              When Agent 1 captured multi-viewport screenshots the strip
+                              renders a button per viewport. Selecting one rewrites the
+                              screenshot URL with a ?breakpoint=<name> query so the same
+                              preview surface shows the responsive variant.
+                              Hidden when only the default capture is available. */}
+                          {(() => {
+                            const bps = activePage.audit?.breakpointScreenshots ?? {};
+                            const names = Object.keys(bps);
+                            if (names.length === 0) return null;
+                            // Human-friendly labels for the canonical engine breakpoints.
+                            const LABELS: Record<string, { label: string; w: number }> = {
+                              mobile:  { label: '📱 iPhone',  w: 390 },
+                              tablet:  { label: '📲 iPad',    w: 768 },
+                              desktop: { label: '🖥️ Desktop', w: 1440 },
+                            };
+                            return (
+                              <div style={{
+                                display: 'flex', gap: '0.4rem', alignItems: 'center',
+                                padding: '0.5rem 0.75rem', borderTop: '1px solid #f1f5f9',
+                                borderBottom: '1px solid #f1f5f9', background: '#f8fafc',
+                                overflowX: 'auto',
+                              }}>
+                                <span style={{
+                                  fontSize: '0.65rem', textTransform: 'uppercase',
+                                  letterSpacing: '0.1em', color: '#64748b', fontWeight: 700,
+                                  whiteSpace: 'nowrap', marginRight: '0.25rem',
+                                }}>Viewport</span>
+                                <button
+                                  onClick={() => setActiveBreakpoint('default')}
+                                  style={{
+                                    padding: '0.3rem 0.65rem', fontSize: '0.72rem', fontWeight: 600,
+                                    borderRadius: '6px', cursor: 'pointer',
+                                    border: '1px solid ' + (activeBreakpoint === 'default' ? '#2563eb' : '#cbd5e1'),
+                                    background: activeBreakpoint === 'default' ? '#dbeafe' : '#fff',
+                                    color: activeBreakpoint === 'default' ? '#1e40af' : '#475569',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >Default</button>
+                                {names.map(name => {
+                                  const meta = LABELS[name];
+                                  const label = meta ? meta.label : name;
+                                  const widthHint = meta ? ` · ${meta.w}px` : '';
+                                  return (
+                                    <button
+                                      key={name}
+                                      onClick={() => setActiveBreakpoint(name)}
+                                      title={`Switch preview to ${name} (${meta?.w ?? '?'}px wide)`}
+                                      style={{
+                                        padding: '0.3rem 0.65rem', fontSize: '0.72rem', fontWeight: 600,
+                                        borderRadius: '6px', cursor: 'pointer',
+                                        border: '1px solid ' + (activeBreakpoint === name ? '#2563eb' : '#cbd5e1'),
+                                        background: activeBreakpoint === name ? '#dbeafe' : '#fff',
+                                        color: activeBreakpoint === name ? '#1e40af' : '#475569',
+                                        whiteSpace: 'nowrap',
+                                      }}
+                                    >{label}{widthHint}</button>
+                                  );
+                                })}
+                                <span style={{ marginLeft: 'auto', fontSize: '0.65rem', color: '#94a3b8', whiteSpace: 'nowrap' }}>
+                                  Drag the right edge below to resize freely
+                                </span>
                               </div>
-                            )}
+                            );
+                          })()}
+
+                          {/* Resizable preview wrapper — native CSS resize gives the
+                              reviewer a draggable right edge to test arbitrary widths.
+                              Centered, capped at the full container width. */}
+                          <div style={{ display: 'flex', justifyContent: 'center', padding: '0.75rem', background: '#f8fafc' }}>
+                            <div
+                              className="preview-resize-wrap"
+                              style={{
+                                resize: 'horizontal',
+                                overflow: 'auto',
+                                maxWidth: '100%',
+                                width: '100%',
+                                minWidth: '320px',
+                                background: '#fff',
+                                border: '2px solid #e2e8f0',
+                                borderRadius: '6px',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                              }}
+                            >
+                              <div className="preview-viewport-scroll fit-scroll">
+                                {previewMode === 'iframe' && activePage.hasHtml && activeBreakpoint === 'default' ? (
+                                  <iframe
+                                    src={`/api/html/${activePage.slug}`}
+                                    sandbox="allow-scripts"
+                                    title={`Static preview of ${activePage.slug}`}
+                                    className="preview-iframe-snapshot"
+                                    style={{ height: '800px', width: '100%', border: 'none' }}
+                                  />
+                                ) : activePage.hasScreenshot ? (
+                                  <img
+                                    className="screenshot-img-refactored"
+                                    key={`${activePage.slug}-${activeBreakpoint}`}
+                                    src={screenshotUrl}
+                                    alt={`Rendered screenshot of ${activePage.slug} at ${activeBreakpoint}`}
+                                    style={{ display: 'block', width: '100%', height: 'auto' }}
+                                    onError={(e) => {
+                                      // Graceful fallback — e.g. the requested breakpoint file
+                                      // hasn't been captured for this page, or mock data
+                                      // doesn't ship images.
+                                      e.currentTarget.style.display = 'none';
+                                      const parent = e.currentTarget.parentElement;
+                                      if (parent && !parent.querySelector('.screenshot-placeholder-mock')) {
+                                        const placeholder = document.createElement('div');
+                                        placeholder.className = 'screenshot-placeholder-mock';
+                                        placeholder.innerHTML = activeBreakpoint === 'default'
+                                          ? '🖼️ Mock Preview Asset Loaded'
+                                          : `📐 No ${activeBreakpoint} capture available for this page.`;
+                                        parent.appendChild(placeholder);
+                                      }
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="no-screenshot">
+                                    <span style={{ fontSize: '2.5rem' }}>🖼️</span>
+                                    <p>No preview asset available for this page.</p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </div>
 
                       </div>
                     </div>
+
+                      {/* ────────────────────────── COMPLIANCE FINDINGS ──────────────────────────
+                          Per-page compliance findings with per-finding Skip / Restore parity.
+                          Same approvals.complianceFindings map the Run Overview writes — both
+                          surfaces stay consistent. Hidden when the page has zero findings so
+                          clean pages don't carry an empty card. */}
+                      {activePage.compliance && activePage.compliance.findings.length > 0 && (
+                        <div className="card border-slate" style={{ marginTop: '1rem' }}>
+                          <div className="card-header compact-header">
+                            <h3 className="card-title" style={{ color: '#8B5CF6' }}>
+                              ⚖️ Compliance findings ({activePage.compliance.findings.length})
+                              {activePage.compliance.clean && (
+                                <span style={{ marginLeft: '0.5rem', fontSize: '0.7rem', padding: '0.15rem 0.45rem', borderRadius: '999px', background: '#dcfce7', color: '#15803d', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                                  no blockers
+                                </span>
+                              )}
+                            </h3>
+                          </div>
+                          <div className="card-body compact-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                            {activePage.compliance.findings.map((finding) => {
+                              const findingKey = `${finding.ruleId}::${finding.location}`;
+                              const itemKey = `${activePage.slug}::compliance::${findingKey}`;
+                              const pageBypassed = currentApproval?.decision === 'skip';
+                              const perItemSkipped =
+                                currentApproval?.complianceFindings?.[findingKey] === 'skip';
+                              const isSkipped = pageBypassed || perItemSkipped;
+                              const writing = overviewWriting.has(itemKey);
+                              const sevTone =
+                                finding.severity === 'critical' ? { bg: '#fee2e2', fg: '#991b1b' }
+                                : finding.severity === 'high'    ? { bg: '#fed7aa', fg: '#9a3412' }
+                                : finding.severity === 'medium'  ? { bg: '#fef3c7', fg: '#854d0e' }
+                                :                                   { bg: '#e0e7ff', fg: '#3730a3' };
+                              const confPct = typeof finding.confidence === 'number'
+                                ? Math.round(finding.confidence * 100) : null;
+                              const mainText = languageRegister === 'plain' && finding.plain
+                                ? finding.plain
+                                : finding.problem;
+
+                              return (
+                                <div
+                                  key={findingKey}
+                                  style={{
+                                    padding: '0.85rem 1rem',
+                                    background: isSkipped ? '#fafafa' : '#fff',
+                                    border: '1px solid #e2e8f0',
+                                    borderRadius: '8px',
+                                    opacity: isSkipped ? 0.55 : 1,
+                                    display: 'flex',
+                                    gap: '0.75rem',
+                                  }}
+                                >
+                                  <div style={{
+                                    padding: '0.2rem 0.5rem', borderRadius: '4px',
+                                    background: sevTone.bg, color: sevTone.fg,
+                                    fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase',
+                                    letterSpacing: '0.05em', height: 'fit-content', whiteSpace: 'nowrap',
+                                  }}>
+                                    {finding.severity}
+                                  </div>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.35rem' }}>
+                                      <span style={{ fontFamily: 'monospace', fontSize: '0.7rem', color: '#475569', fontWeight: 600 }}>
+                                        {finding.ruleId}
+                                      </span>
+                                      <span style={{ fontSize: '0.65rem', color: '#64748b' }}>·</span>
+                                      <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                                        {finding.domain}
+                                      </span>
+                                      {finding.dimension && finding.dimension !== 'compliance' && (
+                                        <span style={{ padding: '0.1rem 0.4rem', borderRadius: '999px', background: '#f3e8ff', color: '#7c3aed', fontSize: '0.65rem', fontWeight: 600 }}>
+                                          {finding.dimension}
+                                        </span>
+                                      )}
+                                      {confPct !== null && (
+                                        <span style={{ fontFamily: 'monospace', fontSize: '0.65rem', color: '#475569' }}>
+                                          {confPct}%
+                                        </span>
+                                      )}
+                                      {isSkipped && (
+                                        <span style={{ padding: '0.1rem 0.4rem', borderRadius: '999px', background: '#fef3c7', color: '#854d0e', fontSize: '0.65rem', fontWeight: 700 }}>
+                                          {pageBypassed ? 'page bypassed' : 'skipped'}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div style={{
+                                      fontSize: '0.85rem', color: '#1e293b', lineHeight: 1.5,
+                                      textDecoration: isSkipped ? 'line-through' : 'none',
+                                    }}>
+                                      {mainText}
+                                    </div>
+                                    {finding.whyItMatters && languageRegister === 'plain' && (
+                                      <p style={{ fontStyle: 'italic', color: '#64748b', fontSize: '0.78rem', marginTop: '0.35rem', marginBottom: 0 }}>
+                                        <strong style={{ fontStyle: 'normal', color: '#475569' }}>Why it matters:</strong> {finding.whyItMatters}
+                                      </p>
+                                    )}
+                                    {languageRegister === 'technical' && finding.plain && (
+                                      <details style={{ marginTop: '0.35rem', fontSize: '0.75rem', color: '#64748b' }}>
+                                        <summary style={{ cursor: 'pointer', userSelect: 'none', fontWeight: 600 }}>
+                                          Plain-English version
+                                        </summary>
+                                        <p style={{ marginTop: '0.25rem', marginBottom: 0 }}>{finding.plain}</p>
+                                        {finding.whyItMatters && (
+                                          <p style={{ marginTop: '0.25rem', marginBottom: 0, fontStyle: 'italic' }}>
+                                            <strong style={{ fontStyle: 'normal' }}>Why it matters:</strong> {finding.whyItMatters}
+                                          </p>
+                                        )}
+                                      </details>
+                                    )}
+                                    {finding.requiredFix && (
+                                      <p style={{ fontSize: '0.78rem', color: '#475569', marginTop: '0.35rem', marginBottom: 0 }}>
+                                        <strong style={{ color: '#1e293b' }}>Required fix:</strong> {finding.requiredFix}
+                                      </p>
+                                    )}
+                                    <p style={{ fontFamily: 'monospace', fontSize: '0.7rem', color: '#94a3b8', marginTop: '0.35rem', marginBottom: 0 }}>
+                                      {finding.location}
+                                    </p>
+                                  </div>
+                                  {!pageBypassed && (
+                                    <button
+                                      onClick={() => {
+                                        if (writing) return;
+                                        setOverviewFindingDecision(
+                                          activePage.slug,
+                                          { kind: 'compliance', complianceFindingKey: findingKey },
+                                          isSkipped ? 'apply' : 'skip',
+                                          itemKey,
+                                        );
+                                      }}
+                                      disabled={writing}
+                                      style={{
+                                        alignSelf: 'flex-start', padding: '0.3rem 0.6rem',
+                                        fontSize: '0.72rem', fontWeight: 600, borderRadius: '6px',
+                                        cursor: writing ? 'wait' : 'pointer',
+                                        border: '1px solid ' + (isSkipped ? '#34d399' : '#fda4af'),
+                                        background: isSkipped ? '#ecfdf5' : '#fff1f2',
+                                        color: isSkipped ? '#065f46' : '#9f1239',
+                                        whiteSpace: 'nowrap',
+                                        opacity: writing ? 0.6 : 1,
+                                      }}
+                                      title={isSkipped ? 'Restore this finding to the apply set' : 'Skip this finding without dropping the page'}
+                                    >
+                                      {writing ? '…' : isSkipped ? '↩ Restore' : '✕ Skip'}
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
 
                       {/* UX & Design specs displayed cleanly under the preview card */}
                       <div className="specs-accordions-row">
