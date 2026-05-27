@@ -38,6 +38,27 @@ export async function runVerifyOnly(
     return 1;
   }
 
+  // Parse `--page <slug>` out of extraArgs. When set, verify scopes to
+  // ONLY the named page — every other page keeps its existing verify
+  // checkpoint and is skipped by the resume path. The tightest dev
+  // loop: edit one screen, re-verify just that one screen.
+  let pageScope: string | undefined;
+  const filteredExtra: string[] = [];
+  for (let i = 0; i < extraArgs.length; i++) {
+    const tok = extraArgs[i];
+    if (tok === '--page') {
+      const v = extraArgs[i + 1];
+      if (!v) {
+        console.error('Error: --page requires a slug argument.');
+        return 1;
+      }
+      pageScope = v;
+      i++;
+    } else {
+      filteredExtra.push(tok);
+    }
+  }
+
   // Recover the original target from manifest.json — without it we have
   // nothing to point the work-copy materializer at.
   const manifestPath = path.join(runDir, 'manifest.json');
@@ -64,13 +85,28 @@ export async function runVerifyOnly(
   // Reset verify checkpoint state so resume re-runs Agent 5. Stage 0.5
   // resets implicitly inside runPipeline (scratch was torn down on the
   // prior run's exit), but the page-level agent checkpoints persist —
-  // we have to opt verify back in explicitly.
+  // we have to opt verify back in explicitly. With --page, only the
+  // named slug is reset; every other page keeps its 'done' status and
+  // the resume path no-ops past it.
   const state = loadState(runDir);
   if (state) {
     state.stage0_5 = 'pending';
-    for (const pageState of Object.values(state.pages)) {
+    if (pageScope) {
+      const pageState = state.pages[pageScope];
+      if (!pageState) {
+        console.error(
+          `Error: --page "${pageScope}" not found in state.json. ` +
+            `Available slugs: ${Object.keys(state.pages).join(', ') || '(none)'}`,
+        );
+        return 1;
+      }
       (pageState.agents as Record<AgentName, StepStatus>).verify = 'pending';
       pageState.pass = undefined;
+    } else {
+      for (const pageState of Object.values(state.pages)) {
+        (pageState.agents as Record<AgentName, StepStatus>).verify = 'pending';
+        pageState.pass = undefined;
+      }
     }
     try {
       saveState(runDir, state);
@@ -94,18 +130,24 @@ export async function runVerifyOnly(
     '--verify-only',
     '--apply-mode',
     'propose',
-    ...extraArgs,
+    ...filteredExtra,
   ];
 
   const config = await resolveConfig(rebuiltArgv);
   const manifest = await runPipeline(config);
 
+  // When scoped to a single page, the manifest still lists every page
+  // (the rest unchanged from the prior run). Filter to just the verify
+  // target for the summary line.
+  const targetEntries = pageScope
+    ? manifest.pagesProcessed.filter((p) => p.slug === pageScope)
+    : manifest.pagesProcessed;
   const allPass =
-    manifest.pagesProcessed.length > 0 &&
-    manifest.pagesProcessed.every((p) => p.pass);
-  const passCount = manifest.pagesProcessed.filter((p) => p.pass).length;
+    targetEntries.length > 0 && targetEntries.every((p) => p.pass);
+  const passCount = targetEntries.filter((p) => p.pass).length;
   console.log(
-    `\n[reframe verify] ${passCount}/${manifest.pagesProcessed.length} page(s) verified clean.`,
+    `\n[reframe verify${pageScope ? ` --page ${pageScope}` : ''}] ` +
+      `${passCount}/${targetEntries.length} page(s) verified clean.`,
   );
   return allPass ? 0 : 1;
 }

@@ -116,14 +116,16 @@ SUBCOMMANDS
                               existing pinned brand unless --force is set.
 
   verify <run-dir>            Re-run only Agent 5 (verify) against an
-                              existing run. Loads the target out of the
+    [--page <slug>]           existing run. Loads the target out of the
                               run's manifest.json, clears verify
                               checkpoint state, and re-runs verify against
                               the on-disk audit results. The tight dev
                               loop: fix a finding by hand, verify in
                               seconds without re-running the full pipeline.
-                              Always --apply-mode propose (verify is
-                              read-only). Exits 0 when every page verifies.
+                              With --page, scopes to a single screen
+                              (the tightest loop). Always --apply-mode
+                              propose (verify is read-only). Exits 0
+                              when every targeted page verifies.
 
 ENV
   GEMINI_API_KEY / GOOGLE_API_KEY   Gemini API key (required for Gemini runs).
