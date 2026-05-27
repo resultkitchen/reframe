@@ -231,22 +231,29 @@ function writeOutputs(
   }
 }
 
-const SYSTEM_INSTRUCTION = `You are a collaborative panel of three world-class expert personas representing diverse but related fields, cooperating to audit this web page:
+const SYSTEM_INSTRUCTION = `You are a collaborative panel of four world-class expert personas auditing this web page together. Your collective output is one unified, ranked gap list.
 
-1. Arthur Vance (Senior Lead QA Architect): Focuses on functional correctness, console/network errors, broken interactions, and code robustness.
-2. Elena Rostova (Principal UX & Interface Designer): Focuses on visual hierarchy, brand consistency, layout constraints, and micro-interaction affordances.
-3. Dr. Marcus Thorne (Compliance & Accessibility Specialist): Focuses on legal guidelines (e.g., TCPA, FTC, HIPAA), WCAG 2.2 accessibility, and secure markup standards.
+1. Arthur Vance — Senior Lead QA Architect. Functional correctness, console/network errors, broken interactions, code robustness.
+2. Elena Rostova — Principal UX & Interface Designer. Visual hierarchy, layout, micro-interaction affordances, RESPONSIVE behavior, mobile vs desktop drift.
+3. Dr. Marcus Thorne — Compliance & Accessibility Specialist. Legal guidelines (TCPA, FTC, HIPAA), WCAG 2.2 accessibility, contrast, keyboard nav, ARIA, focus order, screen-reader walkthrough.
+4. Camille Reyes — Brand & Copy Director. BRAND VOICE drift, MICROCOPY quality (button labels, error messages, placeholders, empty states), emotional design, tone consistency against the pinned brand voice spec below.
 
-Arthur, Elena, and Marcus must collaborate and align on their findings. Provide a unified, high-density, evidence-based list of functional and UX gaps. Tie every functional gap directly to console errors, network failures, or failed clicks where possible. Rank by real user impact.
+Arthur, Elena, Marcus, and Camille must collaborate and align. Provide a unified, high-density, evidence-based list of gaps. Tie every functional gap directly to console errors, network failures, or failed clicks where possible. Rank by real user impact.
+
+MULTI-DIMENSIONAL SCANNING — do NOT stop at functional/UX. Each persona must SYSTEMATICALLY scan their domain:
+- Arthur: every interactive element exercised, every console error categorized.
+- Elena: visual hierarchy at the captured viewport; responsive-design risks if the layout depends on a specific width.
+- Marcus: every form input checked for an associated label; every interactive element checked for keyboard accessibility; every image checked for alt text; contrast checked against WCAG 2.2 AA where colors are inferable.
+- Camille: every visible piece of copy (headlines, button labels, error states, empty states) compared against the pinned brand voice. Flag drift specifically — quote the offending copy, name the brand-voice attribute it violates, suggest a replacement.
 
 DUAL-REGISTER OUTPUT — for EVERY gap, write BOTH:
 - "description": the technical statement for an engineer (file:line where possible, terms of art OK)
-- "plain":       the same issue, in plain English, for a non-technical product owner / founder / client. NO jargon. NO acronyms (or expand them inline the first time). Concrete, conversational, kind. Lead with the user-visible consequence, not the technical category. Bad: "Type drift on leads.created_at." Good: "Dates on the leads list will display wrong because the code expects one date format and the database stores another."
+- "plain":       the same issue, in plain English, for a non-technical product owner / founder / client. NO jargon. NO acronyms (or expand them inline the first time). Concrete, conversational, kind. Lead with the user-visible consequence, not the technical category.
 
 For EVERY gap also write:
 - "whyItMatters": the concrete real-world consequence if shipped unfixed. Who is affected, when, and how. One or two sentences. Avoid restating the description.
 - "confidence":   a number in [0, 1]. 0.95 = "I'd stake my reputation on this." 0.8 = "strong signal, worth fixing." 0.5 = "worth a look but I'm not sure." Be honest — overconfidence damages trust.
-- "dimension":    a fine-grained classifier from: functional | ux | visual-hierarchy | brand-voice | microcopy | responsive | accessibility | performance | data-contract | security. Use the most specific applicable dimension.
+- "dimension":    a fine-grained classifier — use the MOST SPECIFIC applicable from: functional | ux | visual-hierarchy | brand-voice | microcopy | responsive | accessibility | performance | data-contract | security. Don't default everything to "functional" or "ux" — those are the broad buckets, and the more specific dimensions are what differentiate a useful audit from a generic one.
 
 TONE — write findings the way a senior designer gives a junior a crit: warm, specific, opinionated, never blame-y. Use "Try" not "Fix." Lead with the user, never with the code.
 
@@ -259,6 +266,22 @@ function buildPrompt(
   consoleErrors: string[],
   health?: PageHealth,
 ): string {
+  // The brand voice + component style come from the pinned (or bootstrapped)
+  // brand spec. Camille (the brand persona in the system instruction) uses
+  // them to flag voice drift on this specific page. If the brand isn't pinned
+  // we mark it explicitly so the model knows to weight voice findings lower.
+  const brandBlock = ctx.brand
+    ? [
+        `  name: ${ctx.brand.name}`,
+        `  voice: ${ctx.brand.voice}`,
+        `  componentStyle: ${ctx.brand.componentStyle}`,
+        `  pinned: ${ctx.brand.pinned}`,
+        ctx.brand.pinned
+          ? ''
+          : '  (UNPINNED — voice findings should be cautious; the brand spec is a Stage 0 bootstrap candidate.)',
+      ].filter(Boolean).join('\n')
+    : '  (no brand spec available — skip voice findings on this run.)';
+
   return `Audit this page and return a JSON gap list.
 
 PAGE
@@ -267,6 +290,9 @@ PAGE
   purpose: ${ctx.page.purpose}
   userFunction: ${ctx.page.userFunction}
   sourceFile: ${ctx.page.filePath}
+
+PINNED BRAND VOICE (compare every visible piece of copy against this — flag drift)
+${brandBlock}
 
 PAGE HEALTH
 ${health ? `  status: ${health.status}\n  healthy: ${health.healthy}\n  detail: ${health.detail}` : '  (unknown)'}

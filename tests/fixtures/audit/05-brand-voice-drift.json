@@ -1,0 +1,61 @@
+{
+  "name": "brand-voice-drift",
+  "agent": "audit",
+  "description": "A homepage with copy that violates the pinned brand voice (premium, technical, restrained → headline reads like generic marketing fluff). Camille — the brand persona — must flag this as a `brand-voice` dimension finding; should NOT be classified as plain `ux`.",
+
+  "input": {
+    "page": {
+      "slug": "home",
+      "route": "/",
+      "filePath": "app/page.tsx",
+      "purpose": "Marketing homepage for a dental-practice scheduling platform.",
+      "userFunction": "Visitor reads positioning and starts a trial.",
+      "dataDependencies": [],
+      "libraries": ["react", "tailwind"]
+    },
+    "brand": {
+      "name": "Acme Dental",
+      "voice": "Premium and technical. Speak like a knowledgeable peer to dental practice managers. Avoid hype, exclamation points, and superlatives. Reference specifics (workflows, integrations, time saved) rather than generic outcomes.",
+      "componentStyle": "Restrained: generous whitespace, single accent color, no gradients.",
+      "pinned": true
+    },
+    "snapshot": "REVOLUTIONIZE Your Dental Practice with AI! 🚀\nThe ULTIMATE platform to boost your business!!! Get started for FREE today!\n[Start your free trial]",
+    "interactions": [
+      "click: Start your free trial"
+    ],
+    "consoleErrors": [],
+    "health": {
+      "status": "ok",
+      "healthy": true,
+      "finalUrl": "http://localhost:3000/",
+      "httpStatus": 200,
+      "detail": "Page loaded successfully."
+    }
+  },
+
+  "expected": {
+    "gaps": [
+      {
+        "id": "g1",
+        "category": "ux",
+        "dimension": "brand-voice",
+        "severity": "high",
+        "confidence": 0.9,
+        "description": "Homepage hero copy ('REVOLUTIONIZE Your Dental Practice with AI! 🚀 The ULTIMATE platform to boost your business!!!') violates the pinned brand voice on three counts: all-caps emphasis ('REVOLUTIONIZE', 'ULTIMATE'), repeated exclamation points, and absent specifics — the voice spec explicitly bans hype/superlatives and asks for workflow-level reference points.",
+        "plain": "The headline at the top of your homepage sounds like generic marketing hype. Your brand voice says 'speak like a knowledgeable peer, avoid all-caps and exclamation points' — and this copy does the opposite.",
+        "whyItMatters": "Dental practice managers reading 'REVOLUTIONIZE Your Dental Practice with AI! 🚀' will bounce. You're targeting a serious operations buyer; hype-y copy reads as low-credibility and undermines the premium positioning the rest of the product is built around.",
+        "recommendation": "Try a specific, restrained alternative: 'Scheduling, recall, and waitlist — built around the way your front desk already works.' Lead with the workflow, not the technology. No exclamation points. No emoji.",
+        "evidence": ["REVOLUTIONIZE Your Dental Practice with AI! 🚀", "ULTIMATE platform"]
+      }
+    ]
+  },
+
+  "assertions": [
+    { "kind": "minFindings", "value": 1 },
+    { "kind": "dimensionIn", "id": "g1", "values": ["brand-voice", "microcopy"] },
+    { "kind": "severityAtLeast", "id": "g1", "value": "medium" },
+    { "kind": "fieldPresent", "id": "g1", "path": "plain" },
+    { "kind": "fieldPresent", "id": "g1", "path": "whyItMatters" },
+    { "kind": "mentionsAny", "id": "g1", "values": ["voice", "tone", "hype", "premium", "headline"] }
+  ]
+}
