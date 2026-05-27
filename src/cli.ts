@@ -32,6 +32,7 @@ Reframe — portable SaaS architectural refactoring engine (1 mapper + 6-agent f
 USAGE
   reframe rebuild <github-url|local-path> [flags]
   reframe bootstrap <github-url|local-path> [flags]
+  reframe show-brand <run-dir>
   reframe init [target-path]
   reframe review <run-dir> [--port <number>]
   reframe --help
@@ -85,6 +86,11 @@ FLAGS
                               edits — so this is the wake-up signal that
                               actually reaches subscribed reviewers.
                               Off by default to avoid surprising repos.
+  --json-summary              After the human-readable output, print a
+                              single-line JSON summary on stdout. The line
+                              is always last, so \`tail -n 1 | jq\` works
+                              cleanly. Designed for CI pipes — see
+                              .github/workflows/reframe-pr-template.yml.
 
 SUBCOMMANDS
 
@@ -92,6 +98,12 @@ SUBCOMMANDS
                               produces a brand candidate you can review + pin
                               before committing to a full audit run. The
                               friction-free first run for any new project.
+
+  show-brand <run-dir>        Pretty-print the bootstrapped brand candidate
+                              (or the resolved brand) from a completed run
+                              dir. Useful right after \`reframe bootstrap\`
+                              to inspect what the engine inferred before
+                              firing up the review UI.
 
 ENV
   GEMINI_API_KEY / GOOGLE_API_KEY   Gemini API key (required for Gemini runs).
@@ -134,24 +146,33 @@ async function main(): Promise<number> {
     return argv.length === 0 ? 1 : 0;
   }
 
+  // --json-summary: any subcommand that consumes it gets a single-line JSON
+  // summary printed to stdout at the end, AFTER the human-readable output.
+  // CI scripts can `tail -n 1 | jq` it to branch on outcome without parsing
+  // markdown. Flag is removed from argv before delegating to the subcommand.
+  const wantsJsonSummary = argv.includes('--json-summary');
+  const subcommandArgv = wantsJsonSummary
+    ? argv.filter((a) => a !== '--json-summary')
+    : argv;
+
   // Handle 'init' command.
-  if (argv[0] === 'init') {
-    await runInitScaffold(argv[1]);
+  if (subcommandArgv[0] === 'init') {
+    await runInitScaffold(subcommandArgv[1]);
     return 0;
   }
 
   // Handle 'review' command.
-  if (argv[0] === 'review') {
-    const runDir = argv[1];
+  if (subcommandArgv[0] === 'review') {
+    const runDir = subcommandArgv[1];
     if (!runDir) {
       console.error('Error: "review" command requires a target run directory.');
       console.error('Usage: reframe review <run-dir> [--port <number>]');
       return 1;
     }
     let port = 3000;
-    const portIndex = argv.indexOf('--port');
-    if (portIndex !== -1 && argv[portIndex + 1]) {
-      port = parseInt(argv[portIndex + 1], 10) || 3000;
+    const portIndex = subcommandArgv.indexOf('--port');
+    if (portIndex !== -1 && subcommandArgv[portIndex + 1]) {
+      port = parseInt(subcommandArgv[portIndex + 1], 10) || 3000;
     }
 
     const { startReviewServer } = await import('./server');
@@ -160,31 +181,49 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  // Handle 'show-brand' command — pretty-print the bootstrapped brand
+  // candidate from a completed run dir. Useful right after `reframe
+  // bootstrap` to inspect what the engine inferred without firing up
+  // the review UI.
+  if (subcommandArgv[0] === 'show-brand') {
+    const runDir = subcommandArgv[1];
+    if (!runDir) {
+      console.error('Error: "show-brand" command requires a target run directory.');
+      console.error('Usage: reframe show-brand <run-dir>');
+      return 1;
+    }
+    const { showBrand } = await import('./show-brand');
+    return showBrand(runDir);
+  }
+
   // Handle 'bootstrap' command — thin alias for `rebuild <target> --bootstrap-only`.
   // Keeps the verb explicit in the docs and on the user's shell history.
-  if (argv[0] === 'bootstrap') {
-    const target = argv[1];
+  if (subcommandArgv[0] === 'bootstrap') {
+    const target = subcommandArgv[1];
     if (!target) {
       console.error('Error: "bootstrap" command requires a target.');
       console.error('Usage: reframe bootstrap <github-url|local-path> [flags]');
       return 1;
     }
     // Rebuild the argv as if the user had typed `rebuild <target> --bootstrap-only ...`.
-    const rebuiltArgs = ['rebuild', target, ...argv.slice(2)];
+    const rebuiltArgs = ['rebuild', target, ...subcommandArgv.slice(2)];
     if (!rebuiltArgs.includes('--bootstrap-only')) rebuiltArgs.push('--bootstrap-only');
     const config = await resolveConfig(rebuiltArgs);
-    await runPipeline(config);
+    const manifest = await runPipeline(config);
+    if (wantsJsonSummary) {
+      printJsonSummary(manifest, 0);
+    }
     return 0;
   }
 
-  if (argv[0] !== 'rebuild') {
-    console.error(`Unknown command: "${argv[0]}". Expected "rebuild", "bootstrap", "init", or "review".`);
+  if (subcommandArgv[0] !== 'rebuild') {
+    console.error(`Unknown command: "${subcommandArgv[0]}". Expected "rebuild", "bootstrap", "init", "review", or "show-brand".`);
     console.error(`Run "reframe --help" for usage.`);
     return 1;
   }
 
   // resolveConfig parses the full argv (it expects `rebuild <target> ...`).
-  const config = await resolveConfig(argv);
+  const config = await resolveConfig(subcommandArgv);
   const manifest = await runPipeline(config);
 
   // Human-readable summary to stdout.
@@ -195,7 +234,49 @@ async function main(): Promise<number> {
     manifest.pagesProcessed.length > 0 &&
     manifest.pagesProcessed.every((p) => p.pass);
 
-  return allPagesPass ? 0 : 1;
+  const exitCode = allPagesPass ? 0 : 1;
+  if (wantsJsonSummary) {
+    printJsonSummary(manifest, exitCode);
+  }
+  return exitCode;
+}
+
+/**
+ * Print a single-line JSON summary to stdout — the CI-friendly form.
+ *
+ * Always the LAST line printed so `tail -n 1` works without parsing the
+ * rest of the output. Fields are deliberately stable (don't reorder /
+ * remove without a major-version bump) so downstream scripts can rely
+ * on the contract.
+ */
+function printJsonSummary(
+  manifest: Awaited<ReturnType<typeof runPipeline>>,
+  exitCode: number,
+): void {
+  const summary = {
+    schemaVersion: 1,
+    project: manifest.project,
+    target: manifest.target,
+    runDir: manifest.project, // included by callers; project slug here for reference
+    startedAt: manifest.startedAt,
+    finishedAt: manifest.finishedAt,
+    wallClockMs: manifest.wallClockMs,
+    bootStatus: manifest.bootStatus,
+    applyMode: manifest.applyMode,
+    prUrl: manifest.prUrl,
+    pagesProcessed: manifest.pagesProcessed.length,
+    pagesPassing: manifest.pagesProcessed.filter((p) => p.pass).length,
+    gapsFound: manifest.pagesProcessed.reduce((n, p) => n + p.gapsFound, 0),
+    gapsClosed: manifest.pagesProcessed.reduce((n, p) => n + p.gapsClosed, 0),
+    complianceFindings: manifest.pagesProcessed.reduce((n, p) => n + p.complianceFindings, 0),
+    alertCount: manifest.alerts.length,
+    scratchCleaned: manifest.scratchCleaned,
+    exitCode,
+  };
+  // process.stdout.write avoids the trailing newline console.log adds, so
+  // `tail -n 1` always lands on this exact line even if the previous
+  // output didn't end with one.
+  process.stdout.write('\n' + JSON.stringify(summary) + '\n');
 }
 
 main()

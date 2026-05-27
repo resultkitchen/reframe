@@ -14,6 +14,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { AgentContext, BrandSpec, DesignSpec } from '../types';
+import { DesignOutputSchema } from '../schemas/agent-outputs';
 
 interface DesignModelResponse {
   spec?: string;
@@ -175,7 +176,7 @@ export async function runDesign(ctx: AgentContext): Promise<DesignSpec> {
   let rejected: string[] = [];
 
   try {
-    const response = await ctx.gemini.callJson<DesignModelResponse>({
+    const response = await ctx.gemini.callJsonSchema(DesignOutputSchema, {
       role: 'agent3_design',
       systemInstruction: SYSTEM_INSTRUCTION,
       prompt: buildPrompt(ctx, brand, validTokens),

@@ -93,3 +93,127 @@ export const ComplianceOutputSchema = z.object({
 });
 
 export type ComplianceOutput = z.infer<typeof ComplianceOutputSchema>;
+
+/* ─────────────────────────── Agent 2 — UX ─────────────────────────── */
+
+export const UxOutputSchema = z.object({
+  asciiWireframe: z.string().optional(),
+  functionalSpec: z.string().optional(),
+  librariesUsed: z.array(z.string()).optional(),
+});
+
+export type UxOutput = z.infer<typeof UxOutputSchema>;
+
+/* ─────────────────────────── Agent 3 — Design ─────────────────────────── */
+
+export const DesignOutputSchema = z.object({
+  spec: z.string().optional(),
+  brandTokensUsed: z.array(z.string()).optional(),
+});
+
+export type DesignOutput = z.infer<typeof DesignOutputSchema>;
+
+/* ─────────────────────────── Agent 5 — Verify ─────────────────────────── */
+
+export const VerifyOutputSchema = z.object({
+  gapsClosed: z.array(z.string()).optional(),
+  gapsOpen: z.array(z.string()).optional(),
+  regressions: z.array(z.string()).optional(),
+});
+
+export type VerifyOutput = z.infer<typeof VerifyOutputSchema>;
+
+/* ─────────────────────────── Stage 0 — Mapper ─────────────────────────── */
+
+/**
+ * The mapper's output is large and varied. We validate only the top-level
+ * shape (each known section is an array if present) — every nested field
+ * stays optional so the model can omit anything it isn't confident about.
+ * Stage 0's normalizeScope() handles fallbacks per-field downstream.
+ */
+export const MapperOutputSchema = z.object({
+  productGoal: z.string().optional(),
+  pages: z
+    .array(
+      z.object({
+        route: z.string().optional(),
+        filePath: z.string().optional(),
+        purpose: z.string().optional(),
+        userFunction: z.string().optional(),
+        libraries: z.array(z.string()).optional(),
+        dataDependencies: z
+          .array(
+            z.object({
+              kind: z.string().optional(),
+              target: z.string().optional(),
+              description: z.string().optional(),
+            }),
+          )
+          .optional(),
+      }),
+    )
+    .optional(),
+  dbTables: z
+    .array(
+      z.object({
+        name: z.string().optional(),
+        columns: z.array(z.string()).optional(),
+        relationships: z.array(z.string()).optional(),
+      }),
+    )
+    .optional(),
+  dataCalls: z
+    .array(
+      z.object({
+        page: z.string().optional(),
+        kind: z.string().optional(),
+        target: z.string().optional(),
+        description: z.string().optional(),
+      }),
+    )
+    .optional(),
+  componentInventory: z.array(z.string()).optional(),
+  libraryInventory: z.array(z.string()).optional(),
+  brokenContracts: z
+    .array(
+      z.object({
+        kind: z.string().optional(),
+        location: z.string().optional(),
+        detail: z.string().optional(),
+        severity: z.string().optional(),
+      }),
+    )
+    .optional(),
+  bootstrappedBrand: z
+    .object({
+      name: z.string().optional(),
+      colors: z.record(z.string()).optional(),
+      typeScale: z.record(z.string()).optional(),
+      spacing: z.record(z.string()).optional(),
+      radii: z.record(z.string()).optional(),
+      voice: z.string().optional(),
+      componentStyle: z.string().optional(),
+    })
+    .partial()
+    .optional(),
+});
+
+export type MapperOutput = z.infer<typeof MapperOutputSchema>;
+
+/**
+ * Schema for the focused brand-bootstrap sub-call in stage0-map.ts —
+ * smaller surface than MapperOutput, just the brand fields.
+ */
+export const BrandBootstrapOutputSchema = z
+  .object({
+    name: z.string().optional(),
+    colors: z.record(z.string()).optional(),
+    typeScale: z.record(z.string()).optional(),
+    spacing: z.record(z.string()).optional(),
+    radii: z.record(z.string()).optional(),
+    voice: z.string().optional(),
+    componentStyle: z.string().optional(),
+  })
+  .partial();
+
+export type BrandBootstrapOutput = z.infer<typeof BrandBootstrapOutputSchema>;

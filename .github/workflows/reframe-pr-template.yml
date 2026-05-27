@@ -1,0 +1,101 @@
+# Reframe — per-PR audit workflow (TEMPLATE)
+#
+# Drop this into your application repo at `.github/workflows/reframe.yml`
+# (NOT in the rebuild-pipeline repo) to run Reframe against every PR.
+# It audits ONLY the screens whose source files this branch touches
+# (--diff-only) and posts a top-3 findings digest as a PR comment
+# (--post-findings) so reviewers get notified instead of having to dig.
+#
+# Two secrets to add to your repo (Settings → Secrets and variables → Actions):
+#   - GEMINI_API_KEY  (or ANTHROPIC_API_KEY, OPENAI_API_KEY depending on
+#                      whatever provider you set with --llm-provider)
+#
+# The default GITHUB_TOKEN is enough for `gh pr comment` to post.
+#
+# This file is shipped as `reframe-pr-template.yml` deliberately — the
+# rebuild-pipeline repo itself doesn't run reframe on its own PRs. Rename
+# to `reframe.yml` (or anything you like) when you copy it into the app
+# you want audited.
+
+name: Reframe per-PR audit
+
+on:
+  pull_request:
+    # Skip the audit on draft PRs and on doc-only changes to keep CI fast
+    # and the model budget tight. Adjust as makes sense for your team.
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+
+# Only one Reframe run per PR — cancel any in-flight when a new push arrives.
+concurrency:
+  group: reframe-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  reframe:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write   # gh pr comment
+
+    steps:
+      - name: Check out PR head
+        uses: actions/checkout@v4
+        with:
+          # `--diff-only` needs the merge base — fetch full history so
+          # `git diff origin/main...HEAD` resolves on first try.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Reframe
+        run: npm install --no-save @resultkitchen/reframe
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Audit changed pages
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # gh CLI uses GITHUB_TOKEN automatically for the current repo.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx reframe rebuild "$GITHUB_WORKSPACE" \
+            --apply-mode propose \
+            --diff-only \
+            --diff-base origin/${{ github.base_ref }} \
+            --post-findings \
+            --quick-scan \
+            --max-pages 12 \
+            --json-summary \
+            | tee reframe-output.log
+
+      # The JSON summary is the LAST line — extract it for downstream steps
+      # to make pass/fail decisions on (e.g. fail the workflow only when
+      # severity-critical findings remain). The non-zero exit code from
+      # reframe is also propagated by the previous step on its own.
+      - name: Extract JSON summary
+        if: always()
+        run: |
+          tail -n 1 reframe-output.log > reframe-summary.json
+          echo "::group::Reframe summary"
+          cat reframe-summary.json | python3 -m json.tool || cat reframe-summary.json
+          echo "::endgroup::"
+
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reframe-run
+          path: |
+            runs/
+            reframe-output.log
+            reframe-summary.json
+          retention-days: 14

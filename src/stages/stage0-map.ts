@@ -22,6 +22,10 @@ import type {
   PipelineConfig,
   ScopeDoc,
 } from '../types';
+import {
+  BrandBootstrapOutputSchema,
+  MapperOutputSchema,
+} from '../schemas/agent-outputs';
 
 /* ───────────────────────── tuning constants ───────────────────────── */
 
@@ -959,7 +963,7 @@ export async function runStage0(
 
   let raw: MapperResponse;
   try {
-    raw = await gemini.callJson<MapperResponse>({
+    raw = (await gemini.callJsonSchema(MapperOutputSchema, {
       role: 'mapper',
       json: true,
       // Big monorepo digests take far longer than the default 120s.
@@ -972,7 +976,7 @@ export async function runStage0(
         clientRoutes,
         schemaSources,
       ),
-    });
+    })) as MapperResponse;
   } catch (err) {
     // The mapper failing should not crash the run — degrade to a static scope.
     // (gemini.ts already records the failure into gemini.alerts.)
@@ -1029,7 +1033,7 @@ export async function runStage0(
     const projectNameHint = (pkg && (pkg as { name?: string }).name) || config.projectSlug;
 
     try {
-      const brand = await gemini.callJson<Partial<BrandSpec>>({
+      const brand = await gemini.callJsonSchema(BrandBootstrapOutputSchema, {
         role: 'mechanical',
         json: true,
         systemInstruction: [
