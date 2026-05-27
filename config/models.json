@@ -1,11 +1,11 @@
 {
-  "$comment": "Gemini model pins per pipeline role. Swapped to stable long-term Gemini 2.5-pro and 2.5-flash models to ensure runtime reliability and prevent deprecated preview-tier 404 failures.",
-  "mapper": "gemini-2.5-pro",
-  "agent1_audit": "gemini-2.5-flash",
-  "agent2_ux": "gemini-2.5-flash",
-  "agent3_design": "gemini-2.5-flash",
-  "agent4_code": "gemini-2.5-pro",
-  "agent5_verify": "gemini-2.5-flash",
-  "agent6_compliance": "gemini-2.5-pro",
-  "mechanical": "gemini-2.5-flash"
+  "$comment": "Gemini model pins per pipeline role. Swapped to the flagship, generally available Gemini 3.5 Flash, Gemini 3.1 Pro Preview, and Gemini 3.1 Flash-Lite models as specified by OpenWolf cerebrum memory (May 2026).",
+  "mapper": "gemini-3.1-pro-preview",
+  "agent1_audit": "gemini-3.5-flash",
+  "agent2_ux": "gemini-3.5-flash",
+  "agent3_design": "gemini-3.5-flash",
+  "agent4_code": "gemini-3.1-pro-preview",
+  "agent5_verify": "gemini-3.5-flash",
+  "agent6_compliance": "gemini-3.1-pro-preview",
+  "mechanical": "gemini-3.1-flash-lite"
 }
