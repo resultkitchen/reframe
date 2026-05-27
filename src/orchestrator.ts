@@ -17,7 +17,7 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { GeminiClient } from './gemini';
-import { cloneRepo, createRunBranch, commitAll, openPr, getChangedFiles } from './git';
+import { cloneRepo, createRunBranch, commitAll, openPr, getChangedFiles, postPrComment } from './git';
 import { prepareScratch, cleanupScratch, checkDisk } from './scratch';
 import { newRunState, loadState, saveState, loadApprovals } from './state';
 import { writeManifest } from './manifest';
@@ -643,6 +643,26 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
         console.log(
           prUrl ? `[reframe] PR: ${prUrl}` : `[reframe] no GitHub remote — PR skipped.`,
         );
+
+        // --post-findings: also post the top-N plain-English digest as a
+        // top-level PR conversation comment. GitHub sends conversation
+        // comments as notifications to subscribed reviewers; the PR body
+        // does not. This is the wake-up signal for Priya's reviewer queue.
+        // Opt-in by default so an automated run never surprises a repo.
+        if (prUrl && config.postFindings) {
+          const commentBody = buildPrComment(config.runDir, orderedEntries);
+          if (commentBody) {
+            console.log(`[reframe] posting findings digest to PR...`);
+            const posted = await postPrComment(config.workDir, prUrl, commentBody);
+            if (!posted) {
+              extraAlerts.push(
+                `--post-findings: gh pr comment failed for ${prUrl} (see logs).`,
+              );
+            }
+          } else {
+            console.log(`[reframe] --post-findings: nothing to post (clean run).`);
+          }
+        }
       } catch (err) {
         extraAlerts.push(`Commit/PR step failed: ${errMsg(err)}`);
         console.error(`[reframe] commit/PR failed: ${errMsg(err)}`);
@@ -992,6 +1012,86 @@ function buildPlainEnglishSummary(
     lines.push('', `_${items.length - top.length} additional findings below — see the manifest._`);
   }
   lines.push('');
+  return lines.join('\n');
+}
+
+/**
+ * Build the standalone PR conversation comment posted when --post-findings
+ * is set. Distinct in shape from the PR body: shorter, action-oriented,
+ * framed as a notification. Skips the manifest table (already in the body)
+ * and goes straight to the top 3 findings with severity pills + plain text.
+ *
+ * Returns '' on a clean run so the caller skips the comment entirely
+ * instead of posting an empty "nothing to see here" notification.
+ */
+function buildPrComment(
+  runDir: string,
+  entries: PageManifestEntry[],
+): string {
+  const SEVERITY_WEIGHT: Record<string, number> = {
+    critical: 4, high: 3, medium: 2, low: 1,
+  };
+  type DigestItem = {
+    pageSlug: string;
+    severity: string;
+    headline: string;
+    whyItMatters?: string;
+    impact: number;
+  };
+  const items: DigestItem[] = [];
+
+  for (const entry of entries) {
+    const { audit, compliance } = loadPageAgentArtifacts(runDir, entry.slug);
+    for (const gap of audit?.gaps ?? []) {
+      const sev = SEVERITY_WEIGHT[gap.severity] ?? 1;
+      const conf = gap.confidence ?? 0.8;
+      items.push({
+        pageSlug: entry.slug,
+        severity: gap.severity,
+        headline: gap.plain || gap.description,
+        whyItMatters: gap.whyItMatters,
+        impact: sev * conf,
+      });
+    }
+    for (const f of compliance?.findings ?? []) {
+      const sev = SEVERITY_WEIGHT[f.severity] ?? 1;
+      const conf = f.confidence ?? 0.8;
+      items.push({
+        pageSlug: entry.slug,
+        severity: f.severity,
+        headline: f.plain || f.problem,
+        whyItMatters: f.whyItMatters,
+        impact: sev * conf,
+      });
+    }
+  }
+
+  if (items.length === 0) return '';
+
+  items.sort((a, b) => b.impact - a.impact);
+  const top = items.slice(0, 3);
+  const passCount = entries.filter((e) => e.pass).length;
+
+  const lines: string[] = [
+    `🤖 **Reframe review summary**`,
+    '',
+    `${passCount}/${entries.length} pages passing on this branch. The ${top.length === 1 ? 'item' : `${top.length} items`} most likely to land hardest with a real user:`,
+    '',
+  ];
+  for (const item of top) {
+    lines.push(`**\`[${item.severity}]\` \`${item.pageSlug}\`** — ${item.headline}`);
+    if (item.whyItMatters) {
+      lines.push(`_Why it matters_: ${item.whyItMatters}`);
+    }
+    lines.push('');
+  }
+  if (items.length > top.length) {
+    lines.push(
+      `📖 Plus ${items.length - top.length} more finding${items.length - top.length === 1 ? '' : 's'} in the PR description above.`,
+    );
+  } else {
+    lines.push(`📖 Full manifest and per-page detail in the PR description above.`);
+  }
   return lines.join('\n');
 }
 

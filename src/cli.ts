@@ -78,6 +78,13 @@ FLAGS
                               candidate, write it to <runDir>/brand.candidate.json,
                               and exit. No boot, no agents. Used by the
                               \`reframe bootstrap\` subcommand.
+  --post-findings             In --apply-mode pr, also post the top-3
+                              plain-English findings as a PR conversation
+                              comment after opening the PR. GitHub sends
+                              notifications for comments but not for body
+                              edits — so this is the wake-up signal that
+                              actually reaches subscribed reviewers.
+                              Off by default to avoid surprising repos.
 
 SUBCOMMANDS
 

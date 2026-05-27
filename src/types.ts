@@ -153,6 +153,15 @@ export interface PipelineConfig {
    * before the operator commits to a full audit run.
    */
   bootstrapOnly: boolean;
+  /**
+   * In `pr` mode, also post a top-level PR conversation comment with the
+   * top-N plain-English findings — separately from the PR body, which
+   * carries the full manifest. The comment is what GitHub sends as a
+   * notification to subscribed reviewers; the body is the static
+   * reference. Default off so a run never surprises a repo with
+   * unsolicited automated comments.
+   */
+  postFindings: boolean;
 }
 
 /* ─────────────────────────── Approvals & Comments Ledger ─────────────────────────── */

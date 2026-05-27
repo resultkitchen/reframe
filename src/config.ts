@@ -167,6 +167,7 @@ interface ParsedArgs {
   diffOnly?: boolean;
   diffBase?: string;
   bootstrapOnly?: boolean;
+  postFindings?: boolean;
 }
 
 /**
@@ -246,6 +247,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.diffBase = v.trim();
     } else if (tok === '--bootstrap-only') {
       out.bootstrapOnly = true;
+    } else if (tok === '--post-findings') {
+      out.postFindings = true;
     } else if (tok.startsWith('--')) {
       throw new Error(`Unknown flag "${tok}"`);
     } else if (target === undefined) {
@@ -390,6 +393,7 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     diffOnly: args.diffOnly ?? false,
     diffBase: args.diffBase,
     bootstrapOnly: args.bootstrapOnly ?? false,
+    postFindings: args.postFindings ?? false,
   };
 
   return config;

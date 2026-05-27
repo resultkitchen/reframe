@@ -298,3 +298,35 @@ export async function openPr(
   const url = result.stdout.trim().split(/\r?\n/).filter(Boolean).pop() ?? '';
   return /^https?:\/\//i.test(url) ? url : '';
 }
+
+/**
+ * Post a top-level conversation comment on an existing PR.
+ *
+ * `prNumberOrUrl` accepts either a numeric PR number (e.g. "42") or the
+ * full PR URL `openPr` returns. Uses the same `gh` CLI auth + remote
+ * detection as `openPr` — no separate token handling.
+ *
+ * Returns `true` on success, `false` on failure (with a console.error).
+ * Caller decides whether to abort or continue; the engine continues
+ * because finding-posting is a notification convenience, not a
+ * correctness requirement.
+ */
+export async function postPrComment(
+  workDir: string,
+  prNumberOrUrl: string,
+  body: string,
+): Promise<boolean> {
+  if (!prNumberOrUrl) return false;
+  const result = await runGh(
+    ['pr', 'comment', prNumberOrUrl, '--body', body],
+    workDir,
+  );
+  if (result.code !== 0) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[git] gh pr comment failed (exit ${result.code}): ${result.stderr.trim()}`,
+    );
+    return false;
+  }
+  return true;
+}
