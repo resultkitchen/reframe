@@ -34,10 +34,10 @@ fixture. (Source also at `C:\fixtures\saas-fixture`.)
 - **Stack**: Node 24 + TypeScript, CommonJS output, deps kept minimal.
 - **Provider**: Gemini only for the per-page fan-out. Mapper may use the
   strongest model. Models pinned in `config/models.json` (swappable).
-- **Models (preview tier, per operator request)**:
-  - mapper / code / compliance → `gemini-3.1-pro-preview`
-  - audit / ux / design / verify → `gemini-3-flash-preview`
-  - mechanical sub-tasks → `gemini-3.1-flash-lite-preview`
+- **Models (Stable long-term tier, updated May 2026)**:
+  - mapper / code / compliance → `gemini-2.5-pro`
+  - audit / ux / design / verify → `gemini-2.5-flash`
+  - mechanical sub-tasks → `gemini-2.5-flash`
 - **Concurrency**: operator machine has 32 GB RAM → default cap 8 page-workers,
   auto-dial-back on OOM / hang detection.
 - **Apply mode**: `pr` — Agent 4 applies on a per-run branch and the run emits a
