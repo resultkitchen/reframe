@@ -1,0 +1,59 @@
+{
+  "name": "auth-redirect-blocks-page",
+  "agent": "audit",
+  "description": "An admin route is requested without a logged-in session and the browser is bounced to /login. The audit must classify this as a navigation failure (not a UX critique of the login page), because we never actually saw the intended page.",
+
+  "input": {
+    "page": {
+      "slug": "admin-dashboard",
+      "route": "/admin/dashboard",
+      "filePath": "app/admin/dashboard/page.tsx",
+      "purpose": "Internal admin overview: open leads, recent activity, KPIs.",
+      "userFunction": "Operations team triages new leads and monitors funnel.",
+      "dataDependencies": [
+        { "page": "/admin/dashboard", "kind": "query", "target": "leads", "description": "Open leads." },
+        { "page": "/admin/dashboard", "kind": "query", "target": "activity_log", "description": "Recent events." }
+      ],
+      "libraries": ["react", "tanstack-query"],
+      "role": "admin"
+    },
+    "snapshot": "Sign in\nEmail\nPassword\nForgot password?\nSign in",
+    "interactions": [
+      "focus: email",
+      "focus: password"
+    ],
+    "consoleErrors": [],
+    "health": {
+      "status": "auth-redirect",
+      "healthy": false,
+      "finalUrl": "http://localhost:3000/login?next=/admin/dashboard",
+      "httpStatus": 200,
+      "detail": "The page redirected to an authentication or login route."
+    }
+  },
+
+  "expected": {
+    "gaps": [
+      {
+        "id": "g1",
+        "category": "functional",
+        "dimension": "functional",
+        "severity": "critical",
+        "confidence": 0.99,
+        "description": "Audit could not exercise /admin/dashboard — the browser was redirected to /login. No content for the intended page was rendered or measured.",
+        "plain": "We couldn't actually look at the admin dashboard. The app sent us to the login screen instead. To audit this page for real, give us a test admin account.",
+        "whyItMatters": "Every authenticated page in your app is invisible to the audit until you provide credentials. Findings you see for these routes are about the login page, not the page you care about.",
+        "recommendation": "Run with --auth pointing at a config/auth.json that has a role mapped to /admin/* with a working test admin login. See config/auth.template.json.",
+        "evidence": ["Final URL: /login?next=/admin/dashboard"]
+      }
+    ]
+  },
+
+  "assertions": [
+    { "kind": "minFindings", "value": 1 },
+    { "kind": "severityAtLeast", "id": "g1", "value": "high" },
+    { "kind": "fieldPresent", "id": "g1", "path": "plain" },
+    { "kind": "fieldPresent", "id": "g1", "path": "whyItMatters" },
+    { "kind": "mentionsAny", "id": "g1", "values": ["login", "redirect", "auth", "credentials"] }
+  ]
+}
