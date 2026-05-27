@@ -1892,6 +1892,156 @@ ${pmNotes}
                       </div>
                     </div>
 
+                      {/* ────────────────────────── COMPLIANCE FINDINGS ──────────────────────────
+                          Per-page compliance findings with per-finding Skip / Restore parity.
+                          Same approvals.complianceFindings map the Run Overview writes — both
+                          surfaces stay consistent. Hidden when the page has zero findings so
+                          clean pages don't carry an empty card. */}
+                      {activePage.compliance && activePage.compliance.findings.length > 0 && (
+                        <div className="card border-slate" style={{ marginTop: '1rem' }}>
+                          <div className="card-header compact-header">
+                            <h3 className="card-title" style={{ color: '#8B5CF6' }}>
+                              ⚖️ Compliance findings ({activePage.compliance.findings.length})
+                              {activePage.compliance.clean && (
+                                <span style={{ marginLeft: '0.5rem', fontSize: '0.7rem', padding: '0.15rem 0.45rem', borderRadius: '999px', background: '#dcfce7', color: '#15803d', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                                  no blockers
+                                </span>
+                              )}
+                            </h3>
+                          </div>
+                          <div className="card-body compact-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                            {activePage.compliance.findings.map((finding) => {
+                              const findingKey = `${finding.ruleId}::${finding.location}`;
+                              const itemKey = `${activePage.slug}::compliance::${findingKey}`;
+                              const pageBypassed = currentApproval?.decision === 'skip';
+                              const perItemSkipped =
+                                currentApproval?.complianceFindings?.[findingKey] === 'skip';
+                              const isSkipped = pageBypassed || perItemSkipped;
+                              const writing = overviewWriting.has(itemKey);
+                              const sevTone =
+                                finding.severity === 'critical' ? { bg: '#fee2e2', fg: '#991b1b' }
+                                : finding.severity === 'high'    ? { bg: '#fed7aa', fg: '#9a3412' }
+                                : finding.severity === 'medium'  ? { bg: '#fef3c7', fg: '#854d0e' }
+                                :                                   { bg: '#e0e7ff', fg: '#3730a3' };
+                              const confPct = typeof finding.confidence === 'number'
+                                ? Math.round(finding.confidence * 100) : null;
+                              const mainText = languageRegister === 'plain' && finding.plain
+                                ? finding.plain
+                                : finding.problem;
+
+                              return (
+                                <div
+                                  key={findingKey}
+                                  style={{
+                                    padding: '0.85rem 1rem',
+                                    background: isSkipped ? '#fafafa' : '#fff',
+                                    border: '1px solid #e2e8f0',
+                                    borderRadius: '8px',
+                                    opacity: isSkipped ? 0.55 : 1,
+                                    display: 'flex',
+                                    gap: '0.75rem',
+                                  }}
+                                >
+                                  <div style={{
+                                    padding: '0.2rem 0.5rem', borderRadius: '4px',
+                                    background: sevTone.bg, color: sevTone.fg,
+                                    fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase',
+                                    letterSpacing: '0.05em', height: 'fit-content', whiteSpace: 'nowrap',
+                                  }}>
+                                    {finding.severity}
+                                  </div>
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.35rem' }}>
+                                      <span style={{ fontFamily: 'monospace', fontSize: '0.7rem', color: '#475569', fontWeight: 600 }}>
+                                        {finding.ruleId}
+                                      </span>
+                                      <span style={{ fontSize: '0.65rem', color: '#64748b' }}>·</span>
+                                      <span style={{ fontSize: '0.7rem', color: '#64748b' }}>
+                                        {finding.domain}
+                                      </span>
+                                      {finding.dimension && finding.dimension !== 'compliance' && (
+                                        <span style={{ padding: '0.1rem 0.4rem', borderRadius: '999px', background: '#f3e8ff', color: '#7c3aed', fontSize: '0.65rem', fontWeight: 600 }}>
+                                          {finding.dimension}
+                                        </span>
+                                      )}
+                                      {confPct !== null && (
+                                        <span style={{ fontFamily: 'monospace', fontSize: '0.65rem', color: '#475569' }}>
+                                          {confPct}%
+                                        </span>
+                                      )}
+                                      {isSkipped && (
+                                        <span style={{ padding: '0.1rem 0.4rem', borderRadius: '999px', background: '#fef3c7', color: '#854d0e', fontSize: '0.65rem', fontWeight: 700 }}>
+                                          {pageBypassed ? 'page bypassed' : 'skipped'}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div style={{
+                                      fontSize: '0.85rem', color: '#1e293b', lineHeight: 1.5,
+                                      textDecoration: isSkipped ? 'line-through' : 'none',
+                                    }}>
+                                      {mainText}
+                                    </div>
+                                    {finding.whyItMatters && languageRegister === 'plain' && (
+                                      <p style={{ fontStyle: 'italic', color: '#64748b', fontSize: '0.78rem', marginTop: '0.35rem', marginBottom: 0 }}>
+                                        <strong style={{ fontStyle: 'normal', color: '#475569' }}>Why it matters:</strong> {finding.whyItMatters}
+                                      </p>
+                                    )}
+                                    {languageRegister === 'technical' && finding.plain && (
+                                      <details style={{ marginTop: '0.35rem', fontSize: '0.75rem', color: '#64748b' }}>
+                                        <summary style={{ cursor: 'pointer', userSelect: 'none', fontWeight: 600 }}>
+                                          Plain-English version
+                                        </summary>
+                                        <p style={{ marginTop: '0.25rem', marginBottom: 0 }}>{finding.plain}</p>
+                                        {finding.whyItMatters && (
+                                          <p style={{ marginTop: '0.25rem', marginBottom: 0, fontStyle: 'italic' }}>
+                                            <strong style={{ fontStyle: 'normal' }}>Why it matters:</strong> {finding.whyItMatters}
+                                          </p>
+                                        )}
+                                      </details>
+                                    )}
+                                    {finding.requiredFix && (
+                                      <p style={{ fontSize: '0.78rem', color: '#475569', marginTop: '0.35rem', marginBottom: 0 }}>
+                                        <strong style={{ color: '#1e293b' }}>Required fix:</strong> {finding.requiredFix}
+                                      </p>
+                                    )}
+                                    <p style={{ fontFamily: 'monospace', fontSize: '0.7rem', color: '#94a3b8', marginTop: '0.35rem', marginBottom: 0 }}>
+                                      {finding.location}
+                                    </p>
+                                  </div>
+                                  {!pageBypassed && (
+                                    <button
+                                      onClick={() => {
+                                        if (writing) return;
+                                        setOverviewFindingDecision(
+                                          activePage.slug,
+                                          { kind: 'compliance', complianceFindingKey: findingKey },
+                                          isSkipped ? 'apply' : 'skip',
+                                          itemKey,
+                                        );
+                                      }}
+                                      disabled={writing}
+                                      style={{
+                                        alignSelf: 'flex-start', padding: '0.3rem 0.6rem',
+                                        fontSize: '0.72rem', fontWeight: 600, borderRadius: '6px',
+                                        cursor: writing ? 'wait' : 'pointer',
+                                        border: '1px solid ' + (isSkipped ? '#34d399' : '#fda4af'),
+                                        background: isSkipped ? '#ecfdf5' : '#fff1f2',
+                                        color: isSkipped ? '#065f46' : '#9f1239',
+                                        whiteSpace: 'nowrap',
+                                        opacity: writing ? 0.6 : 1,
+                                      }}
+                                      title={isSkipped ? 'Restore this finding to the apply set' : 'Skip this finding without dropping the page'}
+                                    >
+                                      {writing ? '…' : isSkipped ? '↩ Restore' : '✕ Skip'}
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
                       {/* UX & Design specs displayed cleanly under the preview card */}
                       <div className="specs-accordions-row">
                         {activePage.ux && (
