@@ -1,11 +1,11 @@
-# rebuild-pipeline — Build State & Spec
+# reframe — Build State & Spec
 
 > Portable SaaS rebuild pipeline: 1 mapper (Stage 0) + a 6-agent per-page fan-out.
 > Imports ANY GitHub/local project, scopes it, audits + rebuilds every page in
 > parallel, and emits a rebuilt/audited app with a human-test scaffold.
 
 ## Status — COMPLETE
-- [x] Project scaffolded (`C:\projects\rebuild-pipeline`, branch `master`)
+- [x] Project scaffolded (`C:\projects\reframe`, branch `master`)
 - [x] Foundation: types, config, model pins, brand/constraints templates
 - [x] Core infra (gemini, git, scratch, state, manifest, browser)
 - [x] Stages (0 map, 0.5 boot, final scaffold)

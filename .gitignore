@@ -23,7 +23,7 @@ scripts/
 OPTIMIZATION-PROMPT.md
 
 
-# rebuild-pipeline
+# reframe
 dist/
 runs/
 *.scratch/

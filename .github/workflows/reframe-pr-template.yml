@@ -1,7 +1,7 @@
 # Reframe — per-PR audit workflow (TEMPLATE)
 #
 # Drop this into your application repo at `.github/workflows/reframe.yml`
-# (NOT in the rebuild-pipeline repo) to run Reframe against every PR.
+# (NOT in the reframe repo) to run Reframe against every PR.
 # It audits ONLY the screens whose source files this branch touches
 # (--diff-only) and posts a top-3 findings digest as a PR comment
 # (--post-findings) so reviewers get notified instead of having to dig.
@@ -13,7 +13,7 @@
 # The default GITHUB_TOKEN is enough for `gh pr comment` to post.
 #
 # This file is shipped as `reframe-pr-template.yml` deliberately — the
-# rebuild-pipeline repo itself doesn't run reframe on its own PRs. Rename
+# reframe repo itself doesn't run reframe on its own PRs. Rename
 # to `reframe.yml` (or anything you like) when you copy it into the app
 # you want audited.
 
