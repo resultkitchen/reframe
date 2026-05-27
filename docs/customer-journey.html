@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Reframe — Customer Journey Map</title>
+<style>
+  :root {
+    --bg: #0A1424;
+    --panel: #11192B;
+    --panel-2: #160E26;
+    --ink: #EAF1FB;
+    --ink-mute: #8B9DBE;
+    --teal: #34E7D6;
+    --blue: #5BC8FF;
+    --purple: #B07CF0;
+    --violet: #8B5CF6;
+    --pink: #F062A6;
+    --gold: #FFC857;
+    --grid: rgba(91, 200, 255, 0.08);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); }
+  body {
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
+    padding: 40px 28px 48px;
+    min-width: 1680px;
+    font-feature-settings: "ss01", "cv11";
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 8px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--grid);
+  }
+  h1 {
+    font-size: 34px;
+    margin: 0;
+    letter-spacing: -0.025em;
+    font-weight: 700;
+    background: linear-gradient(90deg, var(--teal), var(--blue) 40%, var(--purple) 80%, var(--pink));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .subtitle { color: var(--ink-mute); font-size: 14px; margin-top: 8px; max-width: 720px; }
+  .persona {
+    color: var(--ink-mute);
+    font-size: 12px;
+    text-align: right;
+    line-height: 1.7;
+    background: var(--panel);
+    padding: 12px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--grid);
+  }
+  .persona strong { color: var(--ink); font-weight: 600; }
+  .persona em { color: var(--pink); font-style: normal; font-weight: 600; }
+
+  /* Emotional arc */
+  .arc-wrap {
+    margin: 28px 0 28px;
+    padding: 18px 28px 14px;
+    background: var(--panel);
+    border-radius: 10px;
+    border: 1px solid var(--grid);
+  }
+  .arc-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--ink-mute);
+    margin-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .arc-label .scale { color: var(--ink-mute); }
+  .arc { width: 100%; height: 90px; display: block; }
+
+  /* Grid */
+  .grid {
+    display: grid;
+    grid-template-columns: 140px repeat(9, 1fr);
+    gap: 5px;
+    margin-top: 28px;
+    position: relative;
+  }
+  .col-h {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--ink-mute);
+    padding: 14px 8px 12px;
+    background: var(--panel);
+    border-radius: 8px;
+    text-align: center;
+    position: relative;
+  }
+  .col-h .stage-num {
+    display: inline-block;
+    width: 24px; height: 24px;
+    line-height: 24px;
+    border-radius: 50%;
+    background: var(--panel-2);
+    color: var(--ink);
+    margin-bottom: 8px;
+    font-size: 11px;
+    font-family: 'SF Mono', ui-monospace, monospace;
+    font-weight: 600;
+  }
+  .col-h .stage-name {
+    display: block;
+    color: var(--ink);
+    font-size: 13px;
+    margin-bottom: 4px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    text-transform: none;
+  }
+  .col-h.anxious { border-bottom: 2px solid var(--pink); }
+  .col-h.explore { border-bottom: 2px solid var(--blue); }
+  .col-h.engage  { border-bottom: 2px solid var(--purple); }
+  .col-h.triumph { border-bottom: 2px solid var(--teal); }
+
+  .col-h.anxious .stage-num { background: rgba(240,98,166,0.18); color: var(--pink); }
+  .col-h.explore .stage-num { background: rgba(91,200,255,0.18); color: var(--blue); }
+  .col-h.engage  .stage-num { background: rgba(176,124,240,0.18); color: var(--purple); }
+  .col-h.triumph .stage-num { background: rgba(52,231,214,0.18); color: var(--teal); }
+
+  .row-h {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--ink-mute);
+    padding: 14px 12px;
+    background: var(--panel);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    font-weight: 600;
+  }
+  .row-h .icon { margin-right: 8px; opacity: 0.7; }
+
+  .cell {
+    background: var(--panel);
+    border-radius: 8px;
+    padding: 13px 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--ink);
+    min-height: 64px;
+  }
+  .cell.mindset { color: var(--ink); font-weight: 600; font-size: 12.5px; letter-spacing: -0.005em; }
+  .cell.quote {
+    color: var(--gold);
+    font-style: italic;
+    font-family: 'Georgia', serif;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+  .cell.quote::before { content: "“"; opacity: 0.5; margin-right: 2px; }
+  .cell.quote::after  { content: "”"; opacity: 0.5; margin-left: 2px; }
+
+  .cell.friction {
+    background: rgba(240,98,166,0.07);
+    color: #FFCFE3;
+    border-left: 2px solid var(--pink);
+  }
+  .cell.opportunity {
+    background: rgba(52,231,214,0.06);
+    color: #B5F5EB;
+    border-left: 2px solid var(--teal);
+  }
+  .cell.opportunity strong { color: var(--teal); font-weight: 700; }
+  .cell.friction strong { color: var(--pink); font-weight: 700; }
+
+  .cell.emotion {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 12px;
+  }
+  .emo-meter {
+    flex: 1;
+    height: 6px;
+    background: var(--panel-2);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .emo-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--pink), var(--gold), var(--teal));
+  }
+  .emo-num {
+    font-family: 'SF Mono', ui-monospace, monospace;
+    font-size: 10px;
+    color: var(--ink-mute);
+    min-width: 18px;
+    text-align: right;
+  }
+
+  /* Make-or-break markers */
+  .marker {
+    position: absolute;
+    top: -28px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 9px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+  .marker.valley { background: var(--pink); color: #1a0814; box-shadow: 0 0 20px rgba(240,98,166,0.4); }
+  .marker.peak   { background: var(--teal); color: #051c1a; box-shadow: 0 0 20px rgba(52,231,214,0.4); }
+
+  /* Footer trio */
+  .footer-label {
+    margin-top: 36px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--ink-mute);
+    margin-bottom: 12px;
+  }
+  .footer {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .expert {
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 18px 20px;
+    border: 1px solid var(--grid);
+    position: relative;
+  }
+  .expert::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 18px; bottom: 18px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+  }
+  .expert.linnea::before { background: var(--blue); }
+  .expert.mira::before   { background: var(--pink); }
+  .expert.rishi::before  { background: var(--teal); }
+  .expert h3 {
+    font-size: 14px;
+    margin: 0 0 2px;
+    color: var(--ink);
+    letter-spacing: -0.01em;
+  }
+  .expert .role {
+    color: var(--ink-mute);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+  .expert p {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.65;
+    color: var(--ink);
+  }
+  .expert.linnea h3 { color: var(--blue); }
+  .expert.mira h3   { color: var(--pink); }
+  .expert.rishi h3  { color: var(--teal); }
+
+  /* Stage type legend */
+  .legend {
+    display: flex;
+    gap: 18px;
+    margin-top: 14px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--ink-mute);
+  }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>Customer Journey Map · Reframe</h1>
+    <div class="subtitle">From the vibe-coding hangover to a verified Pull Request — the full arc, end to end, with the emotional curve, the make-or-break moments, and where to invest.</div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#F062A6"></span>Anxious</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#5BC8FF"></span>Exploring</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#B07CF0"></span>Engaging</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#34E7D6"></span>Triumphant</div>
+    </div>
+  </div>
+  <div class="persona">
+    <strong>Persona:</strong> Maya Chen · 32 · YC W26 co-founder<br>
+    <strong>Stack:</strong> Cursor + Lovable + Supabase / Next.js · 34 screens<br>
+    <strong>Skill:</strong> Reads code; can't really write it without AI<br>
+    <strong>Trigger:</strong> Real-customer demo in 7 days<br>
+    <strong>Fear:</strong> <em>"Which of these screens will embarrass me?"</em>
+  </div>
+</div>
+
+<div class="arc-wrap">
+  <div class="arc-label">
+    <span>Emotional arc · 1 = lowest, 5 = peak</span>
+    <span class="scale">↓ Valley at Reveal &nbsp;·&nbsp; ↑ Peak at PR + Verify</span>
+  </div>
+  <svg class="arc" viewBox="0 0 900 90" preserveAspectRatio="none">
+    <line x1="0" y1="22" x2="900" y2="22" stroke="#1c2840" stroke-width="1" stroke-dasharray="2 4"/>
+    <line x1="0" y1="46" x2="900" y2="46" stroke="#1c2840" stroke-width="1" stroke-dasharray="2 4"/>
+    <line x1="0" y1="70" x2="900" y2="70" stroke="#1c2840" stroke-width="1" stroke-dasharray="2 4"/>
+
+    <defs>
+      <linearGradient id="emoGrad" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="#F062A6"/>
+        <stop offset="60%" stop-color="#FFC857"/>
+        <stop offset="100%" stop-color="#34E7D6"/>
+      </linearGradient>
+      <linearGradient id="emoFill" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#34E7D6" stop-opacity="0.2"/>
+        <stop offset="100%" stop-color="#0A1424" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+
+    <path d="M 50,40 L 150,58 L 250,28 L 350,46 L 450,34 L 550,55 L 650,34 L 750,12 L 850,18 L 850,90 L 50,90 Z"
+          fill="url(#emoFill)" opacity="0.6"/>
+    <polyline points="50,40 150,58 250,28 350,46 450,34 550,55 650,34 750,12 850,18"
+              fill="none" stroke="url(#emoGrad)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+
+    <circle cx="50"  cy="40" r="4" fill="#F062A6"/>
+    <circle cx="150" cy="58" r="5" fill="#F062A6"/>
+    <circle cx="250" cy="28" r="4" fill="#5BC8FF"/>
+    <circle cx="350" cy="46" r="4" fill="#F062A6"/>
+    <circle cx="450" cy="34" r="4" fill="#5BC8FF"/>
+    <circle cx="550" cy="55" r="7" fill="#F062A6" stroke="#fff" stroke-width="2"/>
+    <circle cx="650" cy="34" r="4" fill="#B07CF0"/>
+    <circle cx="750" cy="12" r="7" fill="#34E7D6" stroke="#fff" stroke-width="2"/>
+    <circle cx="850" cy="18" r="5" fill="#34E7D6"/>
+
+    <text x="50"  y="84" text-anchor="middle" font-size="10" fill="#8B9DBE" font-family="ui-monospace, monospace">1</text>
+    <text x="150" y="84" text-anchor="middle" font-size="10" fill="#8B9DBE" font-family="ui-monospace, monospace">2</text>
+    <text x="250" y="84" text-anchor="middle" font-size="10" fill="#8B9DBE" font-family="ui-monospace, monospace">3</text>
+    <text x="350" y="84" text-anchor="middle" font-size="10" fill="#8B9DBE" font-family="ui-monospace, monospace">4</text>
+    <text x="450" y="84" text-anchor="middle" font-size="10" fill="#8B9DBE" font-family="ui-monospace, monospace">5</text>
+    <text x="550" y="84" text-anchor="middle" font-size="10" fill="#F062A6" font-weight="700" font-family="ui-monospace, monospace">6 ↓</text>
+    <text x="650" y="84" text-anchor="middle" font-size="10" fill="#8B9DBE" font-family="ui-monospace, monospace">7</text>
+    <text x="750" y="84" text-anchor="middle" font-size="10" fill="#34E7D6" font-weight="700" font-family="ui-monospace, monospace">8 ↑</text>
+    <text x="850" y="84" text-anchor="middle" font-size="10" fill="#8B9DBE" font-family="ui-monospace, monospace">9</text>
+  </svg>
+</div>
+
+<div class="grid">
+
+  <!-- STAGE HEADERS -->
+  <div></div>
+  <div class="col-h anxious"><span class="stage-num">1</span><span class="stage-name">Hangover</span>weeks · pre-trigger</div>
+  <div class="col-h anxious"><span class="stage-num">2</span><span class="stage-name">Trigger</span>minute zero</div>
+  <div class="col-h explore"><span class="stage-num">3</span><span class="stage-name">Discovery</span>~15 min</div>
+  <div class="col-h anxious"><span class="stage-num">4</span><span class="stage-name">Onboard</span>15–45 min</div>
+  <div class="col-h explore"><span class="stage-num">5</span><span class="stage-name">First Run</span>10–25 min</div>
+  <div class="col-h anxious"><span class="stage-num">6</span><span class="stage-name">Reveal</span>60 sec<span class="marker valley">↓ Valley</span></div>
+  <div class="col-h engage"><span class="stage-num">7</span><span class="stage-name">Review</span>20–60 min</div>
+  <div class="col-h triumph"><span class="stage-num">8</span><span class="stage-name">PR + Verify</span>10 min<span class="marker peak">↑ Peak</span></div>
+  <div class="col-h triumph"><span class="stage-num">9</span><span class="stage-name">Habit</span>week 2+</div>
+
+  <!-- MINDSET -->
+  <div class="row-h">Mindset</div>
+  <div class="cell mindset">"It works enough."</div>
+  <div class="cell mindset">"Something is very wrong."</div>
+  <div class="cell mindset">"Is this real?"</div>
+  <div class="cell mindset">"Wait — three configs first?"</div>
+  <div class="cell mindset">"Is it actually working?"</div>
+  <div class="cell mindset">"Where do I even start?"</div>
+  <div class="cell mindset">"Speak to me — I want to fix this."</div>
+  <div class="cell mindset">"Holy shit. It worked."</div>
+  <div class="cell mindset">"Pre-flight checklist now."</div>
+
+  <!-- DOING -->
+  <div class="row-h">Doing</div>
+  <div class="cell">Shipping features. Skipping tests. Tabs left open with three-week-old TODOs.</div>
+  <div class="cell">Clicks through her own app for the first time in weeks. Finds a dead button. Heart sinks.</div>
+  <div class="cell">Skims README on her phone in an Uber. Watches the 50-sec loop. Scans the demo PR.</div>
+  <div class="cell">npx command runs. Opens <code>brand.json</code>, sees fields she's never thought about.</div>
+  <div class="cell">Watches CLI output. Refreshes nothing. Reads every log line.</div>
+  <div class="cell">Review app opens. 47 findings on the dashboard. Stares at it.</div>
+  <div class="cell">Approves, skips, types <em>"royal-blue submit button."</em> Wishes she could see mobile.</div>
+  <div class="cell">Re-runs with <code>--apply-mode pr</code>. Merges. Runs again. Watches red flip to green.</div>
+  <div class="cell">Runs Reframe before every Friday release. DMs three founder friends. Mentions it on a podcast.</div>
+
+  <!-- QUOTE -->
+  <div class="row-h">She says</div>
+  <div class="cell quote">I'll do a pass before the demo.</div>
+  <div class="cell quote">How many of these are there??</div>
+  <div class="cell quote">Will this even work on Next.js + Supabase?</div>
+  <div class="cell quote">I don't have a brand voice yet.</div>
+  <div class="cell quote">Why is /admin taking four minutes?</div>
+  <div class="cell quote">Oh god.</div>
+  <div class="cell quote">What is "type drift" supposed to mean?</div>
+  <div class="cell quote">The submit button works on mobile.</div>
+  <div class="cell quote">You have to try this before your demo.</div>
+
+  <!-- EMOTION -->
+  <div class="row-h">Emotion</div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:50%"></div></div><div class="emo-num">2.5</div></div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:20%"></div></div><div class="emo-num">1.0</div></div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:70%"></div></div><div class="emo-num">3.5</div></div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:40%"></div></div><div class="emo-num">2.0</div></div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:60%"></div></div><div class="emo-num">3.0</div></div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:30%"></div></div><div class="emo-num">1.5</div></div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:60%"></div></div><div class="emo-num">3.0</div></div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:100%"></div></div><div class="emo-num">5.0</div></div>
+  <div class="cell emotion"><div class="emo-meter"><div class="emo-fill" style="width:90%"></div></div><div class="emo-num">4.5</div></div>
+
+  <!-- TOUCHPOINT -->
+  <div class="row-h">Touchpoint</div>
+  <div class="cell">None yet. Content marketing aimed at the unspoken dread.</div>
+  <div class="cell">Search query. HN comment. Peer Slack. YC Demo Day chatter.</div>
+  <div class="cell">README hero · 50-sec loop · GitHub stars · example PR.</div>
+  <div class="cell">CLI prompts · config templates · early error messages.</div>
+  <div class="cell">Terminal output. Live progress signal (or absence of one).</div>
+  <div class="cell">Review app landing screen. First impression locks the session.</div>
+  <div class="cell">Finding cards · comment threads · breakpoint preview · <code>approvals.json</code>.</div>
+  <div class="cell">PR description · embedded review conversation · re-verify screenshots.</div>
+  <div class="cell">Run history · constraints tuning · "Reviewed with Reframe" attribution.</div>
+
+  <!-- FRICTION -->
+  <div class="row-h">Friction</div>
+  <div class="cell friction">No vocabulary for what's wrong. Can't articulate the dread.</div>
+  <div class="cell friction">Doesn't know what to search. "AI code review" returns linter SaaS.</div>
+  <div class="cell friction"><strong>Architecture-first messaging.</strong> "1 mapper + 6 agents" is your org chart, not her problem.</div>
+  <div class="cell friction"><strong>Config-first kills the honeymoon.</strong> 3 files to fill before any value.</div>
+  <div class="cell friction">Logs written for engineers. Silence reads as broken.</div>
+  <div class="cell friction"><strong>Wall of jargon.</strong> Only desktop screenshots. No priority. Overwhelm.</div>
+  <div class="cell friction"><strong>Dev-heavy verbiage.</strong> No mobile preview. Feedback is technical-only — no brand or design lens.</div>
+  <div class="cell friction">Code diff is unreadable for a non-developer. Has to trust on faith.</div>
+  <div class="cell friction">No personalization. Constraints get stale. Same findings re-surface.</div>
+
+  <!-- OPPORTUNITY -->
+  <div class="row-h">Opportunity</div>
+  <div class="cell opportunity"><strong>Hangover content series.</strong> Own the unspoken-dread SEO ("did Cursor break my app").</div>
+  <div class="cell opportunity"><strong>Audit-my-AI-app positioning.</strong> Specific high-intent landing pages per stack.</div>
+  <div class="cell opportunity"><strong>Lead with the review app</strong>, not the agents. Demo loop = the SPA, not the CLI.</div>
+  <div class="cell opportunity"><strong>Bootstrap mode.</strong> Infer brand from existing app, configure <em>after</em> first value.</div>
+  <div class="cell opportunity"><strong>Quiet progress strip</strong> ("Screen 14 of 34 — Patient intake"). Live finding tally.</div>
+  <div class="cell opportunity"><strong>Founder Digest first.</strong> Breakpoint strip (6 viewports). Dual-register language at source.</div>
+  <div class="cell opportunity"><strong>Resizable preview.</strong> Brand-voice + design agents. "Rewrite this in plain English" button per finding.</div>
+  <div class="cell opportunity"><strong>Plain-English diff explainer</strong> per file. Shareable run-summary card (the acquisition engine).</div>
+  <div class="cell opportunity"><strong>Learn approval patterns.</strong> Tasteful "Reviewed with Reframe" attribution = compounding word-of-mouth.</div>
+
+</div>
+
+<div class="footer-label">The trio · how they read this map</div>
+<div class="footer">
+  <div class="expert linnea">
+    <h3>Linnea Park</h3>
+    <div class="role">Principal Product Designer · ex-Linear / ex-Stripe</div>
+    <p>Stages <strong>4</strong> and <strong>6</strong> are where you lose 70% of churn. Bootstrap mode solves 4. Founder Digest + dual-register language + breakpoint strip solve 6. Ship those before any new agent. The review app is the product — the CLI is the dev's surface.</p>
+  </div>
+  <div class="expert mira">
+    <h3>Mira Okonkwo</h3>
+    <div class="role">Brand & Design Director · ex-W+K / ex-IDEO</div>
+    <p>Tone of every finding is the brand. <em>"This page violates X"</em> loses her. <em>"When a logged-out user lands here, they hit a redirect loop — here's what they see"</em> keeps her. Findings should read like a senior designer giving a junior a crit: warm, specific, opinionated, never blame-y. Voice is the product.</p>
+  </div>
+  <div class="expert rishi">
+    <h3>Rishi Madan</h3>
+    <div class="role">Staff ML Engineer · LLM evals & adapters</div>
+    <p>Two latent product surfaces hide in this map: the <strong>shareable artifact at Stage 8</strong> and the <strong>personalization layer at Stage 9</strong>. Both ship from data you already collect in <code>approvals.json</code> and <code>RunState</code>. No new pipeline. Just new views.</p>
+  </div>
+</div>
+
+</body>
+</html>
