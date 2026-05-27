@@ -6,7 +6,7 @@
  * but implements generalized LLM calling mechanics under the hood.
  */
 
-import type { ZodError, ZodIssue, ZodSchema } from 'zod';
+import type { ZodError, ZodIssue, ZodTypeAny, infer as ZodInfer } from 'zod';
 import type {
   GeminiCallOptions,
   IGeminiClient,
@@ -69,10 +69,10 @@ export class GeminiClient implements IGeminiClient {
    * Use this for any new agent. `callJson<T>` remains the unvalidated
    * legacy form for older callers that handle their own normalization.
    */
-  async callJsonSchema<T>(
-    schema: ZodSchema<T>,
+  async callJsonSchema<S extends ZodTypeAny>(
+    schema: S,
     opts: GeminiCallOptions,
-  ): Promise<T> {
+  ): Promise<ZodInfer<S>> {
     let attemptOpts = { ...opts, json: true };
     let lastError: ZodError | null = null;
 
@@ -80,7 +80,7 @@ export class GeminiClient implements IGeminiClient {
       const raw = await this.run(attemptOpts, true);
       const parsedRaw = parseJson<unknown>(raw);
       const result = schema.safeParse(parsedRaw);
-      if (result.success) return result.data;
+      if (result.success) return result.data as ZodInfer<S>;
       lastError = result.error;
 
       if (attempt === 1) {

@@ -87,8 +87,15 @@ function coerceConfidence(value: unknown): number | undefined {
   return Math.max(0, Math.min(1, n));
 }
 
-/** Normalise a raw model gap into a contract-valid Gap. */
-function normaliseGap(raw: AuditModelResponse['gaps'][number], index: number): Gap {
+/**
+ * Normalise a raw model gap into a contract-valid Gap.
+ *
+ * Exported so the live-LLM eval harness (tests/eval/run.ts --live)
+ * can apply the exact same normalization to real agent output before
+ * scoring against assertions — without having to drive the browser
+ * or write to a runDir.
+ */
+export function normaliseGap(raw: AuditModelResponse['gaps'][number], index: number): Gap {
   const gap: Gap = {
     id: typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : `g${index + 1}`,
     category: coerceCategory(raw.category),
@@ -231,7 +238,7 @@ function writeOutputs(
   }
 }
 
-const SYSTEM_INSTRUCTION = `You are a collaborative panel of four world-class expert personas auditing this web page together. Your collective output is one unified, ranked gap list.
+export const AUDIT_SYSTEM_INSTRUCTION = `You are a collaborative panel of four world-class expert personas auditing this web page together. Your collective output is one unified, ranked gap list.
 
 1. Arthur Vance — Senior Lead QA Architect. Functional correctness, console/network errors, broken interactions, code robustness.
 2. Elena Rostova — Principal UX & Interface Designer. Visual hierarchy, layout, micro-interaction affordances, RESPONSIVE behavior, mobile vs desktop drift.
@@ -259,7 +266,12 @@ TONE — write findings the way a senior designer gives a junior a crit: warm, s
 
 Return STRICT JSON only — no prose, no markdown fences.`;
 
-function buildPrompt(
+/**
+ * Build the audit prompt. Exported so the live-LLM eval harness can
+ * exercise the exact production prompt against fixture inputs without
+ * driving a real browser. Keep the signature stable — eval imports it.
+ */
+export function buildAuditPrompt(
   ctx: AgentContext,
   snapshot: string,
   interactions: string[],
@@ -502,8 +514,8 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
     // Either way, the data reaching normaliseGap conforms to the contract.
     const response = await ctx.gemini.callJsonSchema(AuditOutputSchema, {
       role: 'agent1_audit',
-      systemInstruction: SYSTEM_INSTRUCTION,
-      prompt: buildPrompt(ctx, snapshot, interactions, consoleErrors, health),
+      systemInstruction: AUDIT_SYSTEM_INSTRUCTION,
+      prompt: buildAuditPrompt(ctx, snapshot, interactions, consoleErrors, health),
       json: true,
       images: screenshot ? [screenshot] : undefined,
     });

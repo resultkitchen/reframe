@@ -553,14 +553,23 @@ export interface GeminiCallOptions {
  * agent. `callJson<T>` is the legacy unvalidated form — still supported
  * but the caller carries all the burden of trust.
  *
- * Typed loosely as `unknown` for the schema parameter to avoid forcing a
- * zod import into every consumer of this interface; the implementation
- * accepts a real `ZodSchema<T>` at runtime.
+ * The schema parameter takes a real `ZodSchema<T>` so TypeScript can infer
+ * T from the schema at the call site (a structural surrogate wouldn't).
+ * zod is already a runtime dep — no new transitive cost on consumers.
  */
 export interface IGeminiClient {
   call(opts: GeminiCallOptions): Promise<string>;
   callJson<T>(opts: GeminiCallOptions): Promise<T>;
-  callJsonSchema<T>(schema: { safeParse: (data: unknown) => { success: true; data: T } | { success: false; error: unknown } }, opts: GeminiCallOptions): Promise<T>;
+  /**
+   * Generic is constrained to ZodTypeAny so TypeScript infers the OUTPUT
+   * type via `z.infer<S>` at the call site — without this pattern, T
+   * collapses to `{}` and every field access on the response becomes a
+   * compile error. (Confirmed against TS 5.4 / 5.6 / 5.7.)
+   */
+  callJsonSchema<S extends import('zod').ZodTypeAny>(
+    schema: S,
+    opts: GeminiCallOptions,
+  ): Promise<import('zod').infer<S>>;
   /** Timeout/failure alerts accumulated during the run. */
   readonly alerts: string[];
 }

@@ -1,30 +1,54 @@
 /**
- * Reframe fixture eval — runs each fixture's `assertions` block against its
- * `expected` agent output. Catches contradictions (e.g. an assertion that
- * claims a finding has plain text when `expected` has no `plain` field) and
- * regressions when the assertion vocabulary is extended or its semantics
- * change.
+ * Reframe fixture eval — runs each fixture's `assertions` block against
+ * either:
  *
- *   npm run eval
+ *  - DEFAULT MODE (no flag): the fixture's own `expected` block. This is
+ *    a self-consistency check that catches contradictions where an
+ *    assertion claims a property the expected output doesn't satisfy.
+ *    Free, deterministic, and runs in CI on every PR.
  *
- * What it IS (v1):
- *  - A self-consistency check across the fixture suite.
- *  - The assertion engine the v2 live-LLM eval will reuse verbatim — same
- *    rules, same outputs, just fed real agent calls instead of `expected`.
+ *  - LIVE MODE (`--live`): the actual production agent prompt against a
+ *    real LLM, with the response normalized through the agent's real
+ *    normalize function. Costs API tokens; non-deterministic; reveals
+ *    cross-provider drift. Use to validate that a prompt change still
+ *    produces output the fixture's assertions accept.
  *
- * What it ISN'T (yet):
- *  - A live-LLM eval. Adding `--live` later will: build a minimal
- *    AgentContext, swap in the real GeminiClient, call the agent, then
- *    feed the real output through the same evaluateAssertion path below.
- *    Until then, this harness exercises the assertion machinery and
- *    catches the case where someone wrote assertions that don't actually
- *    pass against their own expected output.
+ *   npm run eval                                # self-consistency
+ *   npm run eval -- --live                      # live, default provider (gemini)
+ *   npm run eval -- --live --provider anthropic # live, claude
+ *
+ * Live mode skips fixtures gracefully when the required API key isn't
+ * set so default `npm run eval` invocations don't have to know which
+ * provider to set up.
  *
  * Exits 0 if every assertion across every fixture passes, 1 otherwise.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import {
+  AUDIT_SYSTEM_INSTRUCTION,
+  buildAuditPrompt,
+  normaliseGap,
+} from '../../src/agents/agent1-audit';
+import {
+  COMPLIANCE_SYSTEM_INSTRUCTION,
+  buildCompliancePrompt,
+  normaliseComplianceFinding,
+} from '../../src/agents/agent6-compliance';
+import { GeminiClient } from '../../src/gemini';
+import {
+  AuditOutputSchema,
+  ComplianceOutputSchema,
+} from '../../src/schemas/agent-outputs';
+import type {
+  AgentContext,
+  BrandSpec,
+  ComplianceFinding,
+  ConstraintRule,
+  Gap,
+  PipelineConfig,
+} from '../../src/types';
 
 /* ─────────────────────────── shape contracts ─────────────────────────── */
 
@@ -267,7 +291,173 @@ function loadFixtures(rootDir: string): Fixture[] {
   return out;
 }
 
-function main(): number {
+/* ─────────────────────────── live-LLM mode ─────────────────────────── */
+
+/**
+ * Build a minimal PipelineConfig sufficient for the GeminiClient + the
+ * exported prompt-builders. The browser, scratch, workDir, runDir paths
+ * are unused on this code path (we never drive a browser or write to a
+ * runDir in eval mode) so they're left as empty strings.
+ */
+function buildEvalConfig(provider: string): PipelineConfig {
+  const modelsPath = path.resolve(__dirname, '..', '..', 'config', 'models.json');
+  const modelsRaw = fs.readFileSync(modelsPath, 'utf8');
+  const models = JSON.parse(modelsRaw);
+
+  const keyForProvider: Record<string, string | undefined> = {
+    gemini: process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY,
+    anthropic: process.env.ANTHROPIC_API_KEY,
+    openai: process.env.OPENAI_API_KEY,
+    'openai-compatible': process.env.OPENAI_API_KEY,
+  };
+  const apiKey = keyForProvider[provider] ?? '';
+
+  return {
+    target: '<eval>',
+    isLocalPath: true,
+    projectSlug: 'eval',
+    scratchDir: '',
+    workDir: '',
+    runDir: '',
+    concurrency: 1,
+    applyMode: 'propose',
+    realEnv: false,
+    readOnlyExercise: true,
+    models,
+    brandPath: '',
+    constraintsPath: '',
+    geminiApiKey: apiKey,
+    callTimeoutMs: 120000,
+    maxRetries: 1,
+    sampleParams: {},
+    quickScan: false,
+    llmProvider: provider,
+    diffOnly: false,
+    bootstrapOnly: false,
+    postFindings: false,
+  };
+}
+
+/**
+ * Build a minimal AgentContext for the audit prompt — buildAuditPrompt
+ * only reads ctx.page and ctx.brand, so the rest are inert stubs.
+ */
+function buildAuditCtxFromFixture(
+  fixture: Fixture,
+  gemini: GeminiClient,
+  config: PipelineConfig,
+): AgentContext {
+  const input = fixture.input as Record<string, unknown>;
+  const fallbackBrand: BrandSpec = {
+    name: 'eval',
+    colors: {},
+    typeScale: {},
+    spacing: {},
+    voice: 'Direct.',
+    componentStyle: '',
+    pinned: true,
+  };
+  return {
+    config,
+    page: input.page as AgentContext['page'],
+    scope: {
+      productGoal: '',
+      pages: [],
+      dbTables: [],
+      dataCalls: [],
+      componentInventory: [],
+      libraryInventory: [],
+      brokenContracts: [],
+      bootstrappedBrand: fallbackBrand,
+    },
+    brand: (input.brand as BrandSpec | undefined) ?? fallbackBrand,
+    constraints: { project: '', rules: [] },
+    boot: { status: 'running', baseUrl: 'http://eval', installLog: '', bootLog: '', stubbedIntegrations: [] },
+    gemini,
+    pageDir: '<eval>',
+  };
+}
+
+interface LiveResult {
+  output: Record<string, unknown>;
+  durationMs: number;
+}
+
+async function runLiveAudit(fixture: Fixture, gemini: GeminiClient, config: PipelineConfig): Promise<LiveResult> {
+  const ctx = buildAuditCtxFromFixture(fixture, gemini, config);
+  const input = fixture.input as Record<string, unknown>;
+  const snapshot = (input.snapshot as string) ?? '';
+  const interactions = (input.interactions as string[]) ?? [];
+  const consoleErrors = (input.consoleErrors as string[]) ?? [];
+  const health = input.health as AgentContext['audit'] extends infer T ? T : undefined;
+
+  const t0 = Date.now();
+  const response = await gemini.callJsonSchema(AuditOutputSchema, {
+    role: 'agent1_audit',
+    systemInstruction: AUDIT_SYSTEM_INSTRUCTION,
+    prompt: buildAuditPrompt(ctx, snapshot, interactions, consoleErrors, health as any),
+    json: true,
+  });
+  const gaps: Gap[] = (response.gaps ?? []).map((g: any, i: number) => normaliseGap(g, i));
+  return { output: { gaps }, durationMs: Date.now() - t0 };
+}
+
+async function runLiveCompliance(fixture: Fixture, gemini: GeminiClient): Promise<LiveResult> {
+  const input = fixture.input as Record<string, unknown>;
+  const page = input.page as { slug: string; route?: string; purpose?: string; userFunction?: string; filePath?: string };
+  const matchedRules = (input.matchedRules as ConstraintRule[]) ?? [];
+  const source = (input.source as string) ?? '';
+  const filePath = page.filePath ?? '(unknown)';
+
+  const t0 = Date.now();
+  const response = await gemini.callJsonSchema(ComplianceOutputSchema, {
+    role: 'agent6_compliance',
+    systemInstruction: COMPLIANCE_SYSTEM_INSTRUCTION,
+    prompt: buildCompliancePrompt(
+      page.route || page.slug,
+      page.purpose ?? '',
+      page.userFunction ?? '',
+      filePath,
+      matchedRules,
+      source,
+    ),
+    json: true,
+  });
+  const validIds = new Set(matchedRules.map((r) => r.id));
+  const rawFindings = response.findings ?? [];
+  const findings: ComplianceFinding[] = rawFindings
+    .map((f: NonNullable<typeof rawFindings>[number]) =>
+      normaliseComplianceFinding(f, matchedRules, filePath),
+    )
+    .filter((f: ComplianceFinding) => f.ruleId === 'unknown' || validIds.has(f.ruleId))
+    .filter((f: ComplianceFinding) => f.problem !== '');
+  return { output: { findings }, durationMs: Date.now() - t0 };
+}
+
+/* ─────────────────────────── runner ─────────────────────────── */
+
+interface CliOptions {
+  live: boolean;
+  provider: string;
+}
+
+function parseArgs(argv: string[]): CliOptions {
+  const out: CliOptions = { live: false, provider: 'gemini' };
+  for (let i = 0; i < argv.length; i++) {
+    const tok = argv[i];
+    if (tok === '--live') out.live = true;
+    else if (tok === '--provider') {
+      const v = argv[i + 1];
+      if (!v) throw new Error('--provider requires a value');
+      out.provider = v;
+      i++;
+    }
+  }
+  return out;
+}
+
+async function main(): Promise<number> {
+  const opts = parseArgs(process.argv.slice(2));
   // Fixtures live in tests/fixtures/ — one level up from tests/eval/.
   const fixturesRoot = path.resolve(__dirname, '..', 'fixtures');
   const fixtures = loadFixtures(fixturesRoot);
@@ -277,28 +467,82 @@ function main(): number {
     return 1;
   }
 
-  const results = fixtures.map(evalFixture);
+  let results: FixtureResult[];
+  let modeLabel: string;
+  let totalLiveMs = 0;
+  let skipped = 0;
+
+  if (opts.live) {
+    const config = buildEvalConfig(opts.provider);
+    if (!config.geminiApiKey) {
+      console.error(
+        `[eval] --live --provider ${opts.provider}: no API key set in the env. ` +
+          `Set GEMINI_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY per provider.`,
+      );
+      return 1;
+    }
+    const gemini = new GeminiClient(config);
+    modeLabel = `live · provider=${opts.provider}`;
+    results = [];
+    for (const fixture of fixtures) {
+      try {
+        let live: LiveResult;
+        if (fixture.agent === 'audit') {
+          live = await runLiveAudit(fixture, gemini, config);
+        } else {
+          live = await runLiveCompliance(fixture, gemini);
+        }
+        totalLiveMs += live.durationMs;
+        results.push(evalFixtureAgainstOutput(fixture, live.output));
+      } catch (err) {
+        skipped++;
+        console.error(
+          `[eval] live call failed for ${fixture.agent}/${fixture.name}: ` +
+            (err instanceof Error ? err.message : String(err)),
+        );
+        results.push({
+          name: fixture.name,
+          agent: fixture.agent,
+          total: fixture.assertions?.length ?? 0,
+          passed: 0,
+          failures: [
+            {
+              assertion: { kind: 'liveCall' },
+              reason: `live call threw: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+        });
+      }
+    }
+  } else {
+    modeLabel = 'self-consistency · expected vs assertions';
+    results = fixtures.map(evalFixture);
+  }
 
   const totalAssertions = results.reduce((n, r) => n + r.total, 0);
   const totalPassed = results.reduce((n, r) => n + r.passed, 0);
   const failedFixtures = results.filter((r) => r.failures.length > 0);
 
+  const perAgent: Record<string, number> = {};
+  for (const r of results) perAgent[r.agent] = (perAgent[r.agent] ?? 0) + 1;
+  const totals = Object.entries(perAgent)
+    .map(([a, n]) => `${a}: ${n}`)
+    .join(', ');
+  const tail = opts.live
+    ? ` · ${(totalLiveMs / 1000).toFixed(1)}s of LLM time` + (skipped > 0 ? ` · ${skipped} live call(s) threw` : '')
+    : '';
+
   if (failedFixtures.length === 0) {
-    const perAgent: Record<string, number> = {};
-    for (const r of results) perAgent[r.agent] = (perAgent[r.agent] ?? 0) + 1;
-    const totals = Object.entries(perAgent)
-      .map(([a, n]) => `${a}: ${n}`)
-      .join(', ');
     console.log(
-      `[eval] OK — ${totalPassed}/${totalAssertions} assertion(s) passed across ` +
-        `${fixtures.length} fixture(s) (${totals}).`,
+      `[eval · ${modeLabel}] OK — ${totalPassed}/${totalAssertions} assertion(s) passed across ` +
+        `${fixtures.length} fixture(s) (${totals})${tail}.`,
     );
     return 0;
   }
 
   console.error(
-    `[eval] FAIL — ${totalAssertions - totalPassed} assertion(s) failed across ` +
-      `${failedFixtures.length} of ${fixtures.length} fixture(s):\n`,
+    `[eval · ${modeLabel}] FAIL — ${totalAssertions - totalPassed} assertion(s) failed across ` +
+      `${failedFixtures.length} of ${fixtures.length} fixture(s)${tail}:\n`,
   );
   for (const r of failedFixtures) {
     console.error(`  ${r.agent}/${r.name}  (${r.passed}/${r.total} passed)`);
@@ -310,4 +554,29 @@ function main(): number {
   return 1;
 }
 
-process.exit(main());
+/** Evaluate assertions against a supplied output (instead of fixture.expected). */
+function evalFixtureAgainstOutput(fixture: Fixture, output: Record<string, unknown>): FixtureResult {
+  const assertions = fixture.assertions ?? [];
+  const failures: FixtureResult['failures'] = [];
+  let passed = 0;
+  for (const a of assertions) {
+    const result = evalAssertion(a, output, fixture.agent);
+    if (result.pass) {
+      passed++;
+    } else {
+      failures.push({ assertion: a, reason: result.reason ?? 'unknown failure' });
+    }
+  }
+  return {
+    name: fixture.name,
+    agent: fixture.agent,
+    total: assertions.length,
+    passed,
+    failures,
+  };
+}
+
+main().then((code) => process.exit(code)).catch((err) => {
+  console.error(`[eval] fatal: ${err instanceof Error ? err.message : String(err)}`);
+  process.exit(1);
+});
