@@ -609,6 +609,86 @@ ${pmNotes}
   const OVERVIEW_SLUG = '__overview__';
 
   /**
+   * Tracks which Overview rows are "in flight" to /api/approvals so the
+   * UI can disable the button + show a subtle spinner during the write.
+   * Keyed by the same `item.key` the Overview list uses for React keys.
+   */
+  const [overviewWriting, setOverviewWriting] = useState<Set<string>>(new Set());
+
+  /**
+   * Set a gap's apply/skip decision from the Run Overview WITHOUT
+   * navigating to its page. Used by the per-row Skip/Approve buttons
+   * the cross-page triage view exposes. Reads the existing approval
+   * for that page (or builds a default one), patches just this gap's
+   * decision, then POSTs the whole page-approval.
+   *
+   * The local data state is updated optimistically — if the POST
+   * fails, an error alert restores the prior state to avoid a stale
+   * UI that disagrees with disk.
+   */
+  const setOverviewGapDecision = async (
+    pageSlug: string,
+    gapId: string,
+    decision: 'apply' | 'skip',
+    itemKey: string,
+  ): Promise<void> => {
+    if (!data) return;
+    setOverviewWriting((prev) => new Set(prev).add(itemKey));
+
+    const existing = data.approvals.pages[pageSlug];
+    const updatedApproval: PageApproval = {
+      decision: existing?.decision ?? 'apply',
+      gaps: { ...(existing?.gaps ?? {}), [gapId]: decision },
+      note: existing?.note ?? '',
+      comments: existing?.comments ?? [],
+    };
+
+    // Optimistic local update — instant feedback in the Overview row.
+    const priorPages = data.approvals.pages;
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            approvals: {
+              ...prev.approvals,
+              pages: { ...prev.approvals.pages, [pageSlug]: updatedApproval },
+            },
+          }
+        : prev,
+    );
+
+    try {
+      const res = await fetch('/api/approvals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: pageSlug, approval: updatedApproval }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // Sync currentApproval if the user happens to be on this page —
+      // keeps the per-page card consistent with the Overview decision.
+      if (activeSlug === pageSlug) {
+        setCurrentApproval(updatedApproval);
+      }
+    } catch (err) {
+      // Roll back the optimistic local change so the UI never lies.
+      setData((prev) =>
+        prev ? { ...prev, approvals: { ...prev.approvals, pages: priorPages } } : prev,
+      );
+      alert(
+        `Could not save decision for ${pageSlug}::${gapId}: ` +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    } finally {
+      setOverviewWriting((prev) => {
+        const next = new Set(prev);
+        next.delete(itemKey);
+        return next;
+      });
+    }
+  };
+
+  /**
    * Cross-page run overview: aggregates every finding across every page,
    * ranks by severity × confidence, and bucket-counts by severity. Powers
    * the run-level dashboard the Reviewer queue persona (Priya) asked for —
@@ -627,6 +707,13 @@ ${pmNotes}
       confidence?: number;
       impact: number;
       source: 'audit' | 'compliance';
+      /**
+       * Audit gap id (g1, g2, …). Present only for audit items — used
+       * by the per-row Skip/Approve buttons to address the right gap
+       * inside the page's approvals.gaps map. Compliance findings
+       * don't yet have a per-finding approval surface.
+       */
+      gapId?: string;
     };
     const all: OverviewItem[] = [];
     const counts = { critical: 0, high: 0, medium: 0, low: 0 };
@@ -651,6 +738,7 @@ ${pmNotes}
           confidence: g.confidence,
           impact: sev * conf,
           source: 'audit',
+          gapId: g.id,
         });
       }
       for (const f of findings) {
@@ -872,19 +960,30 @@ ${pmNotes}
                               : item.severity === 'medium'   ? { bg: '#fef3c7', fg: '#854d0e' }
                               :                                 { bg: '#e0e7ff', fg: '#3730a3' };
                     const confPct = typeof item.confidence === 'number' ? Math.round(item.confidence * 100) : null;
+                    // Per-row apply/skip state — only meaningful for audit
+                    // items; compliance findings have no per-finding approval
+                    // surface today. Bypassed pages override per-gap decisions.
+                    const pageApproval = data?.approvals.pages[item.pageSlug];
+                    const pageBypassed = pageApproval?.decision === 'skip';
+                    const isSkipped =
+                      item.source === 'audit' && item.gapId
+                        ? pageBypassed || pageApproval?.gaps?.[item.gapId] === 'skip'
+                        : pageBypassed;
+                    const writing = overviewWriting.has(item.key);
                     return (
                       <div
                         key={item.key}
                         onClick={() => setActiveSlug(item.pageSlug)}
                         style={{
                           padding: '0.85rem 1rem',
-                          background: '#fff',
-                          border: '1px solid #e2e8f0',
+                          background: isSkipped ? '#fafafa' : '#fff',
+                          border: '1px solid ' + (isSkipped ? '#e2e8f0' : '#e2e8f0'),
                           borderRadius: '10px',
                           cursor: 'pointer',
                           transition: 'all 0.15s ease',
                           display: 'flex',
                           gap: '0.85rem',
+                          opacity: isSkipped ? 0.55 : 1,
                         }}
                         onMouseEnter={(e) => {
                           e.currentTarget.style.borderColor = '#8B5CF6';
@@ -904,7 +1003,10 @@ ${pmNotes}
                           {item.severity}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: '0.85rem', color: '#1e293b', lineHeight: 1.4 }}>
+                          <div style={{
+                            fontSize: '0.85rem', color: '#1e293b', lineHeight: 1.4,
+                            textDecoration: isSkipped ? 'line-through' : 'none',
+                          }}>
                             {item.headline}
                           </div>
                           <div style={{ marginTop: '0.35rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', fontSize: '0.7rem', color: '#64748b' }}>
@@ -926,6 +1028,11 @@ ${pmNotes}
                                 {confPct}%
                               </span>
                             )}
+                            {isSkipped && (
+                              <span style={{ padding: '0.1rem 0.4rem', borderRadius: '999px', background: '#fef3c7', color: '#854d0e', fontSize: '0.65rem', fontWeight: 700 }}>
+                                {pageBypassed ? 'page bypassed' : 'skipped'}
+                              </span>
+                            )}
                             {item.whyItMatters && (
                               <span style={{ fontStyle: 'italic', color: '#64748b' }}>
                                 — {item.whyItMatters.slice(0, 80)}{item.whyItMatters.length > 80 ? '…' : ''}
@@ -933,7 +1040,41 @@ ${pmNotes}
                             )}
                           </div>
                         </div>
-                        <div style={{ color: '#94a3b8', fontSize: '1rem', alignSelf: 'center' }}>→</div>
+
+                        {/* Per-row Skip / Approve — audit items only. Click
+                            doesn't propagate to the row (which would jump pages).
+                            Compliance findings still get the jump arrow only,
+                            since there's no per-finding approval surface yet. */}
+                        {item.source === 'audit' && item.gapId && !pageBypassed ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (writing) return;
+                              setOverviewGapDecision(
+                                item.pageSlug,
+                                item.gapId!,
+                                isSkipped ? 'apply' : 'skip',
+                                item.key,
+                              );
+                            }}
+                            disabled={writing}
+                            style={{
+                              alignSelf: 'center', padding: '0.3rem 0.6rem',
+                              fontSize: '0.72rem', fontWeight: 600, borderRadius: '6px',
+                              cursor: writing ? 'wait' : 'pointer',
+                              border: '1px solid ' + (isSkipped ? '#34d399' : '#fda4af'),
+                              background: isSkipped ? '#ecfdf5' : '#fff1f2',
+                              color: isSkipped ? '#065f46' : '#9f1239',
+                              whiteSpace: 'nowrap',
+                              opacity: writing ? 0.6 : 1,
+                            }}
+                            title={isSkipped ? 'Restore this finding to the apply set' : 'Skip this finding without opening the page'}
+                          >
+                            {writing ? '…' : isSkipped ? '↩ Restore' : '✕ Skip'}
+                          </button>
+                        ) : (
+                          <div style={{ color: '#94a3b8', fontSize: '1rem', alignSelf: 'center' }}>→</div>
+                        )}
                       </div>
                     );
                   })}
