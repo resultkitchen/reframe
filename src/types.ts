@@ -133,6 +133,26 @@ export interface PipelineConfig {
   mocksPath?: string;
   /** Selected LLM provider, e.g. 'gemini', 'openai', 'anthropic', 'openai-compatible'. Default 'gemini' */
   llmProvider: string;
+  /**
+   * Scope verification to files changed in the working tree relative to
+   * `diffBase`. Stage 0 still maps the whole app; the per-page fan-out
+   * filters to pages whose source file appears in the diff. The flag that
+   * makes a per-PR review tractable for a power user (Priya persona).
+   */
+  diffOnly: boolean;
+  /**
+   * Git ref to diff against when `diffOnly` is true. When undefined, the
+   * engine probes `origin/main`, `origin/master`, `main`, `master` in
+   * order and uses the first that resolves.
+   */
+  diffBase?: string;
+  /**
+   * When true, runPipeline exits cleanly after Stage 0 + brand resolution
+   * without booting the dev server or running any agents. Used by the
+   * `reframe bootstrap` subcommand to produce the candidate brand spec
+   * before the operator commits to a full audit run.
+   */
+  bootstrapOnly: boolean;
 }
 
 /* ─────────────────────────── Approvals & Comments Ledger ─────────────────────────── */

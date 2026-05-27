@@ -31,6 +31,7 @@ Reframe — portable SaaS architectural refactoring engine (1 mapper + 6-agent f
 
 USAGE
   reframe rebuild <github-url|local-path> [flags]
+  reframe bootstrap <github-url|local-path> [flags]
   reframe init [target-path]
   reframe review <run-dir> [--port <number>]
   reframe --help
@@ -66,6 +67,24 @@ FLAGS
   --scratch <path>            Scratch dir for the clone (deleted on run end).
   --resume <runDir>           Resume an existing run; completed page/agent
                               checkpoints are skipped.
+  --diff-only                 Scope the per-page fan-out to source files
+                              changed on this branch (vs --diff-base). Stage 0
+                              still maps the whole app; agents only run on
+                              pages whose source file is in the diff. The
+                              power-user flag — kills audit time on big repos.
+  --diff-base <ref>           Git ref to diff against when --diff-only is set.
+                              Defaults to origin/main → origin/master → main.
+  --bootstrap-only            Run Stage 0 only: map the app, derive a brand
+                              candidate, write it to <runDir>/brand.candidate.json,
+                              and exit. No boot, no agents. Used by the
+                              \`reframe bootstrap\` subcommand.
+
+SUBCOMMANDS
+
+  bootstrap <target>          Shortcut for --bootstrap-only. Maps the app and
+                              produces a brand candidate you can review + pin
+                              before committing to a full audit run. The
+                              friction-free first run for any new project.
 
 ENV
   GEMINI_API_KEY / GOOGLE_API_KEY   Gemini API key (required for Gemini runs).
@@ -73,11 +92,16 @@ ENV
 
 EXAMPLES
   reframe init ./my-new-saas
+  reframe bootstrap ./my-new-saas                  # see what Reframe sees, fast
   reframe review ./runs/casesdaily-2026-05-25T15-29-40Z
   reframe rebuild https://github.com/acme/todo-saas
   reframe rebuild https://github.com/acme/todo-saas --max-pages 10 --quick-scan
   reframe rebuild ./local/project --apply-mode propose --concurrency 4
   reframe rebuild ./project --resume runs/project-2026-05-15T10-00-00-000Z
+
+  # Per-PR audit: only the screens whose source files this branch touches.
+  reframe rebuild ./project --diff-only
+  reframe rebuild ./project --diff-only --diff-base origin/develop
 
   # Two-pass review gate against a live install, gated screens included:
   reframe rebuild ./project --apply-mode review --auth config/myapp-auth.json
@@ -129,8 +153,25 @@ async function main(): Promise<number> {
     return 0;
   }
 
+  // Handle 'bootstrap' command — thin alias for `rebuild <target> --bootstrap-only`.
+  // Keeps the verb explicit in the docs and on the user's shell history.
+  if (argv[0] === 'bootstrap') {
+    const target = argv[1];
+    if (!target) {
+      console.error('Error: "bootstrap" command requires a target.');
+      console.error('Usage: reframe bootstrap <github-url|local-path> [flags]');
+      return 1;
+    }
+    // Rebuild the argv as if the user had typed `rebuild <target> --bootstrap-only ...`.
+    const rebuiltArgs = ['rebuild', target, ...argv.slice(2)];
+    if (!rebuiltArgs.includes('--bootstrap-only')) rebuiltArgs.push('--bootstrap-only');
+    const config = await resolveConfig(rebuiltArgs);
+    await runPipeline(config);
+    return 0;
+  }
+
   if (argv[0] !== 'rebuild') {
-    console.error(`Unknown command: "${argv[0]}". Expected "rebuild", "init", or "review".`);
+    console.error(`Unknown command: "${argv[0]}". Expected "rebuild", "bootstrap", "init", or "review".`);
     console.error(`Run "reframe --help" for usage.`);
     return 1;
   }

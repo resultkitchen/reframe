@@ -17,7 +17,7 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { GeminiClient } from './gemini';
-import { cloneRepo, createRunBranch, commitAll, openPr } from './git';
+import { cloneRepo, createRunBranch, commitAll, openPr, getChangedFiles } from './git';
 import { prepareScratch, cleanupScratch, checkDisk } from './scratch';
 import { newRunState, loadState, saveState, loadApprovals } from './state';
 import { writeManifest } from './manifest';
@@ -264,6 +264,44 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       console.log(`[reframe] ${msg}`);
     }
 
+    /* (5.5) --diff-only: filter to pages whose source file is changed on
+       this branch relative to the configured base (origin/main by default).
+       Runs AFTER role + page-cap filters so all selectors compose. Pages
+       are matched by absolute and workspace-relative file path so it works
+       whether stage 0 emitted absolute or repo-relative paths. */
+    if (config.diffOnly) {
+      try {
+        const { base, files: changedFiles } = await getChangedFiles(
+          config.workDir,
+          config.diffBase,
+        );
+        const changedSet = new Set<string>();
+        for (const f of changedFiles) {
+          changedSet.add(f);
+          // Normalize POSIX separators on Windows for cross-platform match.
+          changedSet.add(f.replace(/\\/g, '/'));
+        }
+        const originalLength = scope.pages.length;
+        scope.pages = scope.pages.filter((p) => {
+          if (!p.filePath) return false;
+          const rel = path.isAbsolute(p.filePath)
+            ? path.relative(config.workDir, p.filePath).replace(/\\/g, '/')
+            : p.filePath.replace(/\\/g, '/');
+          return changedSet.has(rel);
+        });
+        const msg = changedFiles.length === 0
+          ? `Diff-only against ${base}: no files changed on this branch — nothing to audit.`
+          : `Diff-only against ${base}: ${scope.pages.length} of ${originalLength} pages match the ${changedFiles.length} changed file(s).`;
+        extraAlerts.push(msg);
+        console.log(`[reframe] ${msg}`);
+      } catch (err) {
+        extraAlerts.push(`--diff-only failed: ${errMsg(err)}`);
+        console.error(`[reframe] --diff-only failed: ${errMsg(err)}`);
+        // Continue with the full scope rather than aborting — the operator
+        // gets a clear alert in the manifest and a usable run.
+      }
+    }
+
     /* If we had no state yet (fresh run, or resume without file), build it
        now that we know the page slugs. */
     if (!state) {
@@ -282,6 +320,61 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
     /* (6) BRAND PIN GATE. */
     const brand = resolveBrand(config, scope, extraAlerts);
     const constraints = resolveConstraints(config, scope.productGoal);
+
+    /* (6.5) --bootstrap-only: produce the candidate brand spec and exit
+       without booting the dev server or running any agents. Used by the
+       `reframe bootstrap` subcommand so an operator can review and pin
+       the brand before committing to a full audit run. */
+    if (config.bootstrapOnly) {
+      const brandCandidatePath = path.join(config.runDir, 'brand.candidate.json');
+      // resolveBrand already wrote brand.resolved.json; also write a copy
+      // at the more discoverable name `brand.candidate.json` so the operator
+      // doesn't have to interpret "resolved" vs "candidate" wording.
+      try {
+        fs.writeFileSync(brandCandidatePath, JSON.stringify(brand, null, 2), 'utf8');
+      } catch (err) {
+        extraAlerts.push(`Could not write brand.candidate.json: ${errMsg(err)}`);
+      }
+      console.log('');
+      console.log('─────────────────────────────────────────────────────────────────');
+      console.log(`[reframe] BOOTSTRAP COMPLETE — ${scope.pages.length} pages mapped.`);
+      console.log('');
+      console.log(`  Brand candidate written to:`);
+      console.log(`    ${brandCandidatePath}`);
+      console.log('');
+      console.log(`  Review the candidate, edit if needed, then PIN it:`);
+      console.log(`    1. Copy it into your repo:  cp ${brandCandidatePath} config/brand.json`);
+      console.log(`    2. Open config/brand.json and set  "pinned": true`);
+      console.log(`    3. Re-run the audit:  reframe rebuild ${config.target} --brand config/brand.json`);
+      console.log('─────────────────────────────────────────────────────────────────');
+      console.log('');
+
+      // Clean scratch and write a minimal manifest so downstream tooling
+      // (the review UI, CI) can detect a bootstrap run via its empty
+      // pagesProcessed list and the dedicated alert below.
+      const cleaned = await safeCleanup(config);
+      const geminiAlerts = gemini ? gemini.alerts : [];
+      const manifest: RunManifest = {
+        project: config.projectSlug,
+        target: config.target,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        wallClockMs: Date.now() - startedAtMs,
+        bootStatus: 'no-server',
+        pagesProcessed: [],
+        testUsers: [],
+        applyMode: config.applyMode,
+        scratchCleaned: cleaned,
+        alerts: [
+          ...geminiAlerts,
+          ...extraAlerts,
+          `Bootstrap-only run — brand candidate at ${brandCandidatePath}. Pin and re-run for a full audit.`,
+        ],
+      };
+      writeManifest(config.runDir, manifest);
+      scratchCleaned = true;
+      return manifest;
+    }
 
     /* (7) Stage 0.5 — boot gate. Always re-run, even on resume: scratch (with
        node_modules AND the running dev server) is deleted at the end of every

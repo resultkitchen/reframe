@@ -164,6 +164,9 @@ interface ParsedArgs {
   llmProvider?: string;
   onlyRoles?: string[];
   mocks?: string;
+  diffOnly?: boolean;
+  diffBase?: string;
+  bootstrapOnly?: boolean;
 }
 
 /**
@@ -235,6 +238,14 @@ function parseArgs(argv: string[]): ParsedArgs {
         );
       }
       out.llmProvider = v;
+    } else if (tok === '--diff-only') {
+      out.diffOnly = true;
+    } else if (tok === '--diff-base') {
+      const v = next();
+      if (!v || !v.trim()) throw new Error('--diff-base must be a non-empty git ref');
+      out.diffBase = v.trim();
+    } else if (tok === '--bootstrap-only') {
+      out.bootstrapOnly = true;
     } else if (tok.startsWith('--')) {
       throw new Error(`Unknown flag "${tok}"`);
     } else if (target === undefined) {
@@ -376,6 +387,9 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     onlyRoles: args.onlyRoles,
     mocksPath: args.mocks ? path.resolve(args.mocks) : undefined,
     llmProvider: args.llmProvider ?? 'gemini',
+    diffOnly: args.diffOnly ?? false,
+    diffBase: args.diffBase,
+    bootstrapOnly: args.bootstrapOnly ?? false,
   };
 
   return config;
