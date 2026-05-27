@@ -22,6 +22,7 @@ import type {
   Severity,
 } from '../types';
 import { FINDING_DIMENSIONS } from '../types';
+import { ComplianceOutputSchema } from '../schemas/agent-outputs';
 
 const VALID_SEVERITY: Severity[] = ['critical', 'high', 'medium', 'low'];
 
@@ -246,14 +247,17 @@ export async function runCompliance(ctx: AgentContext): Promise<ComplianceResult
 
   let findings: ComplianceFinding[] = [];
   try {
-    const response = await ctx.gemini.callJson<ComplianceJsonResponse>({
+    // Schema-validated call — ComplianceOutputSchema enforces the findings
+    // array shape; on a validation failure the client retries once with
+    // the issues appended to the prompt before surfacing the error.
+    const response = await ctx.gemini.callJsonSchema(ComplianceOutputSchema, {
       role: 'agent6_compliance',
       systemInstruction,
       prompt,
       json: true,
     });
 
-    const raw = Array.isArray(response?.findings) ? response.findings : [];
+    const raw = response.findings as ComplianceJsonResponse['findings'] ?? [];
     const validIds = new Set(matchedRules.map((r) => r.id));
     findings = raw
       .map((f): ComplianceFinding => {

@@ -535,10 +535,23 @@ export interface GeminiCallOptions {
   timeoutMs?: number;
 }
 
-/** Public surface of the Gemini client (implemented in src/gemini.ts). */
+/**
+ * Public surface of the Gemini client (implemented in src/gemini.ts).
+ *
+ * `callJsonSchema` is the modern entry point: it calls the LLM, validates
+ * the response against the supplied Zod schema, and on validation failure
+ * appends the issues to the prompt and retries ONCE. Use it for any new
+ * agent. `callJson<T>` is the legacy unvalidated form — still supported
+ * but the caller carries all the burden of trust.
+ *
+ * Typed loosely as `unknown` for the schema parameter to avoid forcing a
+ * zod import into every consumer of this interface; the implementation
+ * accepts a real `ZodSchema<T>` at runtime.
+ */
 export interface IGeminiClient {
   call(opts: GeminiCallOptions): Promise<string>;
   callJson<T>(opts: GeminiCallOptions): Promise<T>;
+  callJsonSchema<T>(schema: { safeParse: (data: unknown) => { success: true; data: T } | { success: false; error: unknown } }, opts: GeminiCallOptions): Promise<T>;
   /** Timeout/failure alerts accumulated during the run. */
   readonly alerts: string[];
 }

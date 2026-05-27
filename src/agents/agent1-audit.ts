@@ -22,8 +22,13 @@ import type {
   FindingDimension,
 } from '../types';
 import { FINDING_DIMENSIONS } from '../types';
+import { AuditOutputSchema } from '../schemas/agent-outputs';
 
-/** Shape the model must return — kept narrow so parsing is robust. */
+/**
+ * Shape the model must return — also enforced at runtime by AuditOutputSchema
+ * (src/schemas/agent-outputs.ts). The Zod schema is the source of truth; this
+ * interface mirrors it for the TS-only normalization path below.
+ */
 interface AuditModelResponse {
   gaps: Array<{
     id?: string;
@@ -465,7 +470,11 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
   let gaps: Gap[] = [];
 
   try {
-    const response = await ctx.gemini.callJson<AuditModelResponse>({
+    // Schema-validated call: the LLM's gap array shape is enforced by
+    // AuditOutputSchema. On a first-attempt validation failure the client
+    // appends the Zod issues to the prompt and retries once before throwing.
+    // Either way, the data reaching normaliseGap conforms to the contract.
+    const response = await ctx.gemini.callJsonSchema(AuditOutputSchema, {
       role: 'agent1_audit',
       systemInstruction: SYSTEM_INSTRUCTION,
       prompt: buildPrompt(ctx, snapshot, interactions, consoleErrors, health),
@@ -473,8 +482,8 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
       images: screenshot ? [screenshot] : undefined,
     });
 
-    const rawGaps = Array.isArray(response?.gaps) ? response.gaps : [];
-    gaps = rawGaps.map((raw, i) => normaliseGap(raw, i));
+    const rawGaps = response.gaps;
+    gaps = (rawGaps as AuditModelResponse['gaps']).map((raw, i) => normaliseGap(raw, i));
   } catch (err) {
     // Gemini failure — write a minimal valid result rather than crashing.
     gaps = [

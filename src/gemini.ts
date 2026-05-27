@@ -6,6 +6,7 @@
  * but implements generalized LLM calling mechanics under the hood.
  */
 
+import type { ZodError, ZodIssue, ZodSchema } from 'zod';
 import type {
   GeminiCallOptions,
   IGeminiClient,
@@ -51,10 +52,61 @@ export class GeminiClient implements IGeminiClient {
     return this.run(opts, false);
   }
 
-  /** JSON completion — parsed into T. */
+  /** JSON completion — parsed into T. No schema validation. */
   async callJson<T>(opts: GeminiCallOptions): Promise<T> {
     const raw = await this.run({ ...opts, json: true }, true);
     return parseJson<T>(raw);
+  }
+
+  /**
+   * JSON completion validated against a Zod schema.
+   *
+   * On a validation failure on the first call, the issues are appended to
+   * the prompt and the model is asked to retry — once. Persistent failure
+   * throws, recording an alert so the caller can surface it cleanly and
+   * fall back to its own minimal default.
+   *
+   * Use this for any new agent. `callJson<T>` remains the unvalidated
+   * legacy form for older callers that handle their own normalization.
+   */
+  async callJsonSchema<T>(
+    schema: ZodSchema<T>,
+    opts: GeminiCallOptions,
+  ): Promise<T> {
+    let attemptOpts = { ...opts, json: true };
+    let lastError: ZodError | null = null;
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const raw = await this.run(attemptOpts, true);
+      const parsedRaw = parseJson<unknown>(raw);
+      const result = schema.safeParse(parsedRaw);
+      if (result.success) return result.data;
+      lastError = result.error;
+
+      if (attempt === 1) {
+        // Compose a focused retry: tell the model what it got wrong and
+        // give it the original prompt verbatim so the second attempt sees
+        // the full task again, not just the validation feedback.
+        const feedback = formatZodIssues(result.error);
+        attemptOpts = {
+          ...opts,
+          json: true,
+          prompt:
+            opts.prompt +
+            `\n\nIMPORTANT: Your previous response did not match the required JSON schema.\n` +
+            `Validation issues:\n${feedback}\n\n` +
+            `Return a single JSON object that matches the schema exactly. No prose, no markdown fences.`,
+        };
+        this.alert(
+          `LLM Provider: schema validation failed for "${opts.role}" on attempt 1 — retrying with feedback.`,
+        );
+      }
+    }
+
+    const summary = lastError ? formatZodIssues(lastError) : 'unknown error';
+    const msg = `LLM Provider: schema validation failed for "${opts.role}" after retry. Issues:\n${summary}`;
+    this.alert(msg);
+    throw new Error(msg);
   }
 
   /** Shared call path: build request, race a timeout, retry, alert. */
@@ -295,6 +347,25 @@ export class GeminiClient implements IGeminiClient {
 }
 
 /* ─────────────────────────── helpers ─────────────────────────── */
+
+/**
+ * Compact, model-friendly rendering of a Zod validation error.
+ *
+ * Capped at the first 6 issues so the retry prompt stays bounded — the
+ * model only needs a few representative problems to course-correct, and
+ * larger payloads risk pushing context limits with no real signal gain.
+ */
+function formatZodIssues(error: ZodError): string {
+  const issues = error.issues.slice(0, 6) as ZodIssue[];
+  const lines = issues.map((i) => {
+    const where = i.path.length > 0 ? i.path.join('.') : '(root)';
+    return `  - ${where}: ${i.message}`;
+  });
+  if (error.issues.length > issues.length) {
+    lines.push(`  - ...and ${error.issues.length - issues.length} more issue(s)`);
+  }
+  return lines.join('\n');
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
