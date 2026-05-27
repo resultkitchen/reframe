@@ -171,6 +171,16 @@ export type ApprovalDecision = 'apply' | 'skip';
 export interface PageApproval {
   decision: ApprovalDecision;
   gaps?: Record<string, ApprovalDecision>; // gapId -> apply|skip
+  /**
+   * Per-compliance-finding apply/skip decisions, keyed by
+   * `${ruleId}::${location}` so multiple findings of the same rule at
+   * different locations can be decided independently. Added in v1 to
+   * give compliance findings the same per-item triage surface audit
+   * gaps already had via `gaps`. Optional — older approvals.json files
+   * without this field continue to work; absent decisions default to
+   * 'apply'.
+   */
+  complianceFindings?: Record<string, ApprovalDecision>;
   note?: string;
   comments?: string[]; // Threaded collaborator comments/notes
 }

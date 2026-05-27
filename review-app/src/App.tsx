@@ -73,6 +73,11 @@ interface PageData {
 interface PageApproval {
   decision: 'apply' | 'skip';
   gaps?: Record<string, 'apply' | 'skip'>;
+  /**
+   * Per-compliance-finding decisions, keyed `${ruleId}::${location}`.
+   * Mirrors the engine's PageApproval shape (see src/types.ts).
+   */
+  complianceFindings?: Record<string, 'apply' | 'skip'>;
   note?: string;
   comments?: string[];
 }
@@ -616,19 +621,21 @@ ${pmNotes}
   const [overviewWriting, setOverviewWriting] = useState<Set<string>>(new Set());
 
   /**
-   * Set a gap's apply/skip decision from the Run Overview WITHOUT
-   * navigating to its page. Used by the per-row Skip/Approve buttons
-   * the cross-page triage view exposes. Reads the existing approval
-   * for that page (or builds a default one), patches just this gap's
-   * decision, then POSTs the whole page-approval.
+   * Set a finding's apply/skip decision from the Run Overview WITHOUT
+   * navigating to its page. Works for both audit gaps and compliance
+   * findings — the `target` parameter is a discriminated union that
+   * points the decision at the right slot inside PageApproval.
    *
-   * The local data state is updated optimistically — if the POST
-   * fails, an error alert restores the prior state to avoid a stale
-   * UI that disagrees with disk.
+   * Reads the existing approval for that page (or builds a default one),
+   * patches just this finding's decision, then POSTs the whole
+   * page-approval. The local data state is updated optimistically; a
+   * failed POST rolls back so the UI never disagrees with disk.
    */
-  const setOverviewGapDecision = async (
+  const setOverviewFindingDecision = async (
     pageSlug: string,
-    gapId: string,
+    target:
+      | { kind: 'audit'; gapId: string }
+      | { kind: 'compliance'; complianceFindingKey: string },
     decision: 'apply' | 'skip',
     itemKey: string,
   ): Promise<void> => {
@@ -638,7 +645,17 @@ ${pmNotes}
     const existing = data.approvals.pages[pageSlug];
     const updatedApproval: PageApproval = {
       decision: existing?.decision ?? 'apply',
-      gaps: { ...(existing?.gaps ?? {}), [gapId]: decision },
+      gaps:
+        target.kind === 'audit'
+          ? { ...(existing?.gaps ?? {}), [target.gapId]: decision }
+          : existing?.gaps,
+      complianceFindings:
+        target.kind === 'compliance'
+          ? {
+              ...(existing?.complianceFindings ?? {}),
+              [target.complianceFindingKey]: decision,
+            }
+          : existing?.complianceFindings,
       note: existing?.note ?? '',
       comments: existing?.comments ?? [],
     };
@@ -675,8 +692,12 @@ ${pmNotes}
       setData((prev) =>
         prev ? { ...prev, approvals: { ...prev.approvals, pages: priorPages } } : prev,
       );
+      const label =
+        target.kind === 'audit'
+          ? `${pageSlug}::${target.gapId}`
+          : `${pageSlug}::${target.complianceFindingKey}`;
       alert(
-        `Could not save decision for ${pageSlug}::${gapId}: ` +
+        `Could not save decision for ${label}: ` +
           (err instanceof Error ? err.message : String(err)),
       );
     } finally {
@@ -710,10 +731,15 @@ ${pmNotes}
       /**
        * Audit gap id (g1, g2, …). Present only for audit items — used
        * by the per-row Skip/Approve buttons to address the right gap
-       * inside the page's approvals.gaps map. Compliance findings
-       * don't yet have a per-finding approval surface.
+       * inside the page's approvals.gaps map.
        */
       gapId?: string;
+      /**
+       * Stable key for compliance findings, `${ruleId}::${location}`.
+       * Present only for compliance items — used to address the
+       * finding inside approvals.complianceFindings.
+       */
+      complianceFindingKey?: string;
     };
     const all: OverviewItem[] = [];
     const counts = { critical: 0, high: 0, medium: 0, low: 0 };
@@ -746,8 +772,9 @@ ${pmNotes}
         if (counts[sevKey] !== undefined) counts[sevKey]++;
         const sev = SEVERITY_WEIGHT[f.severity] ?? 1;
         const conf = f.confidence ?? 0.8;
+        const complianceKey = `${f.ruleId}::${f.location}`;
         all.push({
-          key: `${p.slug}::compliance::${f.ruleId}::${f.location}`,
+          key: `${p.slug}::compliance::${complianceKey}`,
           pageSlug: p.slug,
           pageRoute: p.route,
           severity: f.severity,
@@ -757,6 +784,7 @@ ${pmNotes}
           confidence: f.confidence,
           impact: sev * conf,
           source: 'compliance',
+          complianceFindingKey: complianceKey,
         });
       }
     }
@@ -960,15 +988,24 @@ ${pmNotes}
                               : item.severity === 'medium'   ? { bg: '#fef3c7', fg: '#854d0e' }
                               :                                 { bg: '#e0e7ff', fg: '#3730a3' };
                     const confPct = typeof item.confidence === 'number' ? Math.round(item.confidence * 100) : null;
-                    // Per-row apply/skip state — only meaningful for audit
-                    // items; compliance findings have no per-finding approval
-                    // surface today. Bypassed pages override per-gap decisions.
+                    // Per-row apply/skip state — works for both audit gaps
+                    // (via approvals.gaps[gapId]) and compliance findings
+                    // (via approvals.complianceFindings[complianceFindingKey]).
+                    // A bypassed page overrides any per-finding decisions.
                     const pageApproval = data?.approvals.pages[item.pageSlug];
                     const pageBypassed = pageApproval?.decision === 'skip';
-                    const isSkipped =
-                      item.source === 'audit' && item.gapId
-                        ? pageBypassed || pageApproval?.gaps?.[item.gapId] === 'skip'
-                        : pageBypassed;
+                    let perItemSkipped = false;
+                    if (item.source === 'audit' && item.gapId) {
+                      perItemSkipped = pageApproval?.gaps?.[item.gapId] === 'skip';
+                    } else if (item.source === 'compliance' && item.complianceFindingKey) {
+                      perItemSkipped =
+                        pageApproval?.complianceFindings?.[item.complianceFindingKey] === 'skip';
+                    }
+                    const isSkipped = pageBypassed || perItemSkipped;
+                    const canTriage =
+                      !pageBypassed &&
+                      ((item.source === 'audit' && !!item.gapId) ||
+                        (item.source === 'compliance' && !!item.complianceFindingKey));
                     const writing = overviewWriting.has(item.key);
                     return (
                       <div
@@ -1041,18 +1078,25 @@ ${pmNotes}
                           </div>
                         </div>
 
-                        {/* Per-row Skip / Approve — audit items only. Click
-                            doesn't propagate to the row (which would jump pages).
-                            Compliance findings still get the jump arrow only,
-                            since there's no per-finding approval surface yet. */}
-                        {item.source === 'audit' && item.gapId && !pageBypassed ? (
+                        {/* Per-row Skip / Restore — works for audit gaps AND
+                            compliance findings now. Click doesn't propagate
+                            to the row (which would jump pages). When the
+                            page is wholesale-bypassed, the per-finding
+                            button is hidden in favor of the jump arrow,
+                            since per-finding decisions are dominated by
+                            the page-level bypass anyway. */}
+                        {canTriage ? (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               if (writing) return;
-                              setOverviewGapDecision(
+                              const target =
+                                item.source === 'audit'
+                                  ? { kind: 'audit' as const, gapId: item.gapId! }
+                                  : { kind: 'compliance' as const, complianceFindingKey: item.complianceFindingKey! };
+                              setOverviewFindingDecision(
                                 item.pageSlug,
-                                item.gapId!,
+                                target,
                                 isSkipped ? 'apply' : 'skip',
                                 item.key,
                               );
