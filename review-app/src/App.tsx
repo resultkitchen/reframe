@@ -76,6 +76,12 @@ export default function App() {
   const [saving, setSaving] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Track Step 2 approval confirmation
+  const [isLedgerLocked, setIsLedgerLocked] = useState<boolean>(false);
+
+  // Toggle slide-out blueprint drawer
+  const [isArchDrawerOpen, setIsArchDrawerOpen] = useState<boolean>(false);
+
   // New comment input per page
   const [newComment, setNewComment] = useState<string>('');
 
@@ -239,6 +245,7 @@ export default function App() {
   // Handle decisions toggle (Apply vs Skip)
   const handleDecisionToggle = (decision: 'apply' | 'skip') => {
     if (!currentApproval) return;
+    setIsLedgerLocked(false);
     setCurrentApproval({
       ...currentApproval,
       decision,
@@ -248,6 +255,7 @@ export default function App() {
   // Toggle individual gap decision (Apply vs Skip)
   const handleGapToggle = (gapId: string) => {
     if (!currentApproval) return;
+    setIsLedgerLocked(false);
     const currentGaps = { ...currentApproval.gaps };
     currentGaps[gapId] = currentGaps[gapId] === 'skip' ? 'apply' : 'skip';
     
@@ -260,6 +268,7 @@ export default function App() {
   // Toggle all gaps
   const handleToggleAllGaps = () => {
     if (!currentApproval || !activePage?.audit?.gaps) return;
+    setIsLedgerLocked(false);
     const allCurrentlyApply = activePage.audit.gaps.every(g => currentApproval.gaps?.[g.id] !== 'skip');
     const targetStatus: 'apply' | 'skip' = allCurrentlyApply ? 'skip' : 'apply';
     
@@ -278,6 +287,7 @@ export default function App() {
   const handleAddComment = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentApproval || !newComment.trim()) return;
+    setIsLedgerLocked(false);
     
     const commentsList = [...(currentApproval.comments ?? [])];
     commentsList.push(newComment.trim());
@@ -322,7 +332,7 @@ export default function App() {
             },
           };
         });
-        alert('Approvals saved successfully!');
+        setIsLedgerLocked(true);
       }
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err));
@@ -507,14 +517,16 @@ ${pmNotes}
                       <span className="badge badge-pending">Pending</span>
                     )}
 
-                    {/* Decision badge */}
+                    {/* Review Status badge */}
                     {approval ? (
                       approval.decision === 'apply' ? (
-                        <span className="badge badge-apply">Apply</span>
+                        <span className="badge badge-apply">✓ Approved</span>
                       ) : (
-                        <span className="badge badge-skip">Skip</span>
+                        <span className="badge badge-skip">⚪ Bypassed</span>
                       )
-                    ) : null}
+                    ) : (
+                      <span className="badge badge-pending">⏳ Unreviewed</span>
+                    )}
                   </div>
                 </li>
               );
@@ -651,24 +663,41 @@ ${pmNotes}
                     </div>
                   ) : (
                     /* ────────────────────────── NORMAL HEALTHY FLOW ────────────────────────── */
-                    <>
-                      {/* Redesigned grid flow: ELEVATED TWO-COLUMN HORIZONTAL DASHBOARD FLOW */}
-                      <div className="horizontal-dashboard">
-                        
-                        {/* Column 1 (Left 60%): Selective Code Upgrades (Checking applies fixes to git) */}
-                        <div className="card dashboard-card">
-                          <div className="card-header compact-header">
-                            <h3 className="card-title text-green">🛠️ Selective Code Upgrades (Prioritize fixes for next commit)</h3>
-                            {activePage.audit && activePage.audit.gaps.length > 0 && (
-                              <button 
-                                onClick={handleToggleAllGaps} 
-                                className="btn-text-action"
-                              >
-                                🔄 Toggle All ({activePage.audit.gaps.every(g => currentApproval.gaps?.[g.id] !== 'skip') ? 'Skip All' : 'Apply All'})
-                              </button>
-                            )}
-                          </div>
-                          <div className="card-body compact-body scroll-vertical-240">
+                    (() => {
+                      const isBypassed = currentApproval?.decision === 'skip';
+
+                      return (
+                        <>
+                          {/* Redesigned grid flow: ELEVATED TWO-COLUMN HORIZONTAL DASHBOARD FLOW */}
+                          <div className="horizontal-dashboard">
+                            
+                            {/* Column 1 (Left 60%): Selective Code Upgrades (Checking applies fixes to git) */}
+                            <div 
+                              className="card dashboard-card" 
+                              style={{ 
+                                opacity: isBypassed ? 0.55 : 1, 
+                                pointerEvents: isBypassed ? 'none' : 'auto', 
+                                transition: 'all 0.35s ease' 
+                              }}
+                            >
+                              <div className="card-header compact-header">
+                                <h3 className="card-title text-green">🛠️ Selective Code Upgrades (Prioritize fixes for next commit)</h3>
+                                {activePage.audit && activePage.audit.gaps.length > 0 && !isBypassed && (
+                                  <button 
+                                    onClick={handleToggleAllGaps} 
+                                    className="btn-text-action"
+                                  >
+                                    🔄 Toggle All ({activePage.audit.gaps.every(g => currentApproval.gaps?.[g.id] !== 'skip') ? 'Skip All' : 'Apply All'})
+                                  </button>
+                                )}
+                              </div>
+                              <div className="card-body compact-body scroll-vertical-240">
+                                {isBypassed && (
+                                  <div className="bypass-warning-banner" style={{ background: '#fffbeb', border: '1px solid #fef3c7', color: '#d97706', padding: '0.5rem 0.75rem', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                    <span>💡</span>
+                                    <span>This screen is bypassed. Selections will not be committed or processed.</span>
+                                  </div>
+                                )}
                             {activePage.audit && activePage.audit.gaps.length > 0 ? (
                               <div className="gaps-list compact-gaps">
                                 {activePage.audit.gaps.map((gap) => {
@@ -711,291 +740,200 @@ ${pmNotes}
                           </div>
                         </div>
 
-                        {/* Column 2 (Right 40%): Approvals Scoping & Interactive Guides */}
+                        {/* Column 2 (Right 40%): Approvals Scoping & Zen Stepper Funnel */}
                         <div className="card dashboard-card">
-                          <div className="card-header compact-header" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'stretch' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <h3 className="card-title text-blue">⚡ Workspace & scoping</h3>
-                            </div>
-                            
-                            {/* Segmented Tab Strip */}
-                            <div className="segmented-control" style={{ width: '100%' }}>
-                              <button 
-                                className={`control-btn ${activeRightTab === 'decisions' ? 'active' : ''}`}
-                                onClick={() => setActiveRightTab('decisions')}
-                                style={{ flex: 1, textAlign: 'center' }}
-                              >
-                                📋 Decisions
-                              </button>
-                              <button 
-                                className={`control-btn ${activeRightTab === 'guide' ? 'active' : ''}`}
-                                onClick={() => setActiveRightTab('guide')}
-                                style={{ flex: 1, textAlign: 'center' }}
-                              >
-                                🧭 Guide
-                              </button>
-                              <button 
-                                className={`control-btn ${activeRightTab === 'downloads' ? 'active' : ''}`}
-                                onClick={() => setActiveRightTab('downloads')}
-                                style={{ flex: 1, textAlign: 'center' }}
-                              >
-                                📥 Downloads
-                              </button>
-                              <button 
-                                className={`control-btn ${activeRightTab === 'architecture' ? 'active' : ''}`}
-                                onClick={() => setActiveRightTab('architecture')}
-                                style={{ flex: 1, textAlign: 'center' }}
-                              >
-                                📖 Architecture
-                              </button>
-                            </div>
+                          <div className="card-header compact-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h3 className="card-title text-blue">⚡ Workspace scoping</h3>
+                            {data && !data.isGitRepo && (
+                              <span className="badge badge-fail" style={{ fontSize: '0.7rem', textTransform: 'none', padding: '0.25rem 0.5rem' }}>
+                                ⚠️ Non-Git
+                              </span>
+                            )}
                           </div>
-                          <div className="card-body compact-body flex-col-layout">
-                            {activeRightTab === 'decisions' && (
-                              /* ────────────────────────── DECISIONS TAB ────────────────────────── */
-                              <>
-                                <div className="scoping-action-card">
-                                  <div className="approval-choices-row">
+                          <div className="card-body compact-body scroll-vertical-550" style={{ maxHeight: '600px', overflowY: 'auto' }}>
+                            <div className="zen-stepper-funnel">
+                              
+                              {/* Step 1: Scope & Refine */}
+                              <div className="zen-step-card active">
+                                <div className="zen-step-header">
+                                  <span className="zen-step-num">1</span>
+                                  <h4 className="zen-step-title">Scope & Refine Screen</h4>
+                                </div>
+                                <div className="zen-step-body">
+                                  <div className="approval-choices-row" style={{ display: 'flex', gap: '0.5rem' }}>
                                     <button
                                       className={`btn-choice-pill-compact choice-apply ${currentApproval.decision === 'apply' ? 'selected' : ''}`}
                                       onClick={() => handleDecisionToggle('apply')}
+                                      style={{ flex: 1 }}
                                     >
                                       🟢 APPLY UPGRADES
                                     </button>
                                     <button
                                       className={`btn-choice-pill-compact choice-skip ${currentApproval.decision === 'skip' ? 'selected' : ''}`}
                                       onClick={() => handleDecisionToggle('skip')}
+                                      style={{ flex: 1 }}
                                     >
                                       🟡 BYPASS SCREEN
                                     </button>
                                   </div>
 
-                                  <div className="approvals-explain-box">
-                                    <p className="explain-text">
-                                      <strong>Scoping Decisions:</strong> Choose whether to refactor this screen. Use the checkbox list on the left to prioritize specific fixes.
-                                    </p>
+                                  <div className="form-group compact-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                    <label className="form-label compact-label" style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 700 }}>PM / Client Refinement Instructions</label>
+                                    <textarea
+                                      rows={2}
+                                      className="input-text compact-textarea"
+                                      placeholder="Add refactoring adjustments, hex overrides, or notes..."
+                                      value={currentApproval.note ?? ''}
+                                      onChange={(e) => {
+                                        setIsLedgerLocked(false);
+                                        setCurrentApproval({ ...currentApproval, note: e.target.value });
+                                      }}
+                                      style={{ resize: 'none', background: '#fafafa', fontSize: '0.8rem', padding: '0.5rem', borderRadius: '6px', border: '1px solid #cbd5e1' }}
+                                    />
                                   </div>
 
-                                  {data && !data.isGitRepo && currentApproval.decision === 'apply' && (
-                                    <div className="prompt-integration-card">
-                                      <div className="prompt-integration-header">
-                                        <span style={{ fontSize: '1.25rem' }}>🤖</span>
-                                        <h5 className="prompt-integration-title">Resilient AI Refactoring Prompt</h5>
-                                      </div>
-                                      <p style={{ fontSize: '0.75rem', color: '#475569', margin: 0, lineHeight: 1.4 }}>
-                                        This is a non-Git workspace. Direct auto-commits are disabled. Instead, copy or download the dynamic instruction prompt below to apply the refactor directly in your editor co-pilot!
+                                  {/* Threaded Comments Timeline */}
+                                  <div className="form-group compact-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.25rem' }}>
+                                    <label className="form-label compact-label" style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 700 }}>Collaborative Thread</label>
+                                    <div className="comments-timeline compact-timeline-overhauled" style={{ background: '#fafafa', border: '1px solid #f1f5f9', padding: '0.5rem', borderRadius: '6px', maxHeight: '120px', overflowY: 'auto' }}>
+                                      {currentApproval.comments && currentApproval.comments.length > 0 ? (
+                                        currentApproval.comments.map((c, i) => (
+                                          <div key={i} className="comment-bubble compact-bubble" style={{ background: '#f1f5f9', borderRadius: '8px', padding: '0.35rem 0.5rem', marginBottom: '0.35rem', fontSize: '0.75rem' }}>
+                                            <div className="comment-bubble-author" style={{ fontWeight: 700, color: '#475569', fontSize: '0.65rem', marginBottom: '0.1rem' }}>Collaborator</div>
+                                            <div className="comment-bubble-text" style={{ color: '#1e293b' }}>{c}</div>
+                                          </div>
+                                        ))
+                                      ) : (
+                                        <p className="no-comments-placeholder" style={{ color: '#94a3b8', fontSize: '0.75rem', margin: 0, textAlign: 'center', padding: '0.5rem 0' }}>No threads active.</p>
+                                      )}
+                                    </div>
+                                    <form onSubmit={handleAddComment} className="comments-input-row compact-row" style={{ display: 'flex', gap: '0.35rem', marginTop: '0.25rem' }}>
+                                      <input
+                                        type="text"
+                                        className="input-text compact-input"
+                                        placeholder="Reply to thread..."
+                                        value={newComment}
+                                        onChange={(e) => setNewComment(e.target.value)}
+                                        style={{ flex: 1, padding: '0.35rem 0.5rem', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                      />
+                                      <button type="submit" className="input-btn compact-btn" style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', borderRadius: '4px', background: '#2563eb', color: '#ffffff', border: 'none', cursor: 'pointer' }}>Send</button>
+                                    </form>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Step 1 to Step 2 Flow Connector */}
+                              <div className="zen-step-connector" style={{ display: 'flex', justifyContent: 'center', margin: '0.4rem 0', color: '#94a3b8', fontSize: '1.25rem', fontWeight: 'bold' }}>↓</div>
+
+                              {/* Step 2: Lock Selections */}
+                              <div className={`zen-step-card ${currentApproval ? 'active' : 'locked'}`}>
+                                <div className="zen-step-header">
+                                  <span className="zen-step-num">2</span>
+                                  <h4 className="zen-step-title">Lock Screen Approvals</h4>
+                                </div>
+                                <div className="zen-step-body">
+                                  <button
+                                    onClick={handleSaveApproval}
+                                    disabled={saving}
+                                    className={`btn-lock-ledger ${isLedgerLocked ? 'locked-success' : ''}`}
+                                  >
+                                    {saving ? '🔒 Locking approvals...' : isLedgerLocked ? '✓ Approvals Locked' : '💾 Lock Screen Approvals'}
+                                  </button>
+                                  <p style={{ fontSize: '0.7rem', color: '#64748b', margin: 0, lineHeight: 1.35 }}>
+                                    Locking saves your selections to the local configuration on disk, which is instantly parsed by other AI agents to apply code upgrades.
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Step 2 to Step 3 Flow Connector */}
+                              <div className="zen-step-connector" style={{ display: 'flex', justifyContent: 'center', margin: '0.4rem 0', color: '#94a3b8', fontSize: '1.25rem', fontWeight: 'bold' }}>↓</div>
+
+                              {/* Step 3: Deploy Upgrades */}
+                              <div className={`zen-step-card ${isLedgerLocked ? 'active' : 'locked'}`}>
+                                <div className="zen-step-header">
+                                  <span className="zen-step-num">3</span>
+                                  <h4 className="zen-step-title">Deploy Upgrades</h4>
+                                </div>
+                                <div className="zen-step-body">
+                                  {!isLedgerLocked ? (
+                                    <div className="step-locked-placeholder" style={{ padding: '1rem', textAlign: 'center', background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '8px', color: '#64748b' }}>
+                                      <span style={{ fontSize: '1.25rem', display: 'block', marginBottom: '0.25rem' }}>🔒 Pathway Locked</span>
+                                      <p style={{ fontSize: '0.75rem', margin: 0, lineHeight: 1.4 }}>
+                                        Please approve and click <strong>"Lock Screen Approvals"</strong> in Step 2 to generate deploy pathways and download markdown prompts.
                                       </p>
-                                      <div className="prompt-actions-row">
+                                    </div>
+                                  ) : (
+                                    data && data.isGitRepo ? (
+                                    /* Git Deployment Flow */
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                      <button
+                                        onClick={handleApplyRefactor}
+                                        className="btn-primary glow-btn"
+                                        disabled={applying || !isLedgerLocked}
+                                        style={{ width: '100%', justifyContent: 'center', padding: '0.75rem', fontSize: '0.85rem' }}
+                                      >
+                                        {applying ? '⚡ Applying...' : '⚡ Apply Auto-Commit to Git'}
+                                      </button>
+                                      
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.15rem 0' }}>
+                                        <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }}></div>
+                                        <span style={{ fontSize: '0.65rem', color: '#94a3b8', fontWeight: 700 }}>or copy LLM instructions</span>
+                                        <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }}></div>
+                                      </div>
+
+                                      <button
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(generateAiPrompt());
+                                          alert('⚡ AI Refactoring Prompt copied to clipboard!\n\nPaste this into your local AI coding assistant (Claude Code, Cursor, Antigravity, etc.) to immediately apply the approved upgrades!');
+                                        }}
+                                        className="btn-secondary"
+                                        disabled={!isLedgerLocked}
+                                        style={{ width: '100%', justifyContent: 'center', padding: '0.65rem', fontSize: '0.8rem', background: '#faf5ff', borderColor: '#ddd6fe', color: '#4f46e5' }}
+                                      >
+                                        🤖 Copy Resilient IDE Prompt
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    /* Non-Git / Custom Integration Flow */
+                                    <div className="prompt-integration-card" style={{ marginTop: 0, padding: '0.75rem', background: '#fcfdfe', border: '1px solid #ddd6fe' }}>
+                                      <div className="prompt-integration-header" style={{ marginBottom: '0.25rem' }}>
+                                        <span style={{ fontSize: '1.1rem' }}>🤖</span>
+                                        <h5 className="prompt-integration-title" style={{ fontSize: '0.8rem', color: '#4f46e5' }}>Resilient IDE Prompt</h5>
+                                      </div>
+                                      <p style={{ fontSize: '0.7rem', color: '#475569', margin: 0, lineHeight: 1.35 }}>
+                                        VCS branch committing is disabled for non-Git projects. Use the copier or dynamic download below to steer your editor AI co-pilot directly!
+                                      </p>
+                                      <div className="prompt-actions-row" style={{ display: 'flex', gap: '0.35rem', marginTop: '0.5rem' }}>
                                         <button
                                           onClick={() => {
                                             navigator.clipboard.writeText(generateAiPrompt());
                                             alert('⚡ AI Refactoring Prompt copied to clipboard!\n\nPaste this into your local AI coding assistant (Claude Code, Cursor, Antigravity, etc.) to immediately apply the approved upgrades!');
                                           }}
                                           className="btn-primary"
-                                          style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem', justifyContent: 'center' }}
+                                          disabled={!isLedgerLocked}
+                                          style={{ flex: 1, fontSize: '0.75rem', padding: '0.4rem 0.65rem', justifyContent: 'center' }}
                                         >
                                           📋 Copy prompt
                                         </button>
                                         <a
                                           href={`/api/download-prompt/${activePage.slug}`}
                                           className="download-prompt-btn"
+                                          style={{ flex: 1, fontSize: '0.75rem', padding: '0.4rem 0.65rem', justifyContent: 'center', border: '1px solid #ddd6fe', borderRadius: '8px', color: '#4f46e5', background: '#ffffff', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
                                         >
                                           📥 Download .md
                                         </a>
                                       </div>
-                                      <ul className="prompt-usage-list">
-                                        <li>Open target project in Cursor or Claude Code.</li>
-                                        <li>Feed this prompt to the AI to merge style & visual gaps.</li>
-                                        <li>Maintains brand consistency without strict patch rigidity!</li>
+                                      <ul className="prompt-usage-list" style={{ marginTop: '0.5rem', paddingLeft: '1.1rem', fontSize: '0.65rem', color: '#64748b' }}>
+                                        <li>Feed this prompt directly to Cursor / Claude Code / Codex.</li>
+                                        <li>Leverages dynamic context merging to bypass diff rigidity!</li>
                                       </ul>
                                     </div>
+                                  )
                                   )}
                                 </div>
-
-                                <div className="form-group compact-group">
-                                  <label className="form-label compact-label">PM / Client Refinement Instructions</label>
-                                  <textarea
-                                    rows={2}
-                                    className="input-text compact-textarea"
-                                    placeholder="Add refactoring adjustments, hex overrides, or notes..."
-                                    value={currentApproval.note ?? ''}
-                                    onChange={(e) => setCurrentApproval({ ...currentApproval, note: e.target.value })}
-                                  />
-                                </div>
-
-                                <div className="comments-timeline compact-timeline-overhauled">
-                                  {currentApproval.comments && currentApproval.comments.length > 0 ? (
-                                    currentApproval.comments.map((c, i) => (
-                                      <div key={i} className="comment-bubble compact-bubble">
-                                        <div className="comment-bubble-author">Collaborator</div>
-                                        <div className="comment-bubble-text">{c}</div>
-                                      </div>
-                                    ))
-                                  ) : (
-                                    <p className="no-comments-placeholder">No collaborator threads started.</p>
-                                  )}
-                                </div>
-
-                                <form onSubmit={handleAddComment} className="comments-input-row compact-row">
-                                  <input
-                                    type="text"
-                                    className="input-text compact-input"
-                                    placeholder="Reply thread..."
-                                    value={newComment}
-                                    onChange={(e) => setNewComment(e.target.value)}
-                                  />
-                                  <button type="submit" className="input-btn compact-btn">Send</button>
-                                </form>
-                              </>
-                            )}
-
-                            {activeRightTab === 'guide' && (
-                              /* ────────────────────────── GUIDE TAB ────────────────────────── */
-                              <div className="guide-tab scroll-vertical-240">
-                                <div className="guide-stepper">
-                                  <div className="stepper-item">
-                                    <span className="stepper-badge">Step 1</span>
-                                    <p className="stepper-text">Review and select selective upgrades on the left.</p>
-                                  </div>
-                                  <div className="stepper-item">
-                                    <span className="stepper-badge">Step 2</span>
-                                    <p className="stepper-text">Add any PM notes or hex overrides in the textbox above.</p>
-                                  </div>
-                                  <div className="stepper-item">
-                                    <span className="stepper-badge">Step 3</span>
-                                    <p className="stepper-text">Toggle target scoping (Apply vs Bypass) and hit "Save Selections".</p>
-                                  </div>
-                                </div>
-
-                                <div className="guide-ledger-box">
-                                  <h4>💾 Local approvals database path:</h4>
-                                  <p className="guide-meta-desc">Your selections are stored in a standard JSON format that is instantly referenceable by other local agents (Claude Code, Antigravity, Codex):</p>
-                                  <code className="guide-path-code" title="Click to copy" onClick={(e) => {
-                                    navigator.clipboard.writeText(`${data.runDir}\\approvals.json`);
-                                    alert('Ledger path copied to clipboard!');
-                                  }}>
-                                    {`${data.runDir.substring(0, 45)}...\\approvals.json`}
-                                  </code>
-                                </div>
                               </div>
-                            )}
-
-                            {activeRightTab === 'architecture' && (
-                              /* ────────────────────────── ENGINE ARCHITECTURE & CHECKPOINTS TAB ────────────────────────── */
-                              <div className="architecture-tab scroll-vertical-240" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '0.75rem', fontSize: '0.8rem', color: '#1e40af' }}>
-                                  <strong>1-Mapper + 6-Agent Fan-Out Engine:</strong> Reframe runs a multi-agent pipeline to map routes, audit code/UX, rewrite files, and verify results. Override gates below to steer the pipeline direction.
-                                </div>
-
-                                <div className="architecture-stepper">
-                                  {/* Checkpoint 1 */}
-                                  <div className={`checkpoint-step ${gateOverrides.cataloging ? 'pass' : 'fail'}`}>
-                                    <span className="checkpoint-marker-circle">1</span>
-                                    <div className="checkpoint-details">
-                                      <div className="checkpoint-meta">
-                                        <span className="checkpoint-name">Stage 0: Page Mapping</span>
-                                        <span className={`checkpoint-badge ${gateOverrides.cataloging ? 'checkpoint-badge-pass' : 'checkpoint-badge-fail'}`}>
-                                          {gateOverrides.cataloging ? 'Passed' : 'Bypassed'}
-                                        </span>
-                                      </div>
-                                      <p className="checkpoint-desc">Maps absolute routes, gates, and brand tokens.</p>
-                                      <div className="checkpoint-override-action">
-                                        <span className="override-label">Enforce strict mapping path</span>
-                                        <label className="switch-container">
-                                          <input 
-                                            type="checkbox" 
-                                            className="switch-input" 
-                                            checked={gateOverrides.cataloging}
-                                            onChange={() => setGateOverrides(prev => ({ ...prev, cataloging: !prev.cataloging }))}
-                                          />
-                                          <span className="switch-track"><span className="switch-thumb"></span></span>
-                                        </label>
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  {/* Checkpoint 2 */}
-                                  <div className={`checkpoint-step ${gateOverrides.visualReview ? 'pass' : 'fail'}`}>
-                                    <span className="checkpoint-marker-circle">2</span>
-                                    <div className="checkpoint-details">
-                                      <div className="checkpoint-meta">
-                                        <span className="checkpoint-name">Stage 1-4: Visual & UX Review</span>
-                                        <span className={`checkpoint-badge ${gateOverrides.visualReview ? 'checkpoint-badge-pass' : 'checkpoint-badge-fail'}`}>
-                                          {gateOverrides.visualReview ? 'Enforced' : 'Yolo mode'}
-                                        </span>
-                                      </div>
-                                      <p className="checkpoint-desc">Audits responsiveness, styling contrast, accessibility, and brand specs.</p>
-                                      <div className="checkpoint-override-action">
-                                        <span className="override-label">Enforce compliance criteria</span>
-                                        <label className="switch-container">
-                                          <input 
-                                            type="checkbox" 
-                                            className="switch-input" 
-                                            checked={gateOverrides.visualReview}
-                                            onChange={() => setGateOverrides(prev => ({ ...prev, visualReview: !prev.visualReview }))}
-                                          />
-                                          <span className="switch-track"><span className="switch-thumb"></span></span>
-                                        </label>
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  {/* Checkpoint 3 */}
-                                  <div className={`checkpoint-step ${gateOverrides.refactoringPrompt ? 'pass' : 'fail'}`}>
-                                    <span className="checkpoint-marker-circle">3</span>
-                                    <div className="checkpoint-details">
-                                      <div className="checkpoint-meta">
-                                        <span className="checkpoint-name">Stage 5: Code Refactoring</span>
-                                        <span className={`checkpoint-badge ${gateOverrides.refactoringPrompt ? 'checkpoint-badge-pass' : 'checkpoint-badge-fail'}`}>
-                                          {gateOverrides.refactoringPrompt ? 'Resilient Prompt' : 'Rigid Git Patch'}
-                                        </span>
-                                      </div>
-                                      <p className="checkpoint-desc">Generates code upgrades based on review recommendations.</p>
-                                      <div className="checkpoint-override-action">
-                                        <span className="override-label">Use Resilient AI Prompt instead of Patch</span>
-                                        <label className="switch-container">
-                                          <input 
-                                            type="checkbox" 
-                                            className="switch-input" 
-                                            checked={gateOverrides.refactoringPrompt}
-                                            onChange={() => setGateOverrides(prev => ({ ...prev, refactoringPrompt: !prev.refactoringPrompt }))}
-                                          />
-                                          <span className="switch-track"><span className="switch-thumb"></span></span>
-                                        </label>
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  {/* Checkpoint 4 */}
-                                  <div className={`checkpoint-step ${gateOverrides.playwrightVerify ? 'pass' : 'fail'}`}>
-                                    <span className="checkpoint-marker-circle">4</span>
-                                    <div className="checkpoint-details">
-                                      <div className="checkpoint-meta">
-                                        <span className="checkpoint-name">Stage 6: Playwright Verification</span>
-                                        <span className={`checkpoint-badge ${gateOverrides.playwrightVerify ? 'checkpoint-badge-pass' : 'checkpoint-badge-fail'}`}>
-                                          {gateOverrides.playwrightVerify ? 'Strict' : 'Flexible'}
-                                        </span>
-                                      </div>
-                                      <p className="checkpoint-desc">Runs automated build tests and records visual screen health.</p>
-                                      <div className="checkpoint-override-action">
-                                        <span className="override-label">Halt entire run on verification error</span>
-                                        <label className="switch-container">
-                                          <input 
-                                            type="checkbox" 
-                                            className="switch-input" 
-                                            checked={gateOverrides.playwrightVerify}
-                                            onChange={() => setGateOverrides(prev => ({ ...prev, playwrightVerify: !prev.playwrightVerify }))}
-                                          />
-                                          <span className="switch-track"><span className="switch-thumb"></span></span>
-                                        </label>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
+                            </div>
                           </div>
-                        </div>
 
                       </div>
 
@@ -1069,6 +1007,7 @@ ${pmNotes}
                         </div>
 
                       </div>
+                    </div>
 
                       {/* UX & Design specs displayed cleanly under the preview card */}
                       <div className="specs-accordions-row">
@@ -1134,7 +1073,9 @@ ${pmNotes}
                           </div>
                         </div>
                       )}
-                    </>
+                        </>
+                      );
+                    })()
                   )}
                 </>
               );
@@ -1148,6 +1089,86 @@ ${pmNotes}
           )}
         </section>
       </main>
+
+      {/* Reframe Engine Blueprint Slide-out Drawer */}
+      <div 
+        className={`architecture-drawer-backdrop ${isArchDrawerOpen ? 'backdrop-visible' : ''}`} 
+        onClick={() => setIsArchDrawerOpen(false)}
+      ></div>
+      
+      <div className={`architecture-drawer-overlay ${isArchDrawerOpen ? 'drawer-open' : ''}`}>
+        <div className="drawer-header">
+          <h3 className="drawer-title">📖 Reframe Engine Blueprint</h3>
+          <button className="drawer-close-btn" onClick={() => setIsArchDrawerOpen(false)}>×</button>
+        </div>
+        <div className="drawer-body">
+          <p style={{ fontSize: '0.8rem', color: '#475569', lineHeight: 1.5, margin: 0 }}>
+            Reframe orchestrates a 6-agent sequential pipeline to map, audit, refactor, and verify visual and functional states across your workspace.
+          </p>
+
+          <div className="blueprint-section" style={{ borderTop: '1px solid #f1f5f9', paddingTop: '1rem', marginTop: '0.5rem' }}>
+            <h4 style={{ fontSize: '0.85rem', color: '#1e293b', marginBottom: '0.65rem', fontWeight: 600 }}>🤖 Engine Gate Overrides</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+              {Object.entries(gateOverrides).map(([gate, active]) => (
+                <div key={gate} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#334155', textTransform: 'capitalize' }}>
+                    {gate.replace(/([A-Z])/g, ' $1')}
+                  </span>
+                  <label className="switch" style={{ display: 'inline-block', width: '32px', height: '18px', position: 'relative' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={active}
+                      onChange={() => {
+                        setGateOverrides(prev => ({
+                          ...prev,
+                          [gate]: !active
+                        }));
+                      }}
+                      style={{ opacity: 0, width: 0, height: 0 }}
+                    />
+                    <span style={{
+                      position: 'absolute', cursor: 'pointer', top: 0, left: 0, right: 0, bottom: 0,
+                      backgroundColor: active ? '#2563eb' : '#cbd5e1',
+                      borderRadius: '34px', transition: '0.3s'
+                    }}>
+                      <span style={{
+                        position: 'absolute', content: '""', height: '12px', width: '12px', left: '3px', bottom: '3px',
+                        backgroundColor: 'white', borderRadius: '50%', transition: '0.3s',
+                        transform: active ? 'translateX(14px)' : 'translateX(0)'
+                      }} />
+                    </span>
+                  </label>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="blueprint-section" style={{ borderTop: '1px solid #f1f5f9', paddingTop: '1rem', marginTop: '0.5rem' }}>
+            <h4 style={{ fontSize: '0.85rem', color: '#1e293b', marginBottom: '0.5rem', fontWeight: 600 }}>📊 6-Agent Execution Lifecycle</h4>
+            <ol style={{ fontSize: '0.7rem', color: '#475569', paddingLeft: '1.1rem', display: 'flex', flexDirection: 'column', gap: '0.45rem', lineHeight: 1.4 }}>
+              <li><strong>Agent 0 (Map):</strong> Scaffolds the app structure into user-facing page components.</li>
+              <li><strong>Agent 1 (Audit):</strong> Opens headless Chromium, checks health, and catalogs UX bugs.</li>
+              <li><strong>Agent 2 (UX Design):</strong> Designs wireframe blueprints and structures clean token overrides.</li>
+              <li><strong>Agent 3 (Compliance):</strong> Assesses security, legal compliance, and color-contrast benchmarks.</li>
+              <li><strong>Agent 4 (Code Refit):</strong> Writes the git-patch diffs or compiles IDE instruction ledger.</li>
+              <li><strong>Agent 5 (Verify):</strong> Performs Playwright assertions, exercising inputs to confirm health.</li>
+            </ol>
+          </div>
+
+          <div style={{ marginTop: '1.25rem', padding: '0.65rem', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', fontSize: '0.7rem', color: '#1e40af', display: 'flex', gap: '0.35rem', lineHeight: 1.35 }}>
+            <span>💡</span>
+            <span>Manual overrides bypass validation steps in subsequent agent runs. Use with caution.</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Floating Blueprint Trigger Button */}
+      <button 
+        className="btn-blueprint-trigger"
+        onClick={() => setIsArchDrawerOpen(true)}
+      >
+        📖 Engine Blueprint
+      </button>
     </div>
   );
 }

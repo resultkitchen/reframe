@@ -1843,3 +1843,227 @@ button, input, textarea {
   gap: 0.35rem;
 }
 
+/* ────────────────────────── Zen Workflow Stepper Stepper Layout ────────────────────────── */
+.zen-stepper-funnel {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 0.5rem 0;
+}
+
+.zen-step-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.25rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.zen-step-card.active {
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.03);
+}
+
+.zen-step-card.locked {
+  opacity: 0.5;
+  filter: grayscale(80%);
+  pointer-events: none;
+  border-style: dashed;
+}
+
+.zen-step-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.zen-step-num {
+  background: #f1f5f9;
+  color: #475569;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 800;
+  flex-shrink: 0;
+  border: 1px solid #cbd5e1;
+}
+
+.zen-step-card.active .zen-step-num {
+  background: #eff6ff;
+  color: #2563eb;
+  border-color: #93c5fd;
+}
+
+.zen-step-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #1e293b;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.zen-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* ────────────────────────── Save Approvals Locking Button ────────────────────────── */
+.btn-lock-ledger {
+  width: 100%;
+  padding: 0.85rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #475569;
+}
+
+.btn-lock-ledger:hover {
+  background: #f8fafc;
+  color: #0f172a;
+  border-color: #94a3b8;
+}
+
+.btn-lock-ledger:active {
+  transform: scale(0.98);
+}
+
+.btn-lock-ledger.locked-success {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+  color: #ffffff !important;
+  border: none !important;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.2);
+}
+
+/* ────────────────────────── Slide-Out Drawer Overlay ────────────────────────── */
+.architecture-drawer-overlay {
+  position: fixed;
+  top: 0;
+  right: -420px;
+  width: 400px;
+  height: 100vh;
+  background: #ffffff;
+  border-left: 1px solid #e2e8f0;
+  box-shadow: -8px 0 32px rgba(15, 23, 42, 0.08);
+  z-index: 1000;
+  transition: right 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+}
+
+.architecture-drawer-overlay.drawer-open {
+  right: 0;
+}
+
+.drawer-header {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #fcfdfe;
+}
+
+.drawer-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.drawer-close-btn {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  cursor: pointer;
+  color: #94a3b8;
+  padding: 0.25rem;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.drawer-close-btn:hover {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.drawer-body {
+  padding: 1.5rem;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.architecture-drawer-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(15, 23, 42, 0.2);
+  backdrop-filter: blur(2px);
+  z-index: 999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.35s ease;
+}
+
+.architecture-drawer-backdrop.backdrop-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Floating Blueprint Trigger Button */
+.btn-blueprint-trigger {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  color: #ffffff;
+  border: none;
+  padding: 0.75rem 1.25rem;
+  border-radius: 9999px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.15);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  z-index: 900;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-blueprint-trigger:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.25);
+  background: linear-gradient(135deg, #334155 0%, #1e293b 100%);
+}
+
+.btn-blueprint-trigger:active {
+  transform: translateY(0);
+}
+
