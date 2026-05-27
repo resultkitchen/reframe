@@ -202,7 +202,7 @@ export interface DataCall {
  * A code-vs-schema mismatch (adjustment #2): code referencing tables/columns
  * that don't exist, dead code paths, types that don't match the DB.
  */
-export interface BrokenContract {
+export interface BrokenContract extends FindingMeta {
   kind: 'missing-table' | 'missing-column' | 'dead-path' | 'type-drift' | 'orphaned-feature';
   location: string;                       // file:line
   detail: string;
@@ -295,8 +295,59 @@ export type Severity = 'critical' | 'high' | 'medium' | 'low';
 
 export type AgentName = 'audit' | 'ux' | 'design' | 'code' | 'verify' | 'compliance';
 
+/**
+ * Fine-grained classification beyond the broad `category` axis.
+ * Agents fill this when they can; review app filters/groups on it.
+ */
+export type FindingDimension =
+  | 'functional'
+  | 'ux'
+  | 'visual-hierarchy'
+  | 'brand-voice'
+  | 'microcopy'
+  | 'responsive'
+  | 'accessibility'
+  | 'performance'
+  | 'compliance'
+  | 'data-contract'
+  | 'security';
+
+export const FINDING_DIMENSIONS: readonly FindingDimension[] = [
+  'functional',
+  'ux',
+  'visual-hierarchy',
+  'brand-voice',
+  'microcopy',
+  'responsive',
+  'accessibility',
+  'performance',
+  'compliance',
+  'data-contract',
+  'security',
+] as const;
+
+/**
+ * Dual-register fields shared across every finding-shaped output (Gap,
+ * ComplianceFinding, BrokenContract).
+ *
+ * - `plain`         : the same issue written for a non-technical reader
+ *                     (founder, designer, client). No jargon, concrete impact.
+ * - `whyItMatters`  : the user-facing consequence if shipped as-is.
+ * - `confidence`    : 0..1 — how certain the agent is the issue is real.
+ *                     Reviewers filter on this; ≥0.9 = act, 0.5–0.9 = check.
+ * - `dimension`     : finer category for grouping / filtering.
+ *
+ * All optional so legacy outputs and older agent versions remain valid.
+ */
+export interface FindingMeta {
+  plain?: string;
+  whyItMatters?: string;
+  confidence?: number;
+  dimension?: FindingDimension;
+}
+
 /** A single functional/UX gap found by Agent 1. */
-export interface Gap {
+export interface Gap extends FindingMeta {
   id: string;                             // stable id, referenced by verify
   category: 'functional' | 'ux';
   severity: Severity;
@@ -318,6 +369,13 @@ export interface AuditResult {
   /** Honest health of the page as driven (auth-redirect / error-overlay /
    * HTTP-error detection). Present whenever the page was driven. */
   health?: PageHealth;
+  /**
+   * Map of breakpoint name -> relative path of screenshot file
+   * (e.g. `{ mobile: 'audit-mobile.png', tablet: 'audit-tablet.png', ... }`).
+   * Captured by Agent 1 at multiple viewport sizes so the review app can
+   * show responsive behavior side-by-side without a separate run.
+   */
+  breakpointScreenshots?: Record<string, string>;
 }
 
 /** Agent 2 — UX proposal. */
@@ -338,7 +396,7 @@ export interface DesignSpec {
 }
 
 /** Agent 6 — Compliance. */
-export interface ComplianceFinding {
+export interface ComplianceFinding extends FindingMeta {
   ruleId: string;
   domain: string;
   severity: Severity;

@@ -10,18 +10,30 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { PageDriver } from '../browser';
+import { PageDriver, DEFAULT_BREAKPOINTS } from '../browser';
 import { matchAuthRole } from '../auth';
 import { resolveRoutePath } from '../sample-params';
-import type { AgentContext, AuditResult, Gap, Severity, PageHealth } from '../types';
+import type {
+  AgentContext,
+  AuditResult,
+  Gap,
+  Severity,
+  PageHealth,
+  FindingDimension,
+} from '../types';
+import { FINDING_DIMENSIONS } from '../types';
 
 /** Shape the model must return — kept narrow so parsing is robust. */
 interface AuditModelResponse {
   gaps: Array<{
     id?: string;
     category?: string;
+    dimension?: string;
     severity?: string;
+    confidence?: number | string;
     description?: string;
+    plain?: string;
+    whyItMatters?: string;
     recommendation?: string;
     evidence?: string[];
   }>;
@@ -39,6 +51,35 @@ function coerceCategory(value: unknown): 'functional' | 'ux' {
   return value === 'functional' || value === 'ux'
     ? value
     : 'functional';
+}
+
+function coerceDimension(value: unknown): FindingDimension | undefined {
+  if (typeof value !== 'string') return undefined;
+  return (FINDING_DIMENSIONS as readonly string[]).includes(value)
+    ? (value as FindingDimension)
+    : undefined;
+}
+
+/**
+ * Coerce a raw confidence value to [0, 1]. Accepts numbers and numeric
+ * strings ("0.9", "90%"). Returns undefined for anything we can't parse —
+ * letting callers fall through to a sensible default in the UI.
+ */
+function coerceConfidence(value: unknown): number | undefined {
+  let n: number;
+  if (typeof value === 'number') {
+    n = value;
+  } else if (typeof value === 'string') {
+    const trimmed = value.trim().replace(/%$/, '');
+    n = parseFloat(trimmed);
+    if (Number.isNaN(n)) return undefined;
+    // Treat "85" as 0.85, "0.85" as 0.85.
+    if (value.includes('%') || n > 1) n = n / 100;
+  } else {
+    return undefined;
+  }
+  if (!Number.isFinite(n)) return undefined;
+  return Math.max(0, Math.min(1, n));
 }
 
 /** Normalise a raw model gap into a contract-valid Gap. */
@@ -59,6 +100,16 @@ function normaliseGap(raw: AuditModelResponse['gaps'][number], index: number): G
   if (Array.isArray(raw.evidence) && raw.evidence.length > 0) {
     gap.evidence = raw.evidence.filter((e): e is string => typeof e === 'string');
   }
+  if (typeof raw.plain === 'string' && raw.plain.trim()) {
+    gap.plain = raw.plain.trim();
+  }
+  if (typeof raw.whyItMatters === 'string' && raw.whyItMatters.trim()) {
+    gap.whyItMatters = raw.whyItMatters.trim();
+  }
+  const conf = coerceConfidence(raw.confidence);
+  if (conf !== undefined) gap.confidence = conf;
+  const dim = coerceDimension(raw.dimension);
+  if (dim) gap.dimension = dim;
   return gap;
 }
 
@@ -94,9 +145,21 @@ function renderMd(result: AuditResult): string {
     lines.push('_No gaps identified._');
   } else {
     for (const gap of result.gaps) {
-      lines.push(`### ${gap.id} — ${gap.category} / ${gap.severity}`);
+      const conf = typeof gap.confidence === 'number'
+        ? ` · confidence ${Math.round(gap.confidence * 100)}%`
+        : '';
+      const dim = gap.dimension ? ` · ${gap.dimension}` : '';
+      lines.push(`### ${gap.id} — ${gap.category}${dim} / ${gap.severity}${conf}`);
       lines.push('');
-      lines.push(`**Description:** ${gap.description}`);
+      if (gap.plain) {
+        lines.push(`**In plain English:** ${gap.plain}`);
+        lines.push('');
+      }
+      if (gap.whyItMatters) {
+        lines.push(`**Why it matters:** ${gap.whyItMatters}`);
+        lines.push('');
+      }
+      lines.push(`**Technical:** ${gap.description}`);
       lines.push('');
       lines.push(`**Recommendation:** ${gap.recommendation}`);
       if (gap.evidence && gap.evidence.length > 0) {
@@ -107,10 +170,24 @@ function renderMd(result: AuditResult): string {
       lines.push('');
     }
   }
+
+  if (result.breakpointScreenshots && Object.keys(result.breakpointScreenshots).length > 0) {
+    lines.push('## Responsive screenshots');
+    for (const [name, file] of Object.entries(result.breakpointScreenshots)) {
+      lines.push(`- ${name}: \`${file}\``);
+    }
+    lines.push('');
+  }
   return lines.join('\n');
 }
 
-function writeOutputs(ctx: AgentContext, result: AuditResult, screenshot?: string, html?: string): void {
+function writeOutputs(
+  ctx: AgentContext,
+  result: AuditResult,
+  screenshot?: string,
+  html?: string,
+  breakpointShots?: Record<string, string>,
+): void {
   fs.mkdirSync(ctx.pageDir, { recursive: true });
   fs.writeFileSync(
     path.join(ctx.pageDir, 'audit.json'),
@@ -123,6 +200,21 @@ function writeOutputs(ctx: AgentContext, result: AuditResult, screenshot?: strin
       fs.writeFileSync(path.join(ctx.pageDir, 'audit.png'), Buffer.from(screenshot, 'base64'));
     } catch (err) {
       console.error(`[agent1-audit] failed to write screenshot to disk: ${String(err)}`);
+    }
+  }
+  if (breakpointShots) {
+    for (const [name, b64] of Object.entries(breakpointShots)) {
+      if (!b64) continue;
+      try {
+        fs.writeFileSync(
+          path.join(ctx.pageDir, `audit-${name}.png`),
+          Buffer.from(b64, 'base64'),
+        );
+      } catch (err) {
+        console.error(
+          `[agent1-audit] failed to write breakpoint screenshot ${name}: ${String(err)}`,
+        );
+      }
     }
   }
   if (html) {
@@ -141,6 +233,17 @@ const SYSTEM_INSTRUCTION = `You are a collaborative panel of three world-class e
 3. Dr. Marcus Thorne (Compliance & Accessibility Specialist): Focuses on legal guidelines (e.g., TCPA, FTC, HIPAA), WCAG 2.2 accessibility, and secure markup standards.
 
 Arthur, Elena, and Marcus must collaborate and align on their findings. Provide a unified, high-density, evidence-based list of functional and UX gaps. Tie every functional gap directly to console errors, network failures, or failed clicks where possible. Rank by real user impact.
+
+DUAL-REGISTER OUTPUT — for EVERY gap, write BOTH:
+- "description": the technical statement for an engineer (file:line where possible, terms of art OK)
+- "plain":       the same issue, in plain English, for a non-technical product owner / founder / client. NO jargon. NO acronyms (or expand them inline the first time). Concrete, conversational, kind. Lead with the user-visible consequence, not the technical category. Bad: "Type drift on leads.created_at." Good: "Dates on the leads list will display wrong because the code expects one date format and the database stores another."
+
+For EVERY gap also write:
+- "whyItMatters": the concrete real-world consequence if shipped unfixed. Who is affected, when, and how. One or two sentences. Avoid restating the description.
+- "confidence":   a number in [0, 1]. 0.95 = "I'd stake my reputation on this." 0.8 = "strong signal, worth fixing." 0.5 = "worth a look but I'm not sure." Be honest — overconfidence damages trust.
+- "dimension":    a fine-grained classifier from: functional | ux | visual-hierarchy | brand-voice | microcopy | responsive | accessibility | performance | data-contract | security. Use the most specific applicable dimension.
+
+TONE — write findings the way a senior designer gives a junior a crit: warm, specific, opinionated, never blame-y. Use "Try" not "Fix." Lead with the user, never with the code.
 
 Return STRICT JSON only — no prose, no markdown fences.`;
 
@@ -183,14 +286,18 @@ Return JSON of EXACTLY this shape:
     {
       "id": "g1",                       // stable id: g1, g2, g3, ...
       "category": "functional" | "ux",
+      "dimension": "functional" | "ux" | "visual-hierarchy" | "brand-voice" | "microcopy" | "responsive" | "accessibility" | "performance" | "data-contract" | "security",
       "severity": "critical" | "high" | "medium" | "low",
-      "description": "what is wrong, observed concretely",
-      "recommendation": "what to change to fix it",
+      "confidence": 0.95,               // your honest confidence in [0, 1] that this is a real issue
+      "description": "TECHNICAL: what is wrong, observed concretely (for an engineer)",
+      "plain":       "PLAIN ENGLISH: same issue, no jargon, written for a non-technical reader. Lead with the user-visible consequence.",
+      "whyItMatters":"Concrete real-world consequence if shipped unfixed. Who is affected and how.",
+      "recommendation": "What to change to fix it",
       "evidence": ["console error text or exercised interaction that proves it"]
     }
   ]
 }
-Use sequential ids starting at g1. "evidence" is optional but include it whenever a console error or interaction supports the gap. If the page is fully sound, return {"gaps": []}.`;
+Use sequential ids starting at g1. "evidence" is optional but include it whenever a console error or interaction supports the gap. "plain", "whyItMatters", "confidence", and "dimension" are REQUIRED for every gap. If the page is fully sound, return {"gaps": []}.`;
 }
 
 export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
@@ -241,6 +348,8 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
   let authRole: string | undefined;
   let loginNote: string | undefined;
   let health: PageHealth | undefined;
+  const breakpointShots: Record<string, string> = {};
+  const breakpointFiles: Record<string, string> = {};
 
   try {
     driver = await PageDriver.launch({
@@ -293,6 +402,26 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
     }
 
     health = await driver.health(routePath, ctx.config.auth?.loginUrl);
+
+    // Multi-breakpoint capture. Walk DEFAULT_BREAKPOINTS in order; each call
+    // resizes the viewport on the live page (no re-navigation) and captures a
+    // full-page screenshot at that size. A failure on one breakpoint never
+    // aborts the rest — partial coverage is more useful than none.
+    if (screenshot) {
+      for (const bp of DEFAULT_BREAKPOINTS) {
+        try {
+          const shot = await driver.screenshotAt(bp.width, bp.height);
+          if (shot) {
+            breakpointShots[bp.name] = shot;
+            breakpointFiles[bp.name] = `audit-${bp.name}.png`;
+          }
+        } catch (err) {
+          console.error(
+            `[agent1-audit] breakpoint capture failed for ${bp.name}: ${String(err)}`,
+          );
+        }
+      }
+    }
   } catch (err) {
     driveError = `Failed to drive page: ${String(err)}`;
   } finally {
@@ -370,8 +499,11 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
     interactionsExercised: interactions,
     gaps,
     ...(authRole ? { authRole } : {}),
+    ...(Object.keys(breakpointFiles).length > 0
+      ? { breakpointScreenshots: breakpointFiles }
+      : {}),
   };
 
-  writeOutputs(ctx, result, screenshot, html);
+  writeOutputs(ctx, result, screenshot, html, breakpointShots);
   return result;
 }

@@ -18,10 +18,32 @@ import type {
   ComplianceFinding,
   ComplianceResult,
   ConstraintRule,
+  FindingDimension,
   Severity,
 } from '../types';
+import { FINDING_DIMENSIONS } from '../types';
 
 const VALID_SEVERITY: Severity[] = ['critical', 'high', 'medium', 'low'];
+
+function coerceConfidence(value: unknown): number | undefined {
+  let n: number;
+  if (typeof value === 'number') n = value;
+  else if (typeof value === 'string') {
+    const t = value.trim().replace(/%$/, '');
+    n = parseFloat(t);
+    if (Number.isNaN(n)) return undefined;
+    if (value.includes('%') || n > 1) n = n / 100;
+  } else return undefined;
+  if (!Number.isFinite(n)) return undefined;
+  return Math.max(0, Math.min(1, n));
+}
+
+function coerceDimension(value: unknown): FindingDimension | undefined {
+  if (typeof value !== 'string') return undefined;
+  return (FINDING_DIMENSIONS as readonly string[]).includes(value)
+    ? (value as FindingDimension)
+    : undefined;
+}
 
 /** Does a constraint rule apply to this page? */
 function ruleApplies(rule: ConstraintRule, route: string, slug: string): boolean {
@@ -126,6 +148,10 @@ interface ComplianceJsonResponse {
     location?: unknown;
     problem?: unknown;
     requiredFix?: unknown;
+    plain?: unknown;
+    whyItMatters?: unknown;
+    confidence?: unknown;
+    dimension?: unknown;
   }>;
 }
 
@@ -168,7 +194,17 @@ export async function runCompliance(ctx: AgentContext): Promise<ComplianceResult
     'text (TCPA/GDPR), missing required disclosures (FTC, HIPAA), fabricated or ' +
     'unsubstantiated claims, misrepresented pricing or guarantees, dark patterns. ' +
     'Evaluate ONLY against the supplied rules. Do not invent rules. Report a ' +
-    'finding only when there is a concrete violation in the supplied source. ' +
+    'finding only when there is a concrete violation in the supplied source.\n\n' +
+    'DUAL-REGISTER OUTPUT — for EVERY finding, also emit:\n' +
+    '- "plain":       the same violation, in plain English, for a non-technical ' +
+    'reader (founder / client / product owner). NO acronyms (or expand inline). ' +
+    'Lead with the user-visible or legal consequence, not the rule id.\n' +
+    '- "whyItMatters": the real-world consequence if shipped — what regulator / ' +
+    'user / partner is affected, when, and how. Avoid restating the problem.\n' +
+    '- "confidence":   a number in [0, 1] reflecting how certain you are the ' +
+    'violation is real. Be honest — overconfidence damages trust.\n' +
+    '- "dimension":    one of: compliance | brand-voice | microcopy | ' +
+    'accessibility | security. Use the most specific applicable dimension.\n\n' +
     'Respond with STRICT JSON only — no prose, no markdown fences.';
 
   const prompt = [
@@ -194,14 +230,18 @@ export async function runCompliance(ctx: AgentContext): Promise<ComplianceResult
     '    {',
     '      "ruleId": "<id of the violated rule, must be one of the rule ids above>",',
     '      "domain": "<the rule domain>",',
+    '      "dimension": "compliance|brand-voice|microcopy|accessibility|security",',
     '      "severity": "critical|high|medium|low",',
+    '      "confidence": 0.95,',
     '      "location": "<file:line, e.g. ' + ctx.page.filePath + ':42>",',
-    '      "problem": "<what is legally/factually wrong, concretely>",',
-    '      "requiredFix": "<the specific change that makes it compliant>"',
+    '      "problem":      "<TECHNICAL: what is legally/factually wrong, concretely (engineer-facing)>",',
+    '      "plain":        "<PLAIN ENGLISH: same violation for a non-technical reader. No jargon.>",',
+    '      "whyItMatters": "<real-world consequence if shipped. Who is affected and how.>",',
+    '      "requiredFix":  "<the specific change that makes it compliant>"',
     '    }',
     '  ]',
     '}',
-    'If there are no violations, return {"findings": []}.',
+    '"plain", "whyItMatters", "confidence", and "dimension" are REQUIRED for every finding. If there are no violations, return {"findings": []}.',
   ].join('\n');
 
   let findings: ComplianceFinding[] = [];
@@ -219,7 +259,7 @@ export async function runCompliance(ctx: AgentContext): Promise<ComplianceResult
       .map((f): ComplianceFinding => {
         const ruleId = typeof f.ruleId === 'string' ? f.ruleId : 'unknown';
         const rule = matchedRules.find((r) => r.id === ruleId);
-        return {
+        const finding: ComplianceFinding = {
           ruleId,
           domain:
             typeof f.domain === 'string' && f.domain !== ''
@@ -233,6 +273,20 @@ export async function runCompliance(ctx: AgentContext): Promise<ComplianceResult
           problem: typeof f.problem === 'string' ? f.problem : '',
           requiredFix: typeof f.requiredFix === 'string' ? f.requiredFix : '',
         };
+        if (typeof f.plain === 'string' && f.plain.trim()) {
+          finding.plain = f.plain.trim();
+        }
+        if (typeof f.whyItMatters === 'string' && f.whyItMatters.trim()) {
+          finding.whyItMatters = f.whyItMatters.trim();
+        }
+        const conf = coerceConfidence(f.confidence);
+        if (conf !== undefined) finding.confidence = conf;
+        const dim = coerceDimension(f.dimension);
+        if (dim) finding.dimension = dim;
+        // Default compliance findings to the 'compliance' dimension when the
+        // model didn't emit one — keeps the review-app filter complete.
+        if (!finding.dimension) finding.dimension = 'compliance';
+        return finding;
       })
       // Drop hallucinated findings that reference rules not in scope.
       .filter((f) => f.ruleId === 'unknown' || validIds.has(f.ruleId))

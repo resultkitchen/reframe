@@ -229,7 +229,9 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
       return;
     }
 
-    // 3. GET /api/screenshot/:slug — Serve individual screen PNG
+    // 3. GET /api/screenshot/:slug[?breakpoint=mobile|tablet|desktop]
+    //    Serves the default audit.png, or a specific breakpoint file when
+    //    the optional `breakpoint` query parameter is set.
     if (pathname.startsWith('/api/screenshot/') && req.method === 'GET') {
       const slug = pathname.substring('/api/screenshot/'.length);
       if (slug.includes('..') || slug.includes('/') || slug.includes('\\')) {
@@ -238,7 +240,19 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
         return;
       }
 
-      const screenshotPath = path.join(absRunDir, 'pages', slug, 'audit.png');
+      const breakpoint = url.searchParams.get('breakpoint');
+      let filename = 'audit.png';
+      if (breakpoint) {
+        // Strict safelist to prevent path traversal via the query parameter.
+        if (!/^[a-z0-9-]{1,32}$/i.test(breakpoint)) {
+          res.writeHead(400);
+          res.end('Malformed breakpoint name');
+          return;
+        }
+        filename = `audit-${breakpoint}.png`;
+      }
+
+      const screenshotPath = path.join(absRunDir, 'pages', slug, filename);
       if (fs.existsSync(screenshotPath)) {
         res.writeHead(200, { 'Content-Type': 'image/png' });
         fs.createReadStream(screenshotPath).pipe(res);
