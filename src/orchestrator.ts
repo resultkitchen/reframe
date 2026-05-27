@@ -14,6 +14,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as readline from 'node:readline';
 import { spawnSync } from 'node:child_process';
 
 import { GeminiClient } from './gemini';
@@ -348,6 +349,33 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       console.log(`    3. Re-run the audit:  reframe rebuild ${config.target} --brand config/brand.json`);
       console.log('─────────────────────────────────────────────────────────────────');
       console.log('');
+
+      // Interactive pin: if stdin is a TTY (a human is at the keyboard, not
+      // CI), offer to write config/brand.json directly so the operator can
+      // pin and re-run in one step. Silent in non-TTY contexts (CI / pipes).
+      if (process.stdin.isTTY && process.stdout.isTTY) {
+        const targetDir = config.isLocalPath
+          ? path.resolve(config.target)
+          : process.cwd();
+        const pinPath = path.join(targetDir, 'config', 'brand.json');
+        const answer = await promptYesNo(
+          `Pin this brand to ${pinPath} now? (y/N) `,
+        );
+        if (answer) {
+          try {
+            const pinnedBrand = { ...brand, pinned: true };
+            fs.mkdirSync(path.dirname(pinPath), { recursive: true });
+            fs.writeFileSync(pinPath, JSON.stringify(pinnedBrand, null, 2), 'utf8');
+            console.log('');
+            console.log(`[reframe] ✓ pinned to ${pinPath}`);
+            console.log(`[reframe]   re-run with:  reframe rebuild ${config.target} --brand ${pinPath}`);
+            console.log('');
+          } catch (err) {
+            extraAlerts.push(`Interactive pin to ${pinPath} failed: ${errMsg(err)}`);
+            console.error(`[reframe] could not write ${pinPath}: ${errMsg(err)}`);
+          }
+        }
+      }
 
       // Clean scratch and write a minimal manifest so downstream tooling
       // (the review UI, CI) can detect a bootstrap run via its empty
@@ -1155,4 +1183,26 @@ function buildPrBody(
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Ask a yes/no question on stdin. Resolves true on y/Y/yes (any case),
+ * false on anything else — including empty input. Treats the answer as
+ * "no" by default so accidental Enter never auto-pins.
+ *
+ * Caller is responsible for first checking process.stdin.isTTY — calling
+ * this in CI / piped contexts would hang waiting for input.
+ */
+function promptYesNo(question: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    rl.question(question, (answer) => {
+      rl.close();
+      const trimmed = answer.trim().toLowerCase();
+      resolve(trimmed === 'y' || trimmed === 'yes');
+    });
+  });
 }
