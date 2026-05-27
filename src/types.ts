@@ -154,6 +154,15 @@ export interface PipelineConfig {
    */
   bootstrapOnly: boolean;
   /**
+   * When true, runPipeline skips agents 1-4 (audit/ux/design/code/compliance)
+   * and only runs Agent 5 (verify) against the resumed run's existing
+   * audit results. Used by the `reframe verify` subcommand for tight
+   * incremental dev loops — fix something by hand, re-verify in seconds
+   * without re-running the full pipeline. Implies --apply-mode propose
+   * (no commit, no PR — verify is read-only by nature).
+   */
+  verifyOnly: boolean;
+  /**
    * In `pr` mode, also post a top-level PR conversation comment with the
    * top-N plain-English findings — separately from the PR body, which
    * carries the full manifest. The comment is what GitHub sends as a

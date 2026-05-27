@@ -545,22 +545,60 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
 
       console.log(`[${page.slug}] starting (${page.route}).`);
 
-      // DAG: audit → (ux → design); compliance ∥ that chain; then code; then verify.
-      const auditChain = (async () => {
-        ctx.audit = (await runAgent('audit', () => runAudit(ctx))) ?? ctx.audit;
-        ctx.ux = (await runAgent('ux', () => runUx(ctx))) ?? ctx.ux;
-        ctx.design = (await runAgent('design', () => runDesign(ctx))) ?? ctx.design;
-      })();
-      const complianceChain = (async () => {
-        ctx.compliance =
-          (await runAgent('compliance', () => runCompliance(ctx))) ?? ctx.compliance;
-      })();
-      await Promise.all([auditChain, complianceChain]);
+      // --verify-only: skip the upstream DAG entirely and re-hydrate audit
+      // (and optionally compliance) from the resumed run's on-disk artifacts.
+      // Agent 5 needs ctx.audit.gaps to know what to verify against — without
+      // it, verify falls back to "trivially pass if the page drives clean",
+      // which isn't what `reframe verify` asks for.
+      if (config.verifyOnly) {
+        const pageDir = path.join(config.runDir, 'pages', page.slug);
+        const auditJsonPath = path.join(pageDir, 'audit.json');
+        if (fs.existsSync(auditJsonPath)) {
+          try {
+            ctx.audit = JSON.parse(fs.readFileSync(auditJsonPath, 'utf8')) as AuditResult;
+          } catch (err) {
+            extraAlerts.push(
+              `[${page.slug}] could not load audit.json for --verify-only: ${errMsg(err)}`,
+            );
+          }
+        }
+        const complianceJsonPath = path.join(pageDir, 'compliance.json');
+        if (fs.existsSync(complianceJsonPath)) {
+          try {
+            ctx.compliance = JSON.parse(fs.readFileSync(complianceJsonPath, 'utf8')) as ComplianceResult;
+          } catch {
+            /* compliance is optional for verify; ignore parse errors */
+          }
+        }
+        // Skip-mark every upstream agent so the page state reflects what
+        // we actually did (only verify ran).
+        mark('audit', ctx.audit ? 'done' : 'skipped');
+        mark('ux', 'skipped');
+        mark('design', 'skipped');
+        mark('code', 'skipped');
+        mark('compliance', ctx.compliance ? 'done' : 'skipped');
+      } else {
+        // DAG: audit → (ux → design); compliance ∥ that chain; then code; then verify.
+        const auditChain = (async () => {
+          ctx.audit = (await runAgent('audit', () => runAudit(ctx))) ?? ctx.audit;
+          ctx.ux = (await runAgent('ux', () => runUx(ctx))) ?? ctx.ux;
+          ctx.design = (await runAgent('design', () => runDesign(ctx))) ?? ctx.design;
+        })();
+        const complianceChain = (async () => {
+          ctx.compliance =
+            (await runAgent('compliance', () => runCompliance(ctx))) ?? ctx.compliance;
+        })();
+        await Promise.all([auditChain, complianceChain]);
+      }
 
       // 'review' mode stops at the four review agents: no code, no verify —
       // the operator approves proposed-changes.md before any apply pass.
+      // --verify-only skips the gap-filter + code agent and goes straight
+      // to verify against the rehydrated audit results.
       let verify: VerifyResult | undefined;
-      if (config.applyMode !== 'review') {
+      if (config.verifyOnly) {
+        verify = await runAgent('verify', () => runVerify(ctx));
+      } else if (config.applyMode !== 'review') {
         if (ctx.audit && approval?.gaps) {
           const originalGapCount = ctx.audit.gaps.length;
           ctx.audit.gaps = ctx.audit.gaps.filter(g => {
@@ -682,9 +720,11 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       .map((p) => pageEntries.find((e) => e.slug === p.slug))
       .filter((e): e is PageManifestEntry => Boolean(e));
 
-    /* (10) Commit + PR in 'pr' mode. */
+    /* (10) Commit + PR in 'pr' mode. Skipped on --verify-only: verify
+       writes no code changes, so there is nothing to commit and a PR
+       would be empty noise. */
     let prUrl: string | undefined;
-    if (config.applyMode === 'pr') {
+    if (config.applyMode === 'pr' && !config.verifyOnly) {
       const passCount = orderedEntries.filter((e) => e.pass).length;
       const commitMsg =
         `reframe: ${passCount}/${orderedEntries.length} pages passing`;
@@ -737,10 +777,12 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
     /* (11) Test scaffold. Skipped in review mode — a review pass applies no
        code and (under --real-env) must not seed accounts into a real backend. */
     let testUsers: TestUser[] = [];
-    if (config.applyMode === 'review') {
+    if (config.applyMode === 'review' || config.verifyOnly) {
       state.testScaffold = 'skipped';
       saveState(config.runDir, state);
-      console.log(`[reframe] review mode — test scaffold skipped.`);
+      console.log(
+        `[reframe] ${config.verifyOnly ? '--verify-only' : 'review mode'} — test scaffold skipped.`,
+      );
     } else if (
       resuming &&
       state.testScaffold === 'done' &&

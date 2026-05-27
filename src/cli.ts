@@ -32,6 +32,7 @@ Reframe — portable SaaS architectural refactoring engine (1 mapper + 6-agent f
 USAGE
   reframe rebuild <github-url|local-path> [flags]
   reframe bootstrap <github-url|local-path> [flags]
+  reframe verify <run-dir>
   reframe show-brand <run-dir>
   reframe pin <run-dir> [--out <path>] [--force]
   reframe init [target-path]
@@ -113,6 +114,16 @@ SUBCOMMANDS
                               when stdin is a TTY — use this from CI /
                               shell scripts. Refuses to overwrite an
                               existing pinned brand unless --force is set.
+
+  verify <run-dir>            Re-run only Agent 5 (verify) against an
+                              existing run. Loads the target out of the
+                              run's manifest.json, clears verify
+                              checkpoint state, and re-runs verify against
+                              the on-disk audit results. The tight dev
+                              loop: fix a finding by hand, verify in
+                              seconds without re-running the full pipeline.
+                              Always --apply-mode propose (verify is
+                              read-only). Exits 0 when every page verifies.
 
 ENV
   GEMINI_API_KEY / GOOGLE_API_KEY   Gemini API key (required for Gemini runs).
@@ -214,6 +225,22 @@ async function main(): Promise<number> {
     return runPin(subcommandArgv.slice(1));
   }
 
+  // Handle 'verify' command — re-run only Agent 5 against an existing
+  // run dir. Reads the target out of the run's manifest.json, clears
+  // verify checkpoint state so resume picks it back up, then delegates
+  // to runPipeline with --verify-only + --apply-mode propose (no
+  // commit, no PR — verify is read-only).
+  if (subcommandArgv[0] === 'verify') {
+    const runDir = subcommandArgv[1];
+    if (!runDir) {
+      console.error('Error: "verify" command requires a target run directory.');
+      console.error('Usage: reframe verify <run-dir>');
+      return 1;
+    }
+    const { runVerifyOnly } = await import('./verify');
+    return runVerifyOnly(runDir, subcommandArgv.slice(2));
+  }
+
   // Handle 'bootstrap' command — thin alias for `rebuild <target> --bootstrap-only`.
   // Keeps the verb explicit in the docs and on the user's shell history.
   if (subcommandArgv[0] === 'bootstrap') {
@@ -235,7 +262,7 @@ async function main(): Promise<number> {
   }
 
   if (subcommandArgv[0] !== 'rebuild') {
-    console.error(`Unknown command: "${subcommandArgv[0]}". Expected "rebuild", "bootstrap", "pin", "init", "review", or "show-brand".`);
+    console.error(`Unknown command: "${subcommandArgv[0]}". Expected "rebuild", "bootstrap", "verify", "pin", "init", "review", or "show-brand".`);
     console.error(`Run "reframe --help" for usage.`);
     return 1;
   }
