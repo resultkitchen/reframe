@@ -33,6 +33,7 @@ USAGE
   reframe rebuild <github-url|local-path> [flags]
   reframe bootstrap <github-url|local-path> [flags]
   reframe show-brand <run-dir>
+  reframe pin <run-dir> [--out <path>] [--force]
   reframe init [target-path]
   reframe review <run-dir> [--port <number>]
   reframe --help
@@ -104,6 +105,14 @@ SUBCOMMANDS
                               dir. Useful right after \`reframe bootstrap\`
                               to inspect what the engine inferred before
                               firing up the review UI.
+
+  pin <run-dir>               Write the bootstrapped brand from a completed
+    [--out <path>] [--force]  run to config/brand.json (or --out <path>)
+                              with pinned:true. Non-interactive equivalent
+                              of the y/N prompt \`reframe bootstrap\` shows
+                              when stdin is a TTY — use this from CI /
+                              shell scripts. Refuses to overwrite an
+                              existing pinned brand unless --force is set.
 
 ENV
   GEMINI_API_KEY / GOOGLE_API_KEY   Gemini API key (required for Gemini runs).
@@ -196,6 +205,15 @@ async function main(): Promise<number> {
     return showBrand(runDir);
   }
 
+  // Handle 'pin' command — non-interactive equivalent of the prompt the
+  // `bootstrap` subcommand shows when stdin is a TTY. Same write
+  // semantics; works in CI / shell scripts where the interactive path
+  // would hang or be silently skipped.
+  if (subcommandArgv[0] === 'pin') {
+    const { runPin } = await import('./pin');
+    return runPin(subcommandArgv.slice(1));
+  }
+
   // Handle 'bootstrap' command — thin alias for `rebuild <target> --bootstrap-only`.
   // Keeps the verb explicit in the docs and on the user's shell history.
   if (subcommandArgv[0] === 'bootstrap') {
@@ -217,7 +235,7 @@ async function main(): Promise<number> {
   }
 
   if (subcommandArgv[0] !== 'rebuild') {
-    console.error(`Unknown command: "${subcommandArgv[0]}". Expected "rebuild", "bootstrap", "init", "review", or "show-brand".`);
+    console.error(`Unknown command: "${subcommandArgv[0]}". Expected "rebuild", "bootstrap", "pin", "init", "review", or "show-brand".`);
     console.error(`Run "reframe --help" for usage.`);
     return 1;
   }
