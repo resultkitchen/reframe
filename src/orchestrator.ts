@@ -577,6 +577,37 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
           }
         }
 
+        // Mirror the gap-skip flow for compliance findings the reviewer
+        // marked as skip from the Run Overview. Keyed `${ruleId}::${location}`
+        // so multiple findings of the same rule at different lines can be
+        // decided independently. Findings that were dismissed don't flow
+        // into agent 4's prompt (which reads ctx.compliance.findings) and
+        // therefore don't pull code changes for them.
+        if (ctx.compliance && approval?.complianceFindings) {
+          const originalCount = ctx.compliance.findings.length;
+          ctx.compliance.findings = ctx.compliance.findings.filter((f) => {
+            const key = `${f.ruleId}::${f.location}`;
+            if (approval.complianceFindings?.[key] === 'skip') {
+              console.log(`[${page.slug}] skipping compliance finding ${key} per approvals.json`);
+              return false;
+            }
+            return true;
+          });
+          const skipped = originalCount - ctx.compliance.findings.length;
+          if (skipped > 0) {
+            console.log(
+              `[${page.slug}] filtered compliance findings: ${originalCount} -> ` +
+                `${ctx.compliance.findings.length} (${skipped} skipped)`,
+            );
+            // Recompute the clean flag — a previously-dirty page becomes
+            // clean if every remaining finding is below the critical/high
+            // bar (matches agent6-compliance's own clean computation).
+            ctx.compliance.clean = !ctx.compliance.findings.some(
+              (f) => f.severity === 'critical' || f.severity === 'high',
+            );
+          }
+        }
+
         ctx.code = (await runAgent('code', () => runCode(ctx))) ?? ctx.code;
         verify = await runAgent('verify', () => runVerify(ctx));
       } else {
@@ -1173,6 +1204,12 @@ function buildPrBody(
           .map(([gapId, dec]) => `\`${gapId}\`: ${dec === 'apply' ? 'apply' : 'skip'}`)
           .join(', ');
         lines.push(`  - **Gap Decisions**: ${gapDecisions}`);
+      }
+      if (approval.complianceFindings && Object.keys(approval.complianceFindings).length > 0) {
+        const complianceDecisions = Object.entries(approval.complianceFindings)
+          .map(([key, dec]) => `\`${key}\`: ${dec === 'apply' ? 'apply' : 'skip'}`)
+          .join(', ');
+        lines.push(`  - **Compliance Finding Decisions**: ${complianceDecisions}`);
       }
     }
   }
