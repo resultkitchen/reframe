@@ -146,6 +146,13 @@ export default function App() {
   // 0 = show everything (including findings without a confidence score).
   const [minConfidence, setMinConfidence] = useState<number>(0);
 
+  // EXCLUSION filters set by clicking "Apply" on a pattern-insight card.
+  // Independent from the inclusion chips above — applied as an additional
+  // "and then drop anything in here" pass. Persists for the session;
+  // dismissable via the same insight card or the chips above.
+  const [hiddenDimensions, setHiddenDimensions] = useState<Set<string>>(new Set());
+  const [hiddenSeverities, setHiddenSeverities] = useState<Set<string>>(new Set());
+
   // Active breakpoint for the preview surface. 'default' uses the engine's
   // canonical audit.png; named keys map to audit-<name>.png served by the
   // /api/screenshot endpoint's ?breakpoint= query param.
@@ -540,9 +547,11 @@ ${pmNotes}
       if (severityFilter.size > 0 && !severityFilter.has(gap.severity)) return false;
       if (dimensionFilter.size > 0 && (!gap.dimension || !dimensionFilter.has(gap.dimension))) return false;
       if (minConfidence > 0 && (gap.confidence ?? 1) < minConfidence) return false;
+      if (hiddenDimensions.size > 0 && gap.dimension && hiddenDimensions.has(gap.dimension)) return false;
+      if (hiddenSeverities.size > 0 && hiddenSeverities.has(gap.severity)) return false;
       return true;
     });
-  }, [activePage, severityFilter, dimensionFilter, minConfidence]);
+  }, [activePage, severityFilter, dimensionFilter, minConfidence, hiddenDimensions, hiddenSeverities]);
 
   /**
    * Set of dimensions present on the current page — used to render only
@@ -816,8 +825,15 @@ ${pmNotes}
       }
     }
     all.sort((a, b) => b.impact - a.impact);
-    return { items: all, counts, pagesWithFindings, totalPages: data?.pages.length ?? 0 };
-  }, [data]);
+    // Apply the same exclusion-filters that the per-page card respects, so
+    // hides set by "Apply" on a pattern insight take effect cross-page too.
+    const visible = all.filter((item) => {
+      if (item.dimension && hiddenDimensions.has(item.dimension)) return false;
+      if (hiddenSeverities.has(item.severity)) return false;
+      return true;
+    });
+    return { items: visible, counts, pagesWithFindings, totalPages: data?.pages.length ?? 0, totalUnfiltered: all.length };
+  }, [data, hiddenDimensions, hiddenSeverities]);
 
   return (
     <div className="app-container">
@@ -996,8 +1012,11 @@ ${pmNotes}
 
               {/* Cross-run pattern insights — only renders when telemetry
                   returned actionable patterns (skip-rate >= 70% with
-                  sample >= 5). Fail-open: hidden when telemetry is null,
-                  empty, or the endpoint errored. */}
+                  sample >= 5). Each insight has an "Apply" button that
+                  adds the offending dimension / severity to the
+                  exclusion set, making subsequent views drop those
+                  findings automatically. Fail-open: hidden when
+                  telemetry is null, empty, or the endpoint errored. */}
               {telemetry && telemetry.insights.length > 0 && (
                 <div style={{
                   marginBottom: '1.25rem',
@@ -1014,16 +1033,89 @@ ${pmNotes}
                       {telemetry.totalDecisions.toLocaleString()} decisions analyzed · skip-rate ≥ 70%
                     </span>
                   </div>
-                  <ul style={{ margin: 0, paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                    {telemetry.insights.slice(0, 4).map((ins, i) => (
-                      <li key={`${ins.axis}::${ins.value}::${i}`} style={{ fontSize: '0.82rem', lineHeight: 1.5, color: '#14532d' }}>
-                        <strong style={{ fontFamily: 'monospace', fontSize: '0.78rem', background: '#dcfce7', padding: '0.1rem 0.4rem', borderRadius: '4px', marginRight: '0.4rem' }}>
-                          {ins.axis === 'dimension' ? ins.value : `severity:${ins.value}`}
-                        </strong>
-                        {ins.headline}
-                      </li>
-                    ))}
-                  </ul>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                    {telemetry.insights.slice(0, 4).map((ins, i) => {
+                      const isApplied =
+                        ins.axis === 'dimension'
+                          ? hiddenDimensions.has(ins.value)
+                          : hiddenSeverities.has(ins.value);
+                      const toggle = () => {
+                        if (ins.axis === 'dimension') {
+                          setHiddenDimensions((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(ins.value)) next.delete(ins.value);
+                            else next.add(ins.value);
+                            return next;
+                          });
+                        } else {
+                          setHiddenSeverities((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(ins.value)) next.delete(ins.value);
+                            else next.add(ins.value);
+                            return next;
+                          });
+                        }
+                      };
+                      return (
+                        <div
+                          key={`${ins.axis}::${ins.value}::${i}`}
+                          style={{
+                            display: 'flex', gap: '0.6rem', alignItems: 'center',
+                            padding: '0.5rem 0.6rem',
+                            background: isApplied ? '#fff' : 'transparent',
+                            border: isApplied ? '1px solid #bbf7d0' : '1px solid transparent',
+                            borderRadius: '6px',
+                          }}
+                        >
+                          <strong style={{ fontFamily: 'monospace', fontSize: '0.72rem', background: '#dcfce7', padding: '0.15rem 0.45rem', borderRadius: '4px', whiteSpace: 'nowrap' }}>
+                            {ins.axis === 'dimension' ? ins.value : `severity:${ins.value}`}
+                          </strong>
+                          <span style={{ flex: 1, fontSize: '0.82rem', lineHeight: 1.5, color: '#14532d' }}>
+                            {ins.headline}
+                          </span>
+                          <button
+                            onClick={toggle}
+                            style={{
+                              padding: '0.3rem 0.65rem', fontSize: '0.72rem', fontWeight: 600,
+                              borderRadius: '6px', cursor: 'pointer', whiteSpace: 'nowrap',
+                              border: '1px solid ' + (isApplied ? '#34d399' : '#86efac'),
+                              background: isApplied ? '#ecfdf5' : '#fff',
+                              color: isApplied ? '#065f46' : '#166534',
+                            }}
+                            title={isApplied ? 'Restore — show these findings again' : 'Hide these findings from every view in this session'}
+                          >
+                            {isApplied ? '✓ Applied' : 'Apply hide'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {(hiddenDimensions.size > 0 || hiddenSeverities.size > 0) && (
+                    <div style={{
+                      marginTop: '0.65rem', paddingTop: '0.6rem',
+                      borderTop: '1px solid #bbf7d0',
+                      display: 'flex', alignItems: 'center', gap: '0.4rem',
+                      fontSize: '0.72rem', color: '#15803d', flexWrap: 'wrap',
+                    }}>
+                      <span style={{ fontWeight: 600 }}>Currently hidden:</span>
+                      {Array.from(hiddenDimensions).map((d) => (
+                        <button
+                          key={`hd::${d}`}
+                          onClick={() => setHiddenDimensions((prev) => { const n = new Set(prev); n.delete(d); return n; })}
+                          style={{ padding: '0.1rem 0.4rem', borderRadius: '999px', border: '1px solid #86efac', background: '#fff', cursor: 'pointer', color: '#166534', fontWeight: 600 }}
+                          title={`Restore ${d}`}
+                        >{d} ×</button>
+                      ))}
+                      {Array.from(hiddenSeverities).map((s) => (
+                        <button
+                          key={`hs::${s}`}
+                          onClick={() => setHiddenSeverities((prev) => { const n = new Set(prev); n.delete(s); return n; })}
+                          style={{ padding: '0.1rem 0.4rem', borderRadius: '999px', border: '1px solid #86efac', background: '#fff', cursor: 'pointer', color: '#166534', fontWeight: 600 }}
+                          title={`Restore severity:${s}`}
+                        >severity:{s} ×</button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
