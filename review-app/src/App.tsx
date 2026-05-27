@@ -79,7 +79,15 @@ export default function App() {
   // New comment input per page
   const [newComment, setNewComment] = useState<string>('');
 
-  const [activeRightTab, setActiveRightTab] = useState<'decisions' | 'guide' | 'downloads'>('decisions');
+  const [activeRightTab, setActiveRightTab] = useState<'decisions' | 'guide' | 'downloads' | 'architecture'>('decisions');
+
+  // Checkpoint toggles
+  const [gateOverrides, setGateOverrides] = useState({
+    cataloging: true,
+    visualReview: true,
+    refactoringPrompt: false,
+    playwrightVerify: true,
+  });
 
   // Local state changes before saving to disk
   const [currentApproval, setCurrentApproval] = useState<PageApproval | null>(null);
@@ -92,6 +100,9 @@ export default function App() {
 
   // Preview mode: 'iframe' or 'screenshot'
   const [previewMode, setPreviewMode] = useState<'iframe' | 'screenshot'>('screenshot');
+
+  // Connection indicator watchdog state
+  const [isOfflineMock, setIsOfflineMock] = useState(false);
 
   // Load run details on boot
   useEffect(() => {
@@ -109,6 +120,7 @@ export default function App() {
       }
       const json = await response.json() as RunData;
       setData(json);
+      setIsOfflineMock(false);
       
       // Auto-select first page if none selected
       if (json.pages && json.pages.length > 0 && !activeSlug) {
@@ -116,6 +128,7 @@ export default function App() {
       }
     } catch (err) {
       console.warn('API fetch failed, falling back to rich mock data:', err);
+      setIsOfflineMock(true);
       // High fidelity mock data fallback to prevent the application from breaking when API server is inactive
       const mockData: RunData = {
         runDir: "C:\\projects\\should-i-fight-all-tasks\\casesdaily",
@@ -442,16 +455,23 @@ ${pmNotes}
           <span className="logo-sub">Visual Refactoring Workspace</span>
         </div>
         
-        {data && (
-          <div style={{ display: 'flex', gap: '2rem', fontSize: '0.85rem', color: '#64748b' }}>
-            <div>
-              <strong>Project:</strong> <span style={{ color: '#0f172a', fontWeight: 600 }}>{data.state.projectSlug}</span>
-            </div>
-            <div>
-              <strong>Run Directory:</strong> <span style={{ color: '#0f172a', fontFamily: 'monospace' }}>{data.runDir}</span>
-            </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+          <div className="connection-indicator">
+            <span className={`connection-dot ${isOfflineMock ? 'offline' : 'online'}`}></span>
+            {isOfflineMock ? 'OFFLINE MOCK MODE' : 'LOCAL SERVER ONLINE'}
           </div>
-        )}
+
+          {data && (
+            <div style={{ display: 'flex', gap: '2rem', fontSize: '0.85rem', color: '#64748b' }}>
+              <div>
+                <strong>Project:</strong> <span style={{ color: '#0f172a', fontWeight: 600 }}>{data.state.projectSlug}</span>
+              </div>
+              <div>
+                <strong>Run Directory:</strong> <span style={{ color: '#0f172a', fontFamily: 'monospace' }}>{data.runDir}</span>
+              </div>
+            </div>
+          )}
+        </div>
       </header>
 
       {/* ────────────────────────── MAIN WORKSPACE ────────────────────────── */}
@@ -504,6 +524,22 @@ ${pmNotes}
 
         {/* ────────────────────────── DETAIL PANE ────────────────────────── */}
         <section className="detail-pane">
+          {isOfflineMock && (
+            <div className="offline-mock-banner">
+              <span className="offline-mock-icon">⚠️</span>
+              <div className="offline-mock-content">
+                <h4 className="offline-mock-title">Dashboard Running in Offline Mock Mode</h4>
+                <p className="offline-mock-text">
+                  The frontend could not connect to the local Reframe API at <code className="offline-mock-code">http://localhost:3000</code>.
+                  To view live run data, review active screenshots, and apply updates, make sure the Node server is running in your terminal:
+                </p>
+                <div style={{ marginTop: '0.5rem', background: '#ffffff', border: '1px solid #fca5a5', padding: '0.5rem', borderRadius: '6px', fontFamily: 'monospace', fontSize: '0.8rem', color: '#b91c1c', display: 'inline-block' }}>
+                  npx reframe review {data?.runDir || './runs/current'} --port 3000
+                </div>
+              </div>
+            </div>
+          )}
+
           {activePage && currentApproval ? (
             (() => {
               const isPageBroken = activePage.audit?.health && !activePage.audit.health.healthy;
@@ -705,6 +741,13 @@ ${pmNotes}
                               >
                                 📥 Downloads
                               </button>
+                              <button 
+                                className={`control-btn ${activeRightTab === 'architecture' ? 'active' : ''}`}
+                                onClick={() => setActiveRightTab('architecture')}
+                                style={{ flex: 1, textAlign: 'center' }}
+                              >
+                                📖 Architecture
+                              </button>
                             </div>
                           </div>
                           <div className="card-body compact-body flex-col-layout">
@@ -732,6 +775,41 @@ ${pmNotes}
                                       <strong>Scoping Decisions:</strong> Choose whether to refactor this screen. Use the checkbox list on the left to prioritize specific fixes.
                                     </p>
                                   </div>
+
+                                  {data && !data.isGitRepo && currentApproval.decision === 'apply' && (
+                                    <div className="prompt-integration-card">
+                                      <div className="prompt-integration-header">
+                                        <span style={{ fontSize: '1.25rem' }}>🤖</span>
+                                        <h5 className="prompt-integration-title">Resilient AI Refactoring Prompt</h5>
+                                      </div>
+                                      <p style={{ fontSize: '0.75rem', color: '#475569', margin: 0, lineHeight: 1.4 }}>
+                                        This is a non-Git workspace. Direct auto-commits are disabled. Instead, copy or download the dynamic instruction prompt below to apply the refactor directly in your editor co-pilot!
+                                      </p>
+                                      <div className="prompt-actions-row">
+                                        <button
+                                          onClick={() => {
+                                            navigator.clipboard.writeText(generateAiPrompt());
+                                            alert('⚡ AI Refactoring Prompt copied to clipboard!\n\nPaste this into your local AI coding assistant (Claude Code, Cursor, Antigravity, etc.) to immediately apply the approved upgrades!');
+                                          }}
+                                          className="btn-primary"
+                                          style={{ fontSize: '0.8rem', padding: '0.5rem 0.75rem', justifyContent: 'center' }}
+                                        >
+                                          📋 Copy prompt
+                                        </button>
+                                        <a
+                                          href={`/api/download-prompt/${activePage.slug}`}
+                                          className="download-prompt-btn"
+                                        >
+                                          📥 Download .md
+                                        </a>
+                                      </div>
+                                      <ul className="prompt-usage-list">
+                                        <li>Open target project in Cursor or Claude Code.</li>
+                                        <li>Feed this prompt to the AI to merge style & visual gaps.</li>
+                                        <li>Maintains brand consistency without strict patch rigidity!</li>
+                                      </ul>
+                                    </div>
+                                  )}
                                 </div>
 
                                 <div className="form-group compact-group">
@@ -762,7 +840,7 @@ ${pmNotes}
                                   <input
                                     type="text"
                                     className="input-text compact-input"
-                                    placeholder="Type comment..."
+                                    placeholder="Reply thread..."
                                     value={newComment}
                                     onChange={(e) => setNewComment(e.target.value)}
                                   />
@@ -772,25 +850,25 @@ ${pmNotes}
                             )}
 
                             {activeRightTab === 'guide' && (
-                              /* ────────────────────────── INTEGRATION GUIDE TAB ────────────────────────── */
-                              <div className="integration-guide-tab scroll-vertical-240" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                                <div className="guide-step-card">
-                                  <span className="step-num">Step 1</span>
-                                  <p className="step-text"><strong>Scoping check:</strong> Select your visual/functional upgrades on the left and set decisions to 'APPLY' or 'BYPASS'.</p>
-                                </div>
-                                
-                                <div className="guide-step-card">
-                                  <span className="step-num">Step 2</span>
-                                  <p className="step-text"><strong>Save Selections:</strong> Click <code>💾 Save Selections</code>. This writes your precise instructions to `approvals.json` in the run directory.</p>
+                              /* ────────────────────────── GUIDE TAB ────────────────────────── */
+                              <div className="guide-tab scroll-vertical-240">
+                                <div className="guide-stepper">
+                                  <div className="stepper-item">
+                                    <span className="stepper-badge">Step 1</span>
+                                    <p className="stepper-text">Review and select selective upgrades on the left.</p>
+                                  </div>
+                                  <div className="stepper-item">
+                                    <span className="stepper-badge">Step 2</span>
+                                    <p className="stepper-text">Add any PM notes or hex overrides in the textbox above.</p>
+                                  </div>
+                                  <div className="stepper-item">
+                                    <span className="stepper-badge">Step 3</span>
+                                    <p className="stepper-text">Toggle target scoping (Apply vs Bypass) and hit "Save Selections".</p>
+                                  </div>
                                 </div>
 
-                                <div className="guide-step-card">
-                                  <span className="step-num">Step 3</span>
-                                  <p className="step-text"><strong>Apply Refactoring:</strong> If this is a Git project, click <code>⚡ Apply Upgrades to Git</code> to automatically commit changes. If not, use the <strong>Downloads</strong> tab to copy code changes manually.</p>
-                                </div>
-
-                                <div className="guide-integrations-box">
-                                  <h4>📂 Durable Ledger File:</h4>
+                                <div className="guide-ledger-box">
+                                  <h4>💾 Local approvals database path:</h4>
                                   <p className="guide-meta-desc">Your selections are stored in a standard JSON format that is instantly referenceable by other local agents (Claude Code, Antigravity, Codex):</p>
                                   <code className="guide-path-code" title="Click to copy" onClick={(e) => {
                                     navigator.clipboard.writeText(`${data.runDir}\\approvals.json`);
@@ -799,61 +877,120 @@ ${pmNotes}
                                     {`${data.runDir.substring(0, 45)}...\\approvals.json`}
                                   </code>
                                 </div>
-
-                                <div className="guide-cli-command-box">
-                                  <h4>💻 Resume via Terminal command:</h4>
-                                  <code className="guide-command-code" title="Click to copy" onClick={(e) => {
-                                    navigator.clipboard.writeText(`reframe rebuild ./local/project --resume "${data.runDir}" --apply-mode pr`);
-                                    alert('CLI Command copied to clipboard!');
-                                  }}>
-                                    {`reframe rebuild --resume "${data.state.projectSlug}" --apply-mode pr`}
-                                  </code>
-                                </div>
                               </div>
                             )}
 
-                            {activeRightTab === 'downloads' && (
-                              /* ────────────────────────── EXPORT & AI PROMPT TAB ────────────────────────── */
-                              <div className="downloads-tab scroll-vertical-240" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                                <div className="download-info-banner" style={{ background: '#f5f3ff', border: '1px solid #ddd6fe' }}>
-                                  <span className="download-banner-icon">🤖</span>
-                                  <p className="download-banner-text" style={{ color: '#5b21b6' }}>
-                                    <strong>AI Co-Pilot Integration:</strong> Copy a dynamically generated refactoring prompt optimized for Claude Code, Cursor, Codex, or Antigravity!
-                                  </p>
+                            {activeRightTab === 'architecture' && (
+                              /* ────────────────────────── ENGINE ARCHITECTURE & CHECKPOINTS TAB ────────────────────────── */
+                              <div className="architecture-tab scroll-vertical-240" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '10px', padding: '0.75rem', fontSize: '0.8rem', color: '#1e40af' }}>
+                                  <strong>1-Mapper + 6-Agent Fan-Out Engine:</strong> Reframe runs a multi-agent pipeline to map routes, audit code/UX, rewrite files, and verify results. Override gates below to steer the pipeline direction.
                                 </div>
 
-                                <button 
-                                  onClick={() => {
-                                    navigator.clipboard.writeText(generateAiPrompt());
-                                    alert('⚡ AI Refactoring Prompt copied to clipboard!\n\nPaste this into your local AI coding assistant (Claude Code, Cursor, Antigravity, etc.) to immediately apply the approved upgrades!');
-                                  }}
-                                  className="btn-primary glow-btn"
-                                  style={{ justifyContent: 'center', background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)', border: 'none', boxShadow: '0 4px 12px rgba(99, 102, 241, 0.2)', padding: '0.85rem 1.5rem', fontWeight: '700' }}
-                                >
-                                  🤖 Copy AI Refactoring Prompt
-                                </button>
+                                <div className="architecture-stepper">
+                                  {/* Checkpoint 1 */}
+                                  <div className={`checkpoint-step ${gateOverrides.cataloging ? 'pass' : 'fail'}`}>
+                                    <span className="checkpoint-marker-circle">1</span>
+                                    <div className="checkpoint-details">
+                                      <div className="checkpoint-meta">
+                                        <span className="checkpoint-name">Stage 0: Page Mapping</span>
+                                        <span className={`checkpoint-badge ${gateOverrides.cataloging ? 'checkpoint-badge-pass' : 'checkpoint-badge-fail'}`}>
+                                          {gateOverrides.cataloging ? 'Passed' : 'Bypassed'}
+                                        </span>
+                                      </div>
+                                      <p className="checkpoint-desc">Maps absolute routes, gates, and brand tokens.</p>
+                                      <div className="checkpoint-override-action">
+                                        <span className="override-label">Enforce strict mapping path</span>
+                                        <label className="switch-container">
+                                          <input 
+                                            type="checkbox" 
+                                            className="switch-input" 
+                                            checked={gateOverrides.cataloging}
+                                            onChange={() => setGateOverrides(prev => ({ ...prev, cataloging: !prev.cataloging }))}
+                                          />
+                                          <span className="switch-track"><span className="switch-thumb"></span></span>
+                                        </label>
+                                      </div>
+                                    </div>
+                                  </div>
 
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.25rem 0' }}>
-                                  <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }}></div>
-                                  <span style={{ fontSize: '0.7rem', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase' }}>or download static files</span>
-                                  <div style={{ flex: 1, height: '1px', background: '#e2e8f0' }}></div>
-                                </div>
+                                  {/* Checkpoint 2 */}
+                                  <div className={`checkpoint-step ${gateOverrides.visualReview ? 'pass' : 'fail'}`}>
+                                    <span className="checkpoint-marker-circle">2</span>
+                                    <div className="checkpoint-details">
+                                      <div className="checkpoint-meta">
+                                        <span className="checkpoint-name">Stage 1-4: Visual & UX Review</span>
+                                        <span className={`checkpoint-badge ${gateOverrides.visualReview ? 'checkpoint-badge-pass' : 'checkpoint-badge-fail'}`}>
+                                          {gateOverrides.visualReview ? 'Enforced' : 'Yolo mode'}
+                                        </span>
+                                      </div>
+                                      <p className="checkpoint-desc">Audits responsiveness, styling contrast, accessibility, and brand specs.</p>
+                                      <div className="checkpoint-override-action">
+                                        <span className="override-label">Enforce compliance criteria</span>
+                                        <label className="switch-container">
+                                          <input 
+                                            type="checkbox" 
+                                            className="switch-input" 
+                                            checked={gateOverrides.visualReview}
+                                            onChange={() => setGateOverrides(prev => ({ ...prev, visualReview: !prev.visualReview }))}
+                                          />
+                                          <span className="switch-track"><span className="switch-thumb"></span></span>
+                                        </label>
+                                      </div>
+                                    </div>
+                                  </div>
 
-                                <a 
-                                  href={`/api/patch/${activePage.slug}`}
-                                  download={`${activePage.slug}-refactor.patch`}
-                                  className="btn-secondary"
-                                  style={{ textDecoration: 'none', justifyContent: 'center', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
-                                >
-                                  📥 Download Git Patch (.patch)
-                                </a>
+                                  {/* Checkpoint 3 */}
+                                  <div className={`checkpoint-step ${gateOverrides.refactoringPrompt ? 'pass' : 'fail'}`}>
+                                    <span className="checkpoint-marker-circle">3</span>
+                                    <div className="checkpoint-details">
+                                      <div className="checkpoint-meta">
+                                        <span className="checkpoint-name">Stage 5: Code Refactoring</span>
+                                        <span className={`checkpoint-badge ${gateOverrides.refactoringPrompt ? 'checkpoint-badge-pass' : 'checkpoint-badge-fail'}`}>
+                                          {gateOverrides.refactoringPrompt ? 'Resilient Prompt' : 'Rigid Git Patch'}
+                                        </span>
+                                      </div>
+                                      <p className="checkpoint-desc">Generates code upgrades based on review recommendations.</p>
+                                      <div className="checkpoint-override-action">
+                                        <span className="override-label">Use Resilient AI Prompt instead of Patch</span>
+                                        <label className="switch-container">
+                                          <input 
+                                            type="checkbox" 
+                                            className="switch-input" 
+                                            checked={gateOverrides.refactoringPrompt}
+                                            onChange={() => setGateOverrides(prev => ({ ...prev, refactoringPrompt: !prev.refactoringPrompt }))}
+                                          />
+                                          <span className="switch-track"><span className="switch-thumb"></span></span>
+                                        </label>
+                                      </div>
+                                    </div>
+                                  </div>
 
-                                <div className="patch-instructions-card">
-                                  <h5>💡 When to use what?</h5>
-                                  <ul style={{ paddingLeft: '1.1rem', fontSize: '0.8rem', color: '#64748b', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                                    <li><strong>AI Prompt (Recommended)</strong>: Resilient to code drift. Intelligently applies brand styles and fixes using your editor's AI co-pilot.</li>
-                                    <li><strong>Git Patch</strong>: Static file-level diff. Best for instant command-line import (<code>git apply</code>) if your local branch hasn't changed.</li>
-                                  </ul>
+                                  {/* Checkpoint 4 */}
+                                  <div className={`checkpoint-step ${gateOverrides.playwrightVerify ? 'pass' : 'fail'}`}>
+                                    <span className="checkpoint-marker-circle">4</span>
+                                    <div className="checkpoint-details">
+                                      <div className="checkpoint-meta">
+                                        <span className="checkpoint-name">Stage 6: Playwright Verification</span>
+                                        <span className={`checkpoint-badge ${gateOverrides.playwrightVerify ? 'checkpoint-badge-pass' : 'checkpoint-badge-fail'}`}>
+                                          {gateOverrides.playwrightVerify ? 'Strict' : 'Flexible'}
+                                        </span>
+                                      </div>
+                                      <p className="checkpoint-desc">Runs automated build tests and records visual screen health.</p>
+                                      <div className="checkpoint-override-action">
+                                        <span className="override-label">Halt entire run on verification error</span>
+                                        <label className="switch-container">
+                                          <input 
+                                            type="checkbox" 
+                                            className="switch-input" 
+                                            checked={gateOverrides.playwrightVerify}
+                                            onChange={() => setGateOverrides(prev => ({ ...prev, playwrightVerify: !prev.playwrightVerify }))}
+                                          />
+                                          <span className="switch-track"><span className="switch-thumb"></span></span>
+                                        </label>
+                                      </div>
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
                             )}

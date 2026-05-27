@@ -296,6 +296,85 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
       return;
     }
 
+    // 4.6. GET /api/download-prompt/:slug — Download compiled AI refactoring prompt as markdown
+    if (pathname.startsWith('/api/download-prompt/') && req.method === 'GET') {
+      const slug = pathname.substring('/api/download-prompt/'.length);
+      if (slug.includes('..') || slug.includes('/') || slug.includes('\\')) {
+        res.writeHead(400);
+        res.end('Malformed page slug parameter');
+        return;
+      }
+
+      try {
+        const pageDir = path.join(absRunDir, 'pages', slug);
+        if (!fs.existsSync(pageDir)) {
+          res.writeHead(404);
+          res.end('Page directory not found');
+          return;
+        }
+
+        // Load audit, design, and approvals
+        let audit: any = {};
+        const auditPath = path.join(pageDir, 'audit.json');
+        if (fs.existsSync(auditPath)) {
+          try { audit = JSON.parse(fs.readFileSync(auditPath, 'utf8')); } catch {}
+        }
+
+        let design: any = {};
+        const designPath = path.join(pageDir, 'design.json');
+        if (fs.existsSync(designPath)) {
+          try { design = JSON.parse(fs.readFileSync(designPath, 'utf8')); } catch {}
+        }
+
+        const approvals = loadApprovals(absRunDir);
+        const pageApproval = approvals?.pages?.[slug];
+
+        // Format gaps
+        const approvedGaps = audit?.gaps?.filter((g: any) => pageApproval?.gaps?.[g.id] !== 'skip') || [];
+        let gapsSection = '';
+        if (approvedGaps.length > 0) {
+          gapsSection = approvedGaps.map((g: any) => {
+            return `- **[${g.severity.toUpperCase()}] ${g.category.toUpperCase()}**: ${g.description}\n  *Fix Strategy*: ${g.recommendation}`;
+          }).join('\n');
+        } else {
+          gapsSection = '- Review visual specifications and optimize layout for premium responsive aesthetics.';
+        }
+
+        const designSpec = design?.spec ? `\n### Brand Visual Tokens & Rules:\n${design.spec}` : '';
+        const pmNotes = pageApproval?.note ? `\n### PM Adjustments & Instructions:\n${pageApproval.note}` : '';
+        const route = audit?.page || '/' + slug.replace(/-/g, '/');
+
+        const promptMarkdown = `# Reframe AI Refactoring Instruction Set
+
+You are an expert AI software architect. Please apply the following approved visual and functional refactoring upgrades directly to the target source file.
+
+## Workspace Context
+- **Screen**: ${slug}
+- **Route**: ${route}
+
+## Target Upgrades to Apply:
+${gapsSection}
+${designSpec}
+${pmNotes}
+
+## Execution Checklist:
+1. Refactor the code changes inside the target page file to resolve all approved gaps.
+2. Maintain brand token guidelines and correct any visual contrast or alignment errors.
+3. Keep all existing unrelated comments, hooks, and logic intact.
+4. Verify changes compile and serve cleanly.`;
+
+        res.writeHead(200, {
+          'Content-Type': 'text/markdown; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${slug}-refactor-prompt.md"`
+        });
+        res.end(promptMarkdown);
+      } catch (err) {
+        res.writeHead(500);
+        res.end(err instanceof Error ? err.message : String(err));
+      }
+      return;
+    }
+
     // 5. POST /api/apply — Apply approved code refactor via resume command
     if (pathname === '/api/apply' && req.method === 'POST') {
       try {

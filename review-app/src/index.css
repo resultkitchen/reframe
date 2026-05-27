@@ -1490,3 +1490,356 @@ button, input, textarea {
   margin-top: 0;
   margin-bottom: 0.5rem;
 }
+
+/* ────────────────────────── Connection & Offline Mock Watchdog ────────────────────────── */
+.offline-mock-banner {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  padding: 1rem 1.5rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.05);
+  animation: pulse-border 2.5s infinite ease-in-out;
+}
+
+@keyframes pulse-border {
+  0% { border-color: #fecaca; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.05); }
+  50% { border-color: #ef4444; box-shadow: 0 4px 18px rgba(239, 68, 68, 0.15); }
+  100% { border-color: #fecaca; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.05); }
+}
+
+.offline-mock-icon {
+  font-size: 2rem;
+  animation: pulse-scale 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse-scale {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
+.offline-mock-content {
+  flex: 1;
+}
+
+.offline-mock-title {
+  font-size: 1rem;
+  font-weight: 800;
+  color: #991b1b;
+  margin-bottom: 0.25rem;
+}
+
+.offline-mock-text {
+  font-size: 0.85rem;
+  color: #7f1d1d;
+  line-height: 1.4;
+}
+
+.offline-mock-code {
+  font-family: monospace;
+  background: #ffffff;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  border: 1px solid #fca5a5;
+  color: #b91c1c;
+  font-size: 0.8rem;
+}
+
+/* ────────────────────────── Styled Connection Badges in Header ────────────────────────── */
+.connection-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  padding: 0.35rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #475569;
+}
+
+.connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.connection-dot.online {
+  background-color: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
+.connection-dot.offline {
+  background-color: #ef4444;
+  box-shadow: 0 0 8px #ef4444;
+}
+
+/* ────────────────────────── Compact Choice Pills Redesign ────────────────────────── */
+.btn-choice-pill-compact {
+  flex: 1;
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.btn-choice-pill-compact.choice-apply:hover {
+  background: #f0fdf4;
+  color: #166534;
+  border-color: #bbf7d0;
+}
+
+.btn-choice-pill-compact.choice-apply.selected {
+  background: #dcfce7;
+  color: #15803d;
+  border-color: #22c55e;
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.15);
+}
+
+.btn-choice-pill-compact.choice-skip:hover {
+  background: #fffbef;
+  color: #9a3412;
+  border-color: #fed7aa;
+}
+
+.btn-choice-pill-compact.choice-skip.selected {
+  background: #ffedd5;
+  color: #ea580c;
+  border-color: #f97316;
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.15);
+}
+
+/* ────────────────────────── Interactive Stepper Checkpoints ────────────────────────── */
+.architecture-stepper {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 0.5rem 0;
+}
+
+.checkpoint-step {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  position: relative;
+}
+
+.checkpoint-step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 14px;
+  top: 30px;
+  bottom: -20px;
+  width: 2px;
+  background: #e2e8f0;
+}
+
+.checkpoint-marker-circle {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #f1f5f9;
+  border: 2px solid #cbd5e1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.8rem;
+  color: #64748b;
+  flex-shrink: 0;
+  transition: all 0.25s ease;
+  z-index: 2;
+}
+
+.checkpoint-step.pass .checkpoint-marker-circle {
+  background: #dcfce7;
+  border-color: #22c55e;
+  color: #15803d;
+}
+
+.checkpoint-step.fail .checkpoint-marker-circle {
+  background: #fee2e2;
+  border-color: #ef4444;
+  color: #b91c1c;
+}
+
+.checkpoint-details {
+  flex: 1;
+  background: #fafafa;
+  border: 1px solid #f1f5f9;
+  border-radius: 8px;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.checkpoint-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.checkpoint-name {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.checkpoint-badge {
+  font-size: 0.65rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.checkpoint-badge-pass {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.checkpoint-badge-fail {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.checkpoint-desc {
+  font-size: 0.75rem;
+  color: #64748b;
+  line-height: 1.35;
+}
+
+.checkpoint-override-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.override-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #475569;
+}
+
+/* Toggle Switch Styling */
+.switch-container {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.switch-input {
+  display: none;
+}
+
+.switch-track {
+  width: 32px;
+  height: 18px;
+  background-color: #cbd5e1;
+  border-radius: 9px;
+  position: relative;
+  transition: background-color 0.2s ease;
+}
+
+.switch-thumb {
+  width: 14px;
+  height: 14px;
+  background-color: #ffffff;
+  border-radius: 50%;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+
+.switch-input:checked + .switch-track {
+  background-color: #3b82f6;
+}
+
+.switch-input:checked + .switch-track .switch-thumb {
+  transform: translateX(14px);
+}
+
+/* ────────────────────────── Non-Git IDE Prompt Integration Box ────────────────────────── */
+.prompt-integration-card {
+  background: #fcfdfe;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.01);
+}
+
+.prompt-integration-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.prompt-integration-title {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #4f46e5;
+}
+
+.prompt-actions-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+}
+
+.download-prompt-btn {
+  background: #ffffff;
+  border: 1px solid #ddd6fe;
+  color: #4f46e5;
+  padding: 0.65rem 1rem;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  text-decoration: none;
+}
+
+.download-prompt-btn:hover {
+  background: #faf5ff;
+  border-color: #c084fc;
+}
+
+.prompt-usage-list {
+  padding-left: 1.2rem;
+  font-size: 0.75rem;
+  color: #64748b;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
