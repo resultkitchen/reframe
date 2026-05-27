@@ -53,6 +53,7 @@ import type {
   VerifyResult,
   PageOutcome,
   AuditResult,
+  ComplianceResult,
 } from './types';
 
 /* ───────────────────────────── helpers ───────────────────────────── */
@@ -791,6 +792,116 @@ function usersJsonExists(runDir: string): boolean {
   return fs.existsSync(path.join(runDir, 'test-scaffold', 'users.json'));
 }
 
+/**
+ * Read this page's audit + compliance JSON from the run dir, if present.
+ * Returns nulls on missing/malformed files — buildPrBody falls back to
+ * the manifest counts in that case rather than throwing.
+ */
+function loadPageAgentArtifacts(
+  runDir: string,
+  slug: string,
+): { audit: AuditResult | null; compliance: ComplianceResult | null } {
+  const pageDir = path.join(runDir, 'pages', slug);
+  let audit: AuditResult | null = null;
+  let compliance: ComplianceResult | null = null;
+  try {
+    const auditPath = path.join(pageDir, 'audit.json');
+    if (fs.existsSync(auditPath)) {
+      audit = JSON.parse(fs.readFileSync(auditPath, 'utf8')) as AuditResult;
+    }
+  } catch {
+    /* malformed audit.json — fall through with null */
+  }
+  try {
+    const compliancePath = path.join(pageDir, 'compliance.json');
+    if (fs.existsSync(compliancePath)) {
+      compliance = JSON.parse(fs.readFileSync(compliancePath, 'utf8')) as ComplianceResult;
+    }
+  } catch {
+    /* malformed compliance.json — fall through with null */
+  }
+  return { audit, compliance };
+}
+
+/**
+ * Build the plain-English summary block at the top of the PR body — the
+ * reviewer-facing version of the run, in the language a non-technical
+ * reader can act on. Reads agent artifacts directly off disk and ranks
+ * findings by severity x confidence across audit + compliance.
+ *
+ * Returns an empty string when no findings of consequence were emitted,
+ * so the PR body stays tight on clean runs.
+ */
+function buildPlainEnglishSummary(
+  runDir: string,
+  entries: PageManifestEntry[],
+  maxItems = 5,
+): string {
+  const SEVERITY_WEIGHT: Record<string, number> = {
+    critical: 4, high: 3, medium: 2, low: 1,
+  };
+  type DigestItem = {
+    pageSlug: string;
+    pageRoute: string;
+    severity: string;
+    headline: string;
+    whyItMatters?: string;
+    impact: number;
+  };
+  const items: DigestItem[] = [];
+
+  for (const entry of entries) {
+    const { audit, compliance } = loadPageAgentArtifacts(runDir, entry.slug);
+    for (const gap of audit?.gaps ?? []) {
+      const sev = SEVERITY_WEIGHT[gap.severity] ?? 1;
+      const conf = gap.confidence ?? 0.8;
+      items.push({
+        pageSlug: entry.slug,
+        pageRoute: entry.route,
+        severity: gap.severity,
+        headline: gap.plain || gap.description,
+        whyItMatters: gap.whyItMatters,
+        impact: sev * conf,
+      });
+    }
+    for (const f of compliance?.findings ?? []) {
+      const sev = SEVERITY_WEIGHT[f.severity] ?? 1;
+      const conf = f.confidence ?? 0.8;
+      items.push({
+        pageSlug: entry.slug,
+        pageRoute: entry.route,
+        severity: f.severity,
+        headline: f.plain || f.problem,
+        whyItMatters: f.whyItMatters,
+        impact: sev * conf,
+      });
+    }
+  }
+
+  if (items.length === 0) return '';
+
+  items.sort((a, b) => b.impact - a.impact);
+  const top = items.slice(0, maxItems);
+
+  const lines: string[] = [
+    '### ✨ What changed, in plain English',
+    '',
+    `The ${top.length === 1 ? 'one thing' : `${top.length} things`} most likely to land hardest with a real user — ranked by impact across every reviewed page:`,
+    '',
+  ];
+  for (const item of top) {
+    lines.push(`1. **[${item.severity}]** \`${item.pageSlug}\` — ${item.headline}`);
+    if (item.whyItMatters) {
+      lines.push(`   _Why it matters_: ${item.whyItMatters}`);
+    }
+  }
+  if (items.length > top.length) {
+    lines.push('', `_${items.length - top.length} additional findings below — see the manifest._`);
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
 function buildPrBody(
   config: PipelineConfig,
   entries: PageManifestEntry[],
@@ -801,11 +912,19 @@ function buildPrBody(
     '',
     `**${passCount}/${entries.length} pages passing.**`,
     '',
+  ];
+
+  const plainSummary = buildPlainEnglishSummary(config.runDir, entries);
+  if (plainSummary) {
+    lines.push(plainSummary);
+  }
+
+  lines.push(
     '### Page Manifest Summary',
     '',
     '| Page | Route | Pass | Gaps found | Gaps closed | Compliance findings |',
     '| ---- | ----- | ---- | ---------- | ----------- | ------------------- |',
-  ];
+  );
   for (const e of entries) {
     lines.push(
       `| ${e.slug} | ${e.route} | ${e.pass ? '✅' : '❌'} | ` +
