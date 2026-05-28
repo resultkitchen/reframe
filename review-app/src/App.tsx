@@ -95,6 +95,30 @@ interface RunData {
   pages: PageData[];
 }
 
+/**
+ * Shared, single-fire probe of /api/run. Used to dedupe React 18
+ * StrictMode's double-mount (which would otherwise fire two parallel
+ * 503s in standalone Vite dev). Resolves to the run data when the
+ * Node companion is up, or null when the backend is offline.
+ */
+let __backendProbe: Promise<RunData | null> | null = null;
+function sharedBackendProbe(): Promise<RunData | null> {
+  if (__backendProbe) return __backendProbe;
+  __backendProbe = (async () => {
+    try {
+      const r = await fetch('/api/run');
+      if (!r.ok) return null;
+      return (await r.json()) as RunData;
+    } catch {
+      return null;
+    }
+  })();
+  return __backendProbe;
+}
+function resetBackendProbe(): void {
+  __backendProbe = null;
+}
+
 export default function App() {
   const [data, setData] = useState<RunData | null>(null);
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
@@ -160,6 +184,10 @@ export default function App() {
 
   // Connection indicator watchdog state
   const [isOfflineMock, setIsOfflineMock] = useState(false);
+  // Tracks an in-flight manual retry so the Retry button can show a
+  // spinner state without flickering. Auto-poll uses the same flag so
+  // background reconnects also look intentional.
+  const [reconnecting, setReconnecting] = useState(false);
 
   /**
    * Cross-run telemetry — fetched once on mount. Surfaces patterns the
@@ -182,34 +210,107 @@ export default function App() {
     }>;
   } | null>(null);
 
-  // Load run details on boot
+  // Load run details on boot. Wait for fetchRunData to settle so the
+  // telemetry call only fires when the backend is actually reachable —
+  // otherwise it just adds a second proxy 503 to the console for no gain.
   useEffect(() => {
-    fetchRunData();
-    // Fire-and-forget telemetry fetch — never blocks render, fails open
-    // (the insights panel is hidden when telemetry is null or empty).
-    fetch('/api/telemetry')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((t) => { if (t && Array.isArray(t.insights)) setTelemetry(t); })
-      .catch(() => { /* fail open */ });
+    (async () => {
+      const online = await fetchRunData();
+      if (!online) return;
+      try {
+        const r = await fetch('/api/telemetry');
+        if (!r.ok) return;
+        const t = await r.json();
+        if (t && Array.isArray(t.insights)) setTelemetry(t);
+      } catch {
+        /* fail open — insights panel hides when telemetry is null */
+      }
+    })();
   }, []);
 
-  const fetchRunData = async () => {
+  /**
+   * Manual reconnect handler — bound to the Retry Connection button on
+   * the offline banner. Clears the shared probe cache and re-fires
+   * fetchRunData so the user gets immediate feedback without a full
+   * page reload.
+   */
+  const retryConnection = async () => {
+    if (reconnecting) return;
+    setReconnecting(true);
+    resetBackendProbe();
+    try {
+      await fetchRunData();
+    } finally {
+      setReconnecting(false);
+    }
+  };
+
+  /** Unix ms of the next scheduled auto-retry; null when none queued. */
+  const [nextRetryAt, setNextRetryAt] = useState<number | null>(null);
+  /** Ticking now-ms so the countdown re-renders once per second. */
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+
+  /**
+   * Background auto-poll while offline using exponential backoff —
+   * 2s, 4s, 8s, 16s, then stop and leave the manual Retry button as
+   * the sole recovery path. The previous fixed 5s interval generated
+   * one fresh /api/run 503 every cycle of a long-running audit; the
+   * backoff caps total background probes at four so the console
+   * stays quiet after the initial fail-open.
+   */
+  useEffect(() => {
+    if (!isOfflineMock) {
+      setNextRetryAt(null);
+      return;
+    }
+    const delays = [2000, 4000, 8000, 16000];
+    const timers: number[] = [];
+    let elapsed = 0;
+    for (const d of delays) {
+      elapsed += d;
+      const fireAt = Date.now() + elapsed;
+      timers.push(
+        window.setTimeout(() => {
+          setNextRetryAt(null);
+          retryConnection();
+        }, elapsed),
+      );
+      if (timers.length === 1) setNextRetryAt(fireAt);
+    }
+    return () => { timers.forEach(window.clearTimeout); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOfflineMock]);
+
+  // Tick the countdown display once per second while we're waiting on
+  // the next scheduled retry. Stops cleanly when nextRetryAt clears.
+  useEffect(() => {
+    if (nextRetryAt === null) return;
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [nextRetryAt]);
+
+  const retrySecondsRemaining = nextRetryAt !== null
+    ? Math.max(0, Math.ceil((nextRetryAt - nowMs) / 1000))
+    : null;
+
+  const fetchRunData = async (): Promise<boolean> => {
     setLoading(true);
     setError(null);
     try {
-      // Relative endpoint, works both in dev mock and served from Node server
-      const response = await fetch('/api/run');
-      if (!response.ok) {
-        throw new Error(`API returned HTTP ${response.status}`);
-      }
-      const json = await response.json() as RunData;
+      // Module-level cache: a single in-flight probe is shared across
+      // React 18 StrictMode's intentional double-mount, so we never fire
+      // two parallel /api/run requests in dev. Once a probe resolves
+      // offline, subsequent mounts skip the fetch entirely.
+      const json = await sharedBackendProbe();
+      if (!json) throw new Error('backend offline');
       setData(json);
       setIsOfflineMock(false);
-      
+
       // Auto-select first page if none selected
       if (json.pages && json.pages.length > 0 && !activeSlug) {
         setActiveSlug(json.pages[0].slug);
       }
+      return true;
     } catch (err) {
       console.warn('API fetch failed, falling back to rich mock data:', err);
       setIsOfflineMock(true);
@@ -234,8 +335,11 @@ export default function App() {
           {
             slug: "admin-dashboard",
             route: "/admin/dashboard",
-            hasScreenshot: true,
-            hasHtml: true,
+            // Both false in offline-mock: the assets live on the Node
+            // companion that isn't running, so renderers should show
+            // the "no preview" placeholder instead of issuing 503s.
+            hasScreenshot: false,
+            hasHtml: false,
             audit: {
               health: {
                 healthy: true,
@@ -267,19 +371,20 @@ export default function App() {
               ]
             },
             ux: {
-              asciiWireframe: "  +--------------------------------------------+\n  | [🛡️ ADMIN] Leads | Search: [_________] [🔍] |\n  +--------------------------------------------+\n  | ACTIVE LEADS (142)                         |\n  | - John Doe    | personal injury | [EXPORT] |\n  | - Jane Smith  | auto accident   | [EXPORT] |\n  +--------------------------------------------+",
+              asciiWireframe: "  +--------------------------------------------+\n  | [ADMIN] Leads | Search: [_________] [GO]   |\n  +--------------------------------------------+\n  | ACTIVE LEADS (142)                         |\n  | - John Doe    | personal injury | [EXPORT] |\n  | - Jane Smith  | auto accident   | [EXPORT] |\n  +--------------------------------------------+",
               functionalSpec: "Admin control dashboard for lead tracking."
             },
             design: {
               spec: "Standard clean modern slate visual specs.",
               brandTokensUsed: ["colors.primary", "colors.background", "radii.md"]
             },
-            codeDiff: "@@ -12,4 +12,6 @@\n- <button onClick={exportCsv} className=\"btn-slate\">Export CSV</button>\n+ <button onClick={exportCsv} className=\"btn-slate-export\" aria-label=\"Export lead database to CSV\">\n+   💾 Export Lead CSV\n+ </button>"
+            codeDiff: "@@ -12,4 +12,6 @@\n- <button onClick={exportCsv} className=\"btn-slate\">Export CSV</button>\n+ <button onClick={exportCsv} className=\"btn-slate-export\" aria-label=\"Export lead database to CSV\">\n+   Export Lead CSV\n+ </button>"
           }
         ]
       };
       setData(mockData);
       setActiveSlug("admin-dashboard");
+      return false;
     } finally {
       setLoading(false);
     }
@@ -467,7 +572,7 @@ export default function App() {
 
       const resJson = await applyResponse.json();
       if (resJson.success) {
-        alert(`⚡ Git Refactoring Triggered in Background!\n\nThe pipeline is now running in the background to apply your approved upgrades. You can monitor the progress log file at:\n${resJson.logFile}`);
+        alert(`Git Refactoring Triggered in Background!\n\nThe pipeline is now running in the background to apply your approved upgrades. You can monitor the progress log file at:\n${resJson.logFile}`);
       }
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err));
@@ -512,27 +617,6 @@ ${pmNotes}
 3. Keep all existing unrelated comments, hooks, and logic intact.
 4. Verify changes compile and serve cleanly.`;
   };
-
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: '1rem' }}>
-        <div style={{ width: '40px', height: '40px', border: '3px solid #cbd5e1', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
-        <p style={{ color: '#64748b', fontWeight: 600 }}>Loading visual review app...</p>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', padding: '2rem', textAlign: 'center' }}>
-        <p style={{ fontSize: '3rem' }}>⚠️</p>
-        <h2 style={{ margin: '1rem 0 0.5rem', color: '#1e293b' }}>Could not load run data</h2>
-        <p style={{ color: '#64748b', maxWidth: '500px', marginBottom: '1.5rem' }}>{error}</p>
-        <button onClick={fetchRunData} className="btn-primary">Retry Connection</button>
-      </div>
-    );
-  }
 
   const activePage = data?.pages.find(p => p.slug === activeSlug);
 
@@ -835,6 +919,27 @@ ${pmNotes}
     return { items: visible, counts, pagesWithFindings, totalPages: data?.pages.length ?? 0, totalUnfiltered: all.length };
   }, [data, hiddenDimensions, hiddenSeverities]);
 
+  // Early returns must come AFTER all hook declarations — Rules of Hooks.
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: '1rem' }}>
+        <div style={{ width: '40px', height: '40px', border: '3px solid #cbd5e1', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 1s linear infinite' }}></div>
+        <p style={{ color: '#64748b', fontWeight: 600 }}>Loading visual review app...</p>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', padding: '2rem', textAlign: 'center' }}>
+        <h2 style={{ margin: '1rem 0 0.5rem', color: '#1e293b' }}>Could not load run data</h2>
+        <p style={{ color: '#64748b', maxWidth: '500px', marginBottom: '1.5rem' }}>{error}</p>
+        <button onClick={fetchRunData} className="btn-primary">Retry Connection</button>
+      </div>
+    );
+  }
+
   return (
     <div className="app-container">
       {/* ────────────────────────── HEADER ────────────────────────── */}
@@ -889,7 +994,7 @@ ${pmNotes}
                 }}
               >
                 <span className="page-item-title" style={{ color: '#5b21b6' }}>
-                  ✨ Run Overview
+                  Run Overview
                 </span>
                 <span className="page-item-subtitle" style={{ color: '#7c3aed' }}>
                   {runOverview.items.length} finding{runOverview.items.length === 1 ? '' : 's'}
@@ -955,16 +1060,44 @@ ${pmNotes}
         {/* ────────────────────────── DETAIL PANE ────────────────────────── */}
         <section className="detail-pane">
           {isOfflineMock && (
-            <div className="offline-mock-banner">
-              <span className="offline-mock-icon">⚠️</span>
+            <div className="offline-mock-banner" role="status" aria-live="polite">
+              <span className="offline-mock-icon" aria-hidden="true"></span>
               <div className="offline-mock-content">
                 <h4 className="offline-mock-title">Dashboard Running in Offline Mock Mode</h4>
                 <p className="offline-mock-text">
                   The frontend could not connect to the local Reframe API at <code className="offline-mock-code">http://localhost:3000</code>.
-                  To view live run data, review active screenshots, and apply updates, make sure the Node server is running in your terminal:
+                  Reconnects are attempted every 5 seconds — start the Node companion to switch back to live data:
                 </p>
                 <div style={{ marginTop: '0.5rem', background: '#ffffff', border: '1px solid #fca5a5', padding: '0.5rem', borderRadius: '6px', fontFamily: 'monospace', fontSize: '0.8rem', color: '#b91c1c', display: 'inline-block' }}>
                   npx reframe review {data?.runDir || './runs/current'} --port 3000
+                </div>
+                <div style={{ marginTop: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <button
+                    type="button"
+                    onClick={retryConnection}
+                    aria-disabled={reconnecting}
+                    style={{
+                      padding: '0.4rem 0.9rem',
+                      fontSize: '0.75rem',
+                      fontWeight: 600,
+                      background: reconnecting ? '#fee2e2' : '#fff',
+                      border: '1px solid #fca5a5',
+                      color: '#b91c1c',
+                      borderRadius: '6px',
+                      cursor: reconnecting ? 'progress' : 'pointer',
+                    }}
+                  >
+                    {reconnecting ? 'Reconnecting…' : 'Retry connection now'}
+                  </button>
+                  {retrySecondsRemaining !== null && !reconnecting && (
+                    <span
+                      role="timer"
+                      aria-live="polite"
+                      style={{ fontSize: '0.72rem', color: '#7f1d1d', fontFamily: 'monospace' }}
+                    >
+                      Next auto attempt in {retrySecondsRemaining}s
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -1300,7 +1433,7 @@ ${pmNotes}
                     <div className="header-actions" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
                       {data && !data.isGitRepo && (
                         <span className="badge badge-fail" style={{ fontSize: '0.75rem', textTransform: 'none', padding: '0.35rem 0.65rem' }}>
-                          ⚠️ Non-Git Workspace
+                          Non-Git Workspace
                         </span>
                       )}
                       <button 
@@ -1308,16 +1441,63 @@ ${pmNotes}
                         className="btn-secondary"
                         disabled={saving || applying}
                       >
-                        {saving ? 'Saving...' : '💾 Save Selections'}
+                        {saving ? 'Saving...' : 'Save Selections'}
                       </button>
-                      <button 
-                        onClick={handleApplyRefactor} 
-                        className="btn-primary glow-btn"
-                        disabled={applying || saving || (data && !data.isGitRepo)}
-                        title={data && !data.isGitRepo ? "Git repository not detected. Please use the Downloads tab to apply modifications manually." : "Auto-commit approved upgrades to your Git workspace."}
-                      >
-                        {applying ? 'Applying...' : '⚡ Apply Upgrades to Git'}
-                      </button>
+                      {(() => {
+                        // Three states for the primary CTA:
+                        //   1. non-git workspace → swap to active "Download
+                        //      Changes Bundle" CTA pointing at the Downloads
+                        //      tab (no dead-end disabled button).
+                        //   2. transient busy (applying / saving) → keep the
+                        //      Apply button visible but aria-disabled with a
+                        //      status note explaining the wait.
+                        //   3. ready → active Apply Upgrades to Git.
+                        const isNonGit = !!(data && !data.isGitRepo);
+                        if (isNonGit) {
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '0.25rem' }}>
+                              <button
+                                type="button"
+                                onClick={() => setActiveRightTab('downloads')}
+                                className="btn-primary glow-btn"
+                              >
+                                Download Changes Bundle
+                              </button>
+                              <span style={{ fontSize: '0.7rem', color: '#475569', maxWidth: '320px' }}>
+                                No Git workspace detected — download the patch and apply it manually.
+                              </span>
+                            </div>
+                          );
+                        }
+                        const isBlocked = applying || saving;
+                        const blockReason = applying
+                          ? 'Applying changes…'
+                          : saving
+                            ? 'Saving selections…'
+                            : '';
+                        return (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '0.25rem' }}>
+                            <button
+                              type="button"
+                              onClick={() => { if (!isBlocked) handleApplyRefactor(); }}
+                              className={`btn-primary glow-btn${isBlocked ? ' is-disabled' : ''}`}
+                              aria-disabled={isBlocked}
+                              aria-describedby={isBlocked ? 'apply-upgrades-status' : undefined}
+                            >
+                              {applying ? 'Applying...' : 'Apply Upgrades to Git'}
+                            </button>
+                            {isBlocked && (
+                              <span
+                                id="apply-upgrades-status"
+                                role="status"
+                                style={{ fontSize: '0.7rem', color: '#475569', maxWidth: '320px' }}
+                              >
+                                {blockReason}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -1340,7 +1520,7 @@ ${pmNotes}
                           </div>
 
                           <div className="failure-troubleshooting">
-                            <h3>🛠️ Action Plan / How to Fix:</h3>
+                            <h3>Action Plan / How to Fix:</h3>
                             <ol>
                               <li>Ensure your local backend HTTP server is running on the expected port (e.g. port 5173 for Vite, or port 3000 for server API).</li>
                               <li>Check that your environment config matches the database and network credentials in <code>.env.local</code>.</li>
@@ -1354,7 +1534,7 @@ ${pmNotes}
                               className="btn-primary glow-btn btn-large"
                               disabled={applying || saving}
                             >
-                              ⚡ Approve & Apply Quick Refactor to Git
+                              Approve & Apply Quick Refactor to Git
                             </button>
                           </div>
                         </div>
@@ -1363,7 +1543,7 @@ ${pmNotes}
                       {activePage.codeDiff && (
                         <div className="card border-slate" style={{ marginTop: '1.5rem' }}>
                           <div className="card-header compact-header">
-                            <h3 className="card-title text-indigo">📝 Pre-Populated Code Refactoring Fix</h3>
+                            <h3 className="card-title text-indigo">Pre-Populated Code Refactoring Fix</h3>
                           </div>
                           <div className="card-body" style={{ padding: 0 }}>
                             <div className="diff-panel">
@@ -1413,14 +1593,14 @@ ${pmNotes}
                             }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                                 <h3 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#5b21b6', margin: 0, letterSpacing: '-0.01em' }}>
-                                  ✨ What to fix first
+                                  What to fix first
                                 </h3>
                                 <span style={{ fontSize: '0.7rem', color: '#7c3aed', fontWeight: 500 }}>
                                   Top {founderDigest.length} by user impact &middot; severity × confidence
                                 </span>
                               </div>
                               <p style={{ fontSize: '0.8rem', color: '#6b21a8', marginTop: 0, marginBottom: '0.85rem', lineHeight: 1.5 }}>
-                                The {founderDigest.length === 1 ? 'one thing' : `${founderDigest.length} things`} most likely to embarrass you when a real user lands here — in plain English, ranked.
+                                The top {founderDigest.length} {founderDigest.length === 1 ? 'issue' : 'issues'} on this route, ranked by user impact and severity.
                               </p>
                               <ol style={{ margin: 0, paddingLeft: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
                                 {founderDigest.map(item => (
@@ -1452,18 +1632,65 @@ ${pmNotes}
 
                           {/* Redesigned grid flow: ELEVATED TWO-COLUMN HORIZONTAL DASHBOARD FLOW */}
                           <div className="horizontal-dashboard">
-                            
+
+                            {isBypassed && (
+                              <div
+                                className="bypass-enable-banner"
+                                style={{
+                                  gridColumn: '1 / -1',
+                                  background: '#fffbeb',
+                                  border: '1px solid #fde68a',
+                                  color: '#92400e',
+                                  padding: '0.6rem 0.85rem',
+                                  borderRadius: '8px',
+                                  fontSize: '0.78rem',
+                                  marginBottom: '0.75rem',
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  gap: '0.75rem',
+                                }}
+                              >
+                                <span>
+                                  This screen is bypassed — selective code upgrades below are read-only.
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDecisionToggle('apply')}
+                                  style={{
+                                    padding: '0.35rem 0.75rem',
+                                    fontSize: '0.72rem',
+                                    fontWeight: 600,
+                                    background: '#fff',
+                                    border: '1px solid #f59e0b',
+                                    color: '#b45309',
+                                    borderRadius: '6px',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Enable screen to customize
+                                </button>
+                              </div>
+                            )}
+
                             {/* Column 1 (Left 60%): Selective Code Upgrades (Checking applies fixes to git) */}
-                            <div 
-                              className="card dashboard-card" 
-                              style={{ 
-                                opacity: isBypassed ? 0.55 : 1, 
-                                pointerEvents: isBypassed ? 'none' : 'auto', 
-                                transition: 'all 0.35s ease' 
+                            <div
+                              className="card dashboard-card"
+                              // `inert` (and aria-disabled) communicate the
+                              // bypassed-state to both Playwright and assistive
+                              // tech — pointer-events:none alone left the DOM
+                              // looking interactive to crawlers and screen
+                              // readers even when the screen was skipped.
+                              inert={isBypassed}
+                              aria-disabled={isBypassed}
+                              style={{
+                                opacity: isBypassed ? 0.55 : 1,
+                                filter: isBypassed ? 'grayscale(0.4)' : 'none',
+                                transition: 'all 0.35s ease'
                               }}
                             >
                               <div className="card-header compact-header">
-                                <h3 className="card-title text-green">🛠️ Selective Code Upgrades (Prioritize fixes for next commit)</h3>
+                                <h3 className="card-title text-green">Selective Code Upgrades (Prioritize fixes for next commit)</h3>
                                 {activePage.audit && activePage.audit.gaps.length > 0 && !isBypassed && (
                                   <button 
                                     onClick={handleToggleAllGaps} 
@@ -1476,7 +1703,6 @@ ${pmNotes}
                               <div className="card-body compact-body scroll-vertical-240">
                                 {isBypassed && (
                                   <div className="bypass-warning-banner" style={{ background: '#fffbeb', border: '1px solid #fef3c7', color: '#d97706', padding: '0.5rem 0.75rem', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 600, marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                                    <span>💡</span>
                                     <span>This screen is bypassed. Selections will not be committed or processed.</span>
                                   </div>
                                 )}
@@ -1539,6 +1765,11 @@ ${pmNotes}
                                       value={minConfidence}
                                       onChange={(e) => setMinConfidence(parseFloat(e.target.value))}
                                       style={{ width: '90px' }}
+                                      aria-label="Minimum confidence threshold"
+                                      aria-valuemin={0}
+                                      aria-valuemax={1}
+                                      aria-valuenow={minConfidence}
+                                      aria-valuetext={`${Math.round(minConfidence * 100)} percent`}
                                     />
                                     <span style={{ fontSize: '0.75rem', color: '#475569', fontFamily: 'monospace', minWidth: '32px' }}>
                                       {Math.round(minConfidence * 100)}%
@@ -1618,11 +1849,13 @@ ${pmNotes}
                                             className="gap-checkbox-tactile"
                                             checked={!isSkipped}
                                             onChange={() => {}}
+                                            aria-labelledby={`gap-desc-${gap.id}`}
+                                            aria-label={`Apply fix for ${gap.severity} ${gap.dimension || gap.category} gap: ${mainText.slice(0, 80)}`}
                                           />
                                         </div>
                                         <div className="gap-row-content">
                                           <div className="gap-row-header" style={{ gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                                            <span className={`gap-row-tag tag-${gap.severity}`}>{gap.severity}</span>
+                                            <span id={`gap-desc-${gap.id}`} className={`gap-row-tag tag-${gap.severity}`}>{gap.severity}</span>
                                             {gap.dimension ? (
                                               <span style={{
                                                 fontSize: '0.65rem', fontWeight: 600, textTransform: 'lowercase',
@@ -1643,7 +1876,7 @@ ${pmNotes}
                                               >{confPct}%</span>
                                             )}
                                             <span className={`gap-row-pill ${!isSkipped ? 'pill-green' : 'pill-orange'}`}>
-                                              {!isSkipped ? '🟢 WILL APPLY FIX' : '🟡 WILL SKIP FIX'}
+                                              {!isSkipped ? 'WILL APPLY FIX' : 'WILL SKIP FIX'}
                                             </span>
                                           </div>
                                           <p className="gap-row-desc">{mainText}</p>
@@ -1686,10 +1919,10 @@ ${pmNotes}
                         {/* Column 2 (Right 40%): Approvals Scoping & Zen Stepper Funnel */}
                         <div className="card dashboard-card">
                           <div className="card-header compact-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <h3 className="card-title text-blue">⚡ Workspace scoping</h3>
+                            <h3 className="card-title text-blue">Workspace scoping</h3>
                             {data && !data.isGitRepo && (
                               <span className="badge badge-fail" style={{ fontSize: '0.7rem', textTransform: 'none', padding: '0.25rem 0.5rem' }}>
-                                ⚠️ Non-Git
+                                Non-Git
                               </span>
                             )}
                           </div>
@@ -1709,20 +1942,21 @@ ${pmNotes}
                                       onClick={() => handleDecisionToggle('apply')}
                                       style={{ flex: 1 }}
                                     >
-                                      🟢 APPLY UPGRADES
+                                      APPLY UPGRADES
                                     </button>
                                     <button
                                       className={`btn-choice-pill-compact choice-skip ${currentApproval.decision === 'skip' ? 'selected' : ''}`}
                                       onClick={() => handleDecisionToggle('skip')}
                                       style={{ flex: 1 }}
                                     >
-                                      🟡 BYPASS SCREEN
+                                      BYPASS SCREEN
                                     </button>
                                   </div>
 
                                   <div className="form-group compact-group" style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                                    <label className="form-label compact-label" style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 700 }}>PM / Client Refinement Instructions</label>
+                                    <label className="form-label compact-label" htmlFor="pm-refinement-notes" style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: '#64748b', fontWeight: 700 }}>PM / Client Refinement Instructions</label>
                                     <textarea
+                                      id="pm-refinement-notes"
                                       rows={2}
                                       className="input-text compact-textarea"
                                       placeholder="Add refactoring adjustments, hex overrides, or notes..."
@@ -1755,6 +1989,7 @@ ${pmNotes}
                                         type="text"
                                         className="input-text compact-input"
                                         placeholder="Reply to thread..."
+                                        aria-label="Reply to collaborative thread"
                                         value={newComment}
                                         onChange={(e) => setNewComment(e.target.value)}
                                         style={{ flex: 1, padding: '0.35rem 0.5rem', fontSize: '0.75rem', borderRadius: '4px', border: '1px solid #cbd5e1' }}
@@ -1780,7 +2015,7 @@ ${pmNotes}
                                     disabled={saving}
                                     className={`btn-lock-ledger ${isLedgerLocked ? 'locked-success' : ''}`}
                                   >
-                                    {saving ? '🔒 Locking approvals...' : isLedgerLocked ? '✓ Approvals Locked' : '💾 Lock Screen Approvals'}
+                                    {saving ? 'Locking approvals...' : isLedgerLocked ? '✓ Approvals Locked' : 'Lock Screen Approvals'}
                                   </button>
                                   <p style={{ fontSize: '0.7rem', color: '#64748b', margin: 0, lineHeight: 1.35 }}>
                                     Locking saves your selections to the local configuration on disk, which is instantly parsed by other AI agents to apply code upgrades.
@@ -1800,7 +2035,7 @@ ${pmNotes}
                                 <div className="zen-step-body">
                                   {!isLedgerLocked ? (
                                     <div className="step-locked-placeholder" style={{ padding: '1rem', textAlign: 'center', background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '8px', color: '#64748b' }}>
-                                      <span style={{ fontSize: '1.25rem', display: 'block', marginBottom: '0.25rem' }}>🔒 Pathway Locked</span>
+                                      <span style={{ fontSize: '1.25rem', display: 'block', marginBottom: '0.25rem' }}>Pathway Locked</span>
                                       <p style={{ fontSize: '0.75rem', margin: 0, lineHeight: 1.4 }}>
                                         Please approve and click <strong>"Lock Screen Approvals"</strong> in Step 2 to generate deploy pathways and download markdown prompts.
                                       </p>
@@ -1815,7 +2050,7 @@ ${pmNotes}
                                         disabled={applying || !isLedgerLocked}
                                         style={{ width: '100%', justifyContent: 'center', padding: '0.75rem', fontSize: '0.85rem' }}
                                       >
-                                        {applying ? '⚡ Applying...' : '⚡ Apply Auto-Commit to Git'}
+                                        {applying ? 'Applying...' : 'Apply Auto-Commit to Git'}
                                       </button>
                                       
                                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: '0.15rem 0' }}>
@@ -1827,7 +2062,7 @@ ${pmNotes}
                                       <button
                                         onClick={() => {
                                           navigator.clipboard.writeText(generateAiPrompt());
-                                          alert('⚡ AI Refactoring Prompt copied to clipboard!\n\nPaste this into your local AI coding assistant (Claude Code, Cursor, Antigravity, etc.) to immediately apply the approved upgrades!');
+                                          alert('AI Refactoring Prompt copied to clipboard!\n\nPaste this into your local AI coding assistant (Claude Code, Cursor, Antigravity, etc.) to immediately apply the approved upgrades!');
                                         }}
                                         className="btn-secondary"
                                         disabled={!isLedgerLocked}
@@ -1850,13 +2085,13 @@ ${pmNotes}
                                         <button
                                           onClick={() => {
                                             navigator.clipboard.writeText(generateAiPrompt());
-                                            alert('⚡ AI Refactoring Prompt copied to clipboard!\n\nPaste this into your local AI coding assistant (Claude Code, Cursor, Antigravity, etc.) to immediately apply the approved upgrades!');
+                                            alert('AI Refactoring Prompt copied to clipboard!\n\nPaste this into your local AI coding assistant (Claude Code, Cursor, Antigravity, etc.) to immediately apply the approved upgrades!');
                                           }}
                                           className="btn-primary"
                                           disabled={!isLedgerLocked}
                                           style={{ flex: 1, fontSize: '0.75rem', padding: '0.4rem 0.65rem', justifyContent: 'center' }}
                                         >
-                                          📋 Copy prompt
+                                          Copy prompt
                                         </button>
                                         <a
                                           href={`/api/download-prompt/${activePage.slug}`}
@@ -1892,24 +2127,29 @@ ${pmNotes}
                               <span className="b-dot dot-green"></span>
                             </div>
                             <div className="browser-address-bar">
-                              <span className="lock-icon">🔒</span>
+                              <svg className="lock-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+                                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                              </svg>
                               <span className="address-text">{`http://localhost/${activePage.route || activePage.slug}`}</span>
                             </div>
 
                             {/* Single simple preview engine toggle */}
                             <div className="segmented-control-compact">
                               <button
-                                className={`control-btn-compact ${previewMode === 'iframe' ? 'active' : ''}`}
+                                className={`control-btn-compact${previewMode === 'iframe' && activePage.hasHtml ? ' active' : ''}${!activePage.hasHtml ? ' is-muted' : ''}`}
                                 disabled={!activePage.hasHtml}
                                 onClick={() => setPreviewMode('iframe')}
+                                title={!activePage.hasHtml ? 'Live HTML preview unavailable — no captured snapshot for this page.' : 'Switch to interactive HTML preview.'}
+                                aria-label={!activePage.hasHtml ? 'Live View — unavailable for this page' : 'Switch to Live View'}
                               >
-                                🖥️ Live View
+                                Live View
                               </button>
                               <button
                                 className={`control-btn-compact ${previewMode === 'screenshot' ? 'active' : ''}`}
                                 onClick={() => setPreviewMode('screenshot')}
                               >
-                                🖼️ Screenshot
+                                Screenshot
                               </button>
                             </div>
                           </div>
@@ -1928,7 +2168,7 @@ ${pmNotes}
                             const LABELS: Record<string, { label: string; w: number }> = {
                               mobile:  { label: '📱 iPhone',  w: 390 },
                               tablet:  { label: '📲 iPad',    w: 768 },
-                              desktop: { label: '🖥️ Desktop', w: 1440 },
+                              desktop: { label: 'Desktop', w: 1440 },
                             };
                             return (
                               <div style={{
@@ -2024,15 +2264,14 @@ ${pmNotes}
                                         const placeholder = document.createElement('div');
                                         placeholder.className = 'screenshot-placeholder-mock';
                                         placeholder.innerHTML = activeBreakpoint === 'default'
-                                          ? '🖼️ Mock Preview Asset Loaded'
-                                          : `📐 No ${activeBreakpoint} capture available for this page.`;
+                                          ? 'Mock Preview Asset Loaded'
+                                          : `No ${activeBreakpoint} capture available for this page.`;
                                         parent.appendChild(placeholder);
                                       }
                                     }}
                                   />
                                 ) : (
                                   <div className="no-screenshot">
-                                    <span style={{ fontSize: '2.5rem' }}>🖼️</span>
                                     <p>No preview asset available for this page.</p>
                                   </div>
                                 )}
@@ -2053,7 +2292,7 @@ ${pmNotes}
                         <div className="card border-slate" style={{ marginTop: '1rem' }}>
                           <div className="card-header compact-header">
                             <h3 className="card-title" style={{ color: '#8B5CF6' }}>
-                              ⚖️ Compliance findings ({activePage.compliance.findings.length})
+                              Compliance findings ({activePage.compliance.findings.length})
                               {activePage.compliance.clean && (
                                 <span style={{ marginLeft: '0.5rem', fontSize: '0.7rem', padding: '0.15rem 0.45rem', borderRadius: '999px', background: '#dcfce7', color: '#15803d', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                                   no blockers
@@ -2199,7 +2438,7 @@ ${pmNotes}
                         {activePage.ux && (
                           <div className="card spec-card-flat">
                             <div className="card-header spec-header">
-                              <h3 className="card-title text-indigo">📐 UX Wireframe Blueprint</h3>
+                              <h3 className="card-title text-indigo">UX Wireframe Blueprint</h3>
                             </div>
                             <div className="card-body spec-body font-mono">
                               <pre className="ascii-wireframe">{activePage.ux.asciiWireframe}</pre>
@@ -2210,7 +2449,7 @@ ${pmNotes}
                         {activePage.design && (
                           <div className="card spec-card-flat">
                             <div className="card-header spec-header">
-                              <h3 className="card-title text-blue">🎨 Brand Tokens Inventory</h3>
+                              <h3 className="card-title text-blue">Brand Tokens Inventory</h3>
                             </div>
                             <div className="card-body spec-body">
                               <pre className="pre-spec">{activePage.design.spec}</pre>
@@ -2231,7 +2470,7 @@ ${pmNotes}
                       {activePage.codeDiff && (
                         <div className="card border-slate">
                           <div className="card-header">
-                            <h3 className="card-title">📝 Proposed Refactoring Changes</h3>
+                            <h3 className="card-title">Proposed Refactoring Changes</h3>
                           </div>
                           <div className="card-body" style={{ padding: 0 }}>
                             <div className="diff-panel">
@@ -2267,7 +2506,6 @@ ${pmNotes}
             })()
           ) : (
             <div className="no-selection glass-card">
-              <span style={{ fontSize: '3rem' }}>🎯</span>
               <h2>Select a screen to review details</h2>
               <p>Choose any screen from the sidebar to verify visual screenshots, design tokens, audit findings, and code upgrades.</p>
             </div>
@@ -2275,16 +2513,32 @@ ${pmNotes}
         </section>
       </main>
 
-      {/* Reframe Engine Blueprint Slide-out Drawer */}
-      <div 
-        className={`architecture-drawer-backdrop ${isArchDrawerOpen ? 'backdrop-visible' : ''}`} 
-        onClick={() => setIsArchDrawerOpen(false)}
-      ></div>
-      
-      <div className={`architecture-drawer-overlay ${isArchDrawerOpen ? 'drawer-open' : ''}`}>
+      {/* Reframe Engine Blueprint Slide-out Drawer — mounted only when open
+          so the close button can never be probed in an offscreen position
+          by automated crawlers. */}
+      {isArchDrawerOpen && (
+        <div
+          className="architecture-drawer-backdrop backdrop-visible"
+          onClick={() => setIsArchDrawerOpen(false)}
+        ></div>
+      )}
+
+      {isArchDrawerOpen && (
+      <div
+        className="architecture-drawer-overlay drawer-open"
+        role="dialog"
+        aria-label="Reframe engine blueprint"
+      >
         <div className="drawer-header">
-          <h3 className="drawer-title">📖 Reframe Engine Blueprint</h3>
-          <button className="drawer-close-btn" onClick={() => setIsArchDrawerOpen(false)}>×</button>
+          <h3 className="drawer-title">Reframe Engine Blueprint</h3>
+          <button
+            className="drawer-close-btn"
+            type="button"
+            aria-label="Close panel"
+            onClick={() => setIsArchDrawerOpen(false)}
+          >
+            ×
+          </button>
         </div>
         <div className="drawer-body">
           <p style={{ fontSize: '0.8rem', color: '#475569', lineHeight: 1.5, margin: 0 }}>
@@ -2329,7 +2583,7 @@ ${pmNotes}
           </div>
 
           <div className="blueprint-section" style={{ borderTop: '1px solid #f1f5f9', paddingTop: '1rem', marginTop: '0.5rem' }}>
-            <h4 style={{ fontSize: '0.85rem', color: '#1e293b', marginBottom: '0.5rem', fontWeight: 600 }}>📊 6-Agent Execution Lifecycle</h4>
+            <h4 style={{ fontSize: '0.85rem', color: '#1e293b', marginBottom: '0.5rem', fontWeight: 600 }}>6-Agent Execution Lifecycle</h4>
             <ol style={{ fontSize: '0.7rem', color: '#475569', paddingLeft: '1.1rem', display: 'flex', flexDirection: 'column', gap: '0.45rem', lineHeight: 1.4 }}>
               <li><strong>Agent 0 (Map):</strong> Scaffolds the app structure into user-facing page components.</li>
               <li><strong>Agent 1 (Audit):</strong> Opens headless Chromium, checks health, and catalogs UX bugs.</li>
@@ -2341,18 +2595,18 @@ ${pmNotes}
           </div>
 
           <div style={{ marginTop: '1.25rem', padding: '0.65rem', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', fontSize: '0.7rem', color: '#1e40af', display: 'flex', gap: '0.35rem', lineHeight: 1.35 }}>
-            <span>💡</span>
             <span>Manual overrides bypass validation steps in subsequent agent runs. Use with caution.</span>
           </div>
         </div>
       </div>
+      )}
 
       {/* Floating Blueprint Trigger Button */}
       <button 
         className="btn-blueprint-trigger"
         onClick={() => setIsArchDrawerOpen(true)}
       >
-        📖 Engine Blueprint
+        Engine Blueprint
       </button>
     </div>
   );

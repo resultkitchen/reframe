@@ -142,6 +142,43 @@ function freshAgentMap(): Record<AgentName, StepStatus> {
   };
 }
 
+/**
+ * Spot the things that mean "this page is on fire" regardless of which
+ * gaps the LLM-driven agents happened to surface. Used by the review-mode
+ * pass/fail gate so a screen that crashed in the browser or got 5xx from
+ * its own API can never report PASS.
+ *
+ * Looks at the AuditResult.consoleErrors stream populated by the browser
+ * driver — entries are prefixed `[pageerror]` (uncaught JS) or
+ * `[console.error]` (logged error). We treat the JS crash + any 5xx
+ * response as load-bearing; everything else is left to the audit gaps.
+ *
+ * Also returns true if any gap was severity:'critical' — those should
+ * never coexist with a pass.
+ */
+function detectSmokingGuns(audit: AuditResult): string[] {
+  const guns: string[] = [];
+  for (const line of audit.consoleErrors ?? []) {
+    if (line.startsWith('[pageerror]')) {
+      guns.push(line);
+      continue;
+    }
+    // 5xx response — Playwright surfaces these as console.error
+    // ("Failed to load resource: the server responded with a status
+    // of 500 ..."). Match 5XX explicitly so transient 4xx noise from
+    // analytics pixels doesn't fail every audit.
+    if (/status of 5\d\d/i.test(line)) {
+      guns.push(line);
+    }
+  }
+  for (const gap of audit.gaps ?? []) {
+    if (gap.severity === 'critical') {
+      guns.push(`critical gap: ${gap.id} ${gap.description}`);
+    }
+  }
+  return guns;
+}
+
 function deriveOutcome(boot: BootResult, audit: AuditResult | undefined): PageOutcome {
   if (boot.status !== 'running') return 'boot-failed';
   if (!audit || !audit.health) return 'drive-failed';
@@ -653,12 +690,19 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
         mark('verify', 'skipped');
       }
 
-      // Pass: in review mode = all four review agents completed; otherwise =
-      // Agent 5's verdict (or the resumed checkpoint).
+      // Pass: in review mode = all four review agents completed AND no
+      // "smoking guns" were observed (browser JS crash, 5xx fetch, or any
+      // critical-severity gap). Without this gate a screen that literally
+      // threw `pageerror: Rendered more hooks than during the previous
+      // render` would still be reported as PASS — exactly what bit us
+      // auditing our own review-app.
       const reviewAgents: AgentName[] = ['audit', 'ux', 'design', 'compliance'];
+      const smokingGuns = ctx.audit ? detectSmokingGuns(ctx.audit) : [];
       const pass =
         config.applyMode === 'review'
-          ? reviewAgents.every((a) => pageState.agents[a] === 'done') && deriveOutcome(boot, ctx.audit) === 'audited'
+          ? reviewAgents.every((a) => pageState.agents[a] === 'done')
+            && deriveOutcome(boot, ctx.audit) === 'audited'
+            && smokingGuns.length === 0
           : verify
             ? verify.pass
             : pageState.pass ?? false;

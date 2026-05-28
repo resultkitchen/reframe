@@ -412,28 +412,61 @@ function parseJson<T>(raw: string): T {
   try {
     return JSON.parse(s) as T;
   } catch {
-    // Fall back to the outermost {...} or [...] span.
-    const firstObj = s.indexOf('{');
-    const firstArr = s.indexOf('[');
-    let start = -1;
-    let open = '{';
-    let close = '}';
-    if (firstArr !== -1 && (firstObj === -1 || firstArr < firstObj)) {
-      start = firstArr;
-      open = '[';
-      close = ']';
-    } else {
-      start = firstObj;
-    }
-    if (start !== -1) {
-      const end = s.lastIndexOf(close);
-      if (end > start) {
-        const span = s.slice(start, end + 1);
+    // Plain parse failed — Gemini sometimes appends commentary, two
+    // adjacent JSON objects, or trailing fences. Walk braces/brackets
+    // to find the first balanced span and parse just that. Much more
+    // reliable than lastIndexOf('}'), which lands inside a second
+    // appended object and produces invalid concatenated JSON.
+    const span = extractBalancedJson(s);
+    if (span !== null) {
+      try {
         return JSON.parse(span) as T;
+      } catch {
+        /* fall through to error */
       }
     }
     throw new Error(
       `LLM Client JSON parse failed; raw output starts: ${s.slice(0, 200)}`,
     );
   }
+}
+
+/**
+ * Scan a string for the first balanced `{...}` or `[...]` span, respecting
+ * string literals + escape sequences. Returns null if no balanced span is
+ * found. Used by parseJson() to recover when the model trails extra prose
+ * or accidentally emits two adjacent JSON objects.
+ */
+function extractBalancedJson(s: string): string | null {
+  let start = -1;
+  let depth = 0;
+  let opener: '{' | '[' | '' = '';
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (c === '\\') escape = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; continue; }
+    if (c === '{' || c === '[') {
+      if (start === -1) {
+        start = i;
+        opener = c;
+      }
+      depth++;
+    } else if (c === '}' || c === ']') {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        const expectedClose = opener === '{' ? '}' : ']';
+        if (c === expectedClose) return s.slice(start, i + 1);
+        return null;
+      }
+      if (depth < 0) return null;
+    }
+  }
+  return null;
 }
