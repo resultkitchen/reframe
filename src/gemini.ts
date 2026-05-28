@@ -97,9 +97,12 @@ export class GeminiClient implements IGeminiClient {
             `Validation issues:\n${feedback}\n\n` +
             `Return a single JSON object that matches the schema exactly. No prose, no markdown fences.`,
         };
-        this.alert(
-          `LLM Provider: schema validation failed for "${opts.role}" on attempt 1 — retrying with feedback.`,
-        );
+        // Deliberately silent on the first-attempt miss. The cheap model
+        // tier (mechanical) routinely produces one-field-off JSON; the
+        // retry path patches the prompt with the Zod feedback and almost
+        // always succeeds. Alerting on attempt 1 buried the real failure
+        // signal (retry-then-throw at line below) under recurring noise.
+        // The retry-then-fail alert at the bottom still fires.
       }
     }
 
