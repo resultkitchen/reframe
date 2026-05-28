@@ -69,6 +69,27 @@ export class PageDriver {
     this.page.on('pageerror', (err: Error) => {
       this.consoleErrors.push(`[pageerror] ${err.message}`);
     });
+
+    // Defensively dismiss any unhandled dialogs (alert / confirm / prompt /
+    // beforeunload). A synchronous window.alert() raised by a button under
+    // exercise() otherwise blocks every subsequent Playwright operation —
+    // the click returns (noWaitAfter), but the next locator query hangs
+    // until the dialog is dismissed. Record the dialog text so the audit
+    // still sees the surface; never accept (confirm/prompt accept could
+    // mutate data outside read-only mode's intent).
+    this.page.on('dialog', (dialog) => {
+      this.consoleErrors.push(`[dialog ${dialog.type()}] ${dialog.message().slice(0, 200)}`);
+      dialog.dismiss().catch(() => { /* dialog already gone */ });
+    });
+
+    // Auto-close popups spawned by `<a target="_blank">` or `window.open`.
+    // Without this, exercise()'s click loop can spawn dozens of tabs that
+    // stack up in the BrowserContext, ratchet up event-loop churn, and
+    // eventually wedge the parent page's locator queries on Windows.
+    this.page.context().on('page', (popup) => {
+      this.consoleErrors.push(`[popup] auto-closed ${popup.url()}`);
+      popup.close().catch(() => { /* popup already gone */ });
+    });
   }
 
   static async launch(opts?: { readOnly?: boolean; mocksPath?: string }): Promise<PageDriver> {
@@ -344,6 +365,14 @@ export class PageDriver {
     interactions: string[];
     consoleErrors: string[];
   }> {
+    // Hard wall-clock cap. The per-click timeout is bounded (2000ms × 60
+    // clickables ≈ 2 min), but pathological apps with churning DOMs or
+    // popup windows can keep the loop "almost-progressing" forever. A
+    // hard ceiling guarantees forward progress — when exceeded, the loop
+    // breaks early and the audit proceeds with whatever was exercised.
+    const EXERCISE_BUDGET_MS = 45_000;
+    const deadline = Date.now() + EXERCISE_BUDGET_MS;
+    const overBudget = () => Date.now() > deadline;
     const interactions: string[] = [];
 
     // 1) Focus visible form inputs.
@@ -353,12 +382,16 @@ export class PageDriver {
       );
       const inputCount = await inputs.count();
       for (let i = 0; i < inputCount; i++) {
+        if (overBudget()) {
+          interactions.push(`exercise budget exhausted at input#${i}`);
+          break;
+        }
         const el = inputs.nth(i);
         try {
           const name =
-            (await el.getAttribute('name').catch(() => null)) ??
-            (await el.getAttribute('placeholder').catch(() => null)) ??
-            (await el.getAttribute('aria-label').catch(() => null)) ??
+            (await el.getAttribute('name', { timeout: 1000 }).catch(() => null)) ??
+            (await el.getAttribute('placeholder', { timeout: 1000 }).catch(() => null)) ??
+            (await el.getAttribute('aria-label', { timeout: 1000 }).catch(() => null)) ??
             `input#${i}`;
           await el.focus({ timeout: 2000 });
           interactions.push(`focus: ${name}`);
@@ -385,11 +418,15 @@ export class PageDriver {
       // Cap to keep exercise bounded on large pages.
       const limit = Math.min(clickCount, 60);
       for (let i = 0; i < limit; i++) {
+        if (overBudget()) {
+          interactions.push(`exercise budget exhausted at clickable#${i}/${limit}`);
+          break;
+        }
         const el = clickables.nth(i);
         let label = `clickable#${i}`;
         try {
-          const text = (await el.innerText().catch(() => '')) || '';
-          const aria = await el.getAttribute('aria-label').catch(() => null);
+          const text = (await el.innerText({ timeout: 1000 }).catch(() => '')) || '';
+          const aria = await el.getAttribute('aria-label', { timeout: 1000 }).catch(() => null);
           label = (text.trim() || aria || `clickable#${i}`).slice(0, 80);
 
           // Read-only mode: never click anything that could mutate data, send
@@ -397,7 +434,7 @@ export class PageDriver {
           // the audit still knows the element exists.
           if (this.readOnly) {
             const type = (
-              await el.getAttribute('type').catch(() => null)
+              await el.getAttribute('type', { timeout: 1000 }).catch(() => null)
             )?.toLowerCase();
             if (type === 'submit' || DESTRUCTIVE_LABEL.test(label)) {
               interactions.push(`skipped (read-only): ${label}`);

@@ -34,6 +34,20 @@ Theme: **the SPA earns its labels**. A founder-led critique of the review SPA (e
 - "Save Selections" + "Download Changes Bundle" button pair. Replaced by a single register-aware primary action (`Send approved fixes to my IDE` / `Export approval bundle`) and an auto-saved indicator.
 - "Visual Refactoring Workspace" tagline in Vibe register. Replaced with the brief's mandated voice — fragments, weapons.
 
+### Added — Engine hardening (dogfood-driven)
+
+- **PageDriver auto-dismisses unhandled dialogs** (`alert` / `confirm` / `prompt` / `beforeunload`). A click in `exercise()` that triggers a synchronous `window.alert` previously blocked every subsequent Playwright operation until the dialog was manually dismissed — there was no audit-side handler. Reframe-on-Reframe surfaced this hang against the redesigned SPA's toast button.
+- **PageDriver auto-closes popup windows.** `<a target="_blank">` clicks under `exercise()` spawn new pages in the BrowserContext; they used to stack up silently and eventually wedge the parent page's locator queries on Windows. Now closed on spawn, recorded as `[popup]` console entries.
+- **`exercise()` hard wall-clock cap of 45s.** Per-click timeouts (2s × 60 clickables) were bounded in theory, but `count()` and `getAttribute()` had no explicit timeouts and could chain forever on pathological DOMs. All per-attribute calls now timeout at 1s and the outer loop breaks at 45s with `exercise budget exhausted` interactions recorded so the audit still proceeds.
+- **`/api/screenshot/:slug?breakpoint=`** falls back to the default `audit.png` when a per-breakpoint capture wasn't recorded (instead of returning 404). Lets the SPA's Phone / Tablet preset toggle show a usable image on runs that didn't exercise multi-breakpoint capture.
+
+### Fixed — Review SPA (caught by Reframe-on-Reframe)
+
+- **Toast no longer blocks underlying clicks** (`pointer-events: none`). The first dogfood run flagged this as a critical functional regression: the success toast intercepted pointer events on the workspace for its 3-second visible window.
+- **Phone / Tablet preset tabs no longer dead-end on runs without per-breakpoint captures.** They now fall back to the desktop screenshot rather than rendering as permanently disabled controls.
+- **Demo banner copy tightened** — "A demo run. Connect a real audit with…" → "Demo run. Connect with: npx reframe review &lt;runDir&gt;." (vibe register matches the brief's voice rules — fragments).
+- **`window.alert` → inline `rf-toast` component** for the primary action confirmation. Modal alerts are bad UX in general and also exactly the kind of thing `exercise()` interacts badly with.
+
 ### Docs
 
 - **README — "Hundreds of small agents, not one big one"** section. Names the 6×30=180 parallel-calls math, the three reasons (accuracy, cost, 15-min runs vs 15-hour incomplete ones), and calls out Gemini Flash as the default for its 3–7× speed/$ ratio.

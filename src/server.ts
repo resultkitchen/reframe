@@ -456,9 +456,17 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
       }
 
       const screenshotPath = path.join(absRunDir, 'pages', slug, filename);
-      if (fs.existsSync(screenshotPath)) {
+      // Fall back to the default audit.png when a breakpoint-specific
+      // capture wasn't recorded for this run. Lets the SPA's Phone /
+      // Tablet preset tabs show *something* even on runs that didn't
+      // exercise multi-breakpoint capture, instead of dead 404s.
+      const fallbackPath = path.join(absRunDir, 'pages', slug, 'audit.png');
+      const servePath = fs.existsSync(screenshotPath) ? screenshotPath
+        : (filename !== 'audit.png' && fs.existsSync(fallbackPath)) ? fallbackPath
+        : null;
+      if (servePath) {
         res.writeHead(200, { 'Content-Type': 'image/png' });
-        fs.createReadStream(screenshotPath).pipe(res);
+        fs.createReadStream(servePath).pipe(res);
       } else {
         res.writeHead(404);
         res.end('Screenshot not found');

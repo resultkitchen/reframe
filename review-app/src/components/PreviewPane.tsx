@@ -18,10 +18,17 @@ export function PreviewPane({ page, baseUrl }: Props) {
   const r = ui.register;
   const [bp, setBp] = useState<Bp>('desktop');
 
+  // Treat the desktop screenshot as a usable fallback for the smaller
+  // breakpoints when per-breakpoint captures weren't recorded — the user
+  // still gets a sharp render, just not the actual mobile/tablet layout.
+  // Previously these tabs sat in a permanently disabled state on runs
+  // without breakpoint captures, which the dogfood (2026-05-28T22-03-35
+  // g2) flagged as a high-severity dead control.
+  const desktopShot = page.hasScreenshot || page.audit?.breakpointScreenshots?.desktop != null;
   const available: Record<Bp, boolean> = {
-    mobile:  page.audit?.breakpointScreenshots?.mobile != null,
-    tablet:  page.audit?.breakpointScreenshots?.tablet != null,
-    desktop: page.hasScreenshot || page.audit?.breakpointScreenshots?.desktop != null,
+    mobile:  page.audit?.breakpointScreenshots?.mobile != null || desktopShot,
+    tablet:  page.audit?.breakpointScreenshots?.tablet != null || desktopShot,
+    desktop: desktopShot,
   };
 
   const src = `/api/screenshot/${encodeURIComponent(page.slug)}${bp === 'desktop' ? '' : `?breakpoint=${bp}`}`;

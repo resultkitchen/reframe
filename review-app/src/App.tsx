@@ -55,7 +55,7 @@ function offlineMock(): RunData {
       voice: 'Direct. Utilitarian. No marketing fluff. Focused on issues and actions.',
     },
     scope: {
-      productGoal: 'A demo run. Connect a real audit with npx reframe review <runDir>.',
+      productGoal: 'Demo run. Connect with: npx reframe review <runDir>.',
       dataCalls: [{ page: '/dashboard', kind: 'query', target: '/api/items', description: 'Loads dashboard items.' }],
       brokenContracts: [],
     },
@@ -111,7 +111,15 @@ function AppInner() {
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [currentApproval, setCurrentApproval] = useState<PageApproval | null>(null);
   const [telemetry, setTelemetry] = useState<TelemetryData | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const saveTimer = useRef<number | null>(null);
+  const toastTimer = useRef<number | null>(null);
+
+  const flashToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 3000);
+  }, []);
 
   const fetchRunData = useCallback(async () => {
     setLoading(true);
@@ -261,7 +269,7 @@ function AppInner() {
       }
       lines.push(`\nResume with: npx reframe rebuild --resume "${data.runDir}" --apply-mode pr`);
       void navigator.clipboard?.writeText(lines.join('\n'));
-      window.alert('Approved fixes + resume command copied to clipboard.\nPaste into Claude Code or your terminal.');
+      flashToast('Approved fixes + resume command copied. Paste into Claude Code or your terminal.');
     } else {
       const blob = new Blob([JSON.stringify(data.approvals, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -270,6 +278,7 @@ function AppInner() {
       a.download = 'approvals.json';
       a.click();
       URL.revokeObjectURL(url);
+      flashToast('approvals.json exported.');
     }
   };
 
@@ -341,6 +350,12 @@ function AppInner() {
       </main>
 
       <EngineDrawer data={data} telemetry={telemetry} />
+
+      {toast && (
+        <div className="rf-toast" role="status" aria-live="polite">
+          {toast}
+        </div>
+      )}
 
       {isOfflineMock && (
         <div className="rf-offline-banner" role="status">
