@@ -49,8 +49,8 @@
         "whyItMatters": "Roughly 2% of working-age users rely on screen readers daily. An unlabeled search input on your primary admin tool means those users can't do their job. It's also the first thing an accessibility audit catches in any compliance review.",
         "recommendation": "Add aria-label=\"Search active leads\" to the input, or wrap it with a visible <label htmlFor=\"search\">Search leads</label> linked by id.",
         "evidence": ["input#0 had no associated label"],
-        "signals": ["severity-critical"],
-        "confidenceTier": "low"
+        "signals": ["severity-critical", "a11y-rule-violation"],
+        "confidenceTier": "medium"
       },
       {
         "id": "g2",
@@ -63,8 +63,8 @@
         "whyItMatters": "Icon-only buttons without text are the single most common screen-reader blocker in production SaaS apps. This particular one gates access to the search itself, so it compounds the missing-label finding.",
         "recommendation": "Add aria-label=\"Submit search\" to the button. If the icon is meaningful sighted-only, also add a sr-only span with the text label.",
         "evidence": ["clickable#1 had no accessible name"],
-        "signals": ["severity-critical"],
-        "confidenceTier": "low"
+        "signals": ["severity-critical", "a11y-rule-violation"],
+        "confidenceTier": "medium"
       }
     ]
   },
@@ -77,7 +77,8 @@
     { "kind": "fieldPresent", "id": "g1", "path": "plain" },
     { "kind": "mentionsAny", "id": "g1", "values": ["screen reader", "label", "wcag", "aria"] },
     { "kind": "mentionsAny", "id": "g2", "values": ["icon", "aria", "label", "name"] },
-    { "kind": "signalsInclude", "id": "g1", "values": ["severity-critical"] },
-    { "kind": "signalsInclude", "id": "g2", "values": ["severity-critical"] }
+    { "kind": "signalsInclude", "id": "g1", "values": ["severity-critical", "a11y-rule-violation"] },
+    { "kind": "signalsInclude", "id": "g2", "values": ["severity-critical", "a11y-rule-violation"] },
+    { "kind": "tierAtLeast", "id": "g1", "value": "medium" }
   ]
 }

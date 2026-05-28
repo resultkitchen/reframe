@@ -255,6 +255,55 @@ describe('confidenceTier derivation + back-fill', () => {
   });
 });
 
+describe('a11y-rule-violation signal (slice 5)', () => {
+  it('fires for an accessibility gap whose text matches a WCAG rule', () => {
+    const a = audit([gap({
+      dimension: 'accessibility',
+      severity: 'high',
+      description: 'Search input has no associated label.',
+      recommendation: 'Add aria-label="Search active leads".',
+    })]);
+    decorateAllFindings(page, a, undefined, []);
+    assert.ok(a.gaps[0].signals?.includes('a11y-rule-violation'));
+  });
+
+  it('does NOT fire for a non-accessibility gap, even if text matches', () => {
+    // brand-voice gap that incidentally mentions "label" should not borrow
+    // accessibility trust.
+    const a = audit([gap({
+      dimension: 'brand-voice',
+      severity: 'high',
+      description: 'Headline label feels off-brand.',
+    })]);
+    decorateAllFindings(page, a, undefined, []);
+    assert.ok(!a.gaps[0].signals?.includes('a11y-rule-violation'));
+  });
+
+  it('does NOT fire for an accessibility gap whose text matches nothing', () => {
+    const a = audit([gap({
+      dimension: 'accessibility',
+      severity: 'medium',
+      description: 'Some vague accessibility concern with no WCAG hint.',
+    })]);
+    decorateAllFindings(page, a, undefined, []);
+    assert.ok(!a.gaps[0].signals?.includes('a11y-rule-violation'));
+  });
+
+  it('combined with severity-critical lifts an a11y finding to MEDIUM', () => {
+    const a = audit([gap({
+      dimension: 'accessibility',
+      severity: 'high',
+      description: 'Icon-only button has no accessible name.',
+    })]);
+    decorateAllFindings(page, a, undefined, []);
+    assert.deepEqual(
+      [...(a.gaps[0].signals ?? [])].sort(),
+      ['a11y-rule-violation', 'severity-critical'],
+    );
+    assert.equal(a.gaps[0].confidenceTier, 'medium');
+  });
+});
+
 describe('decoration is idempotent', () => {
   it('running twice produces the same signals (de-duped)', () => {
     const a = audit(

@@ -39,6 +39,7 @@ import {
   tierFor,
   type FindingSignal,
 } from './signals';
+import { matchA11yRule } from './a11y-rules';
 
 /**
  * One-shot decorator covering the two finding shapes that exist today.
@@ -95,6 +96,13 @@ function decorateAuditGaps(
 
     if (gapTouchesAnyLocation(gap, complianceLocations, page.filePath)) {
       signals.push('cross-agent-agreement');
+    }
+
+    // a11y-rule-violation — slice 5. Only consider gaps whose dimension is
+    // explicitly accessibility; otherwise we'd light up generic "contrast"
+    // mentions on a brand-voice gap and erode trust in the signal.
+    if (gap.dimension === 'accessibility' && matchA11yRule(gap)) {
+      signals.push('a11y-rule-violation');
     }
 
     applySignals(gap, signals);
