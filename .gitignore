@@ -33,8 +33,19 @@ playwright-report/
 
 config/*-auth.json
 
-# Hyperframes skills installed via `npx skills add heygen-com/hyperframes`
-# — large 3rd-party content; not needed in the repo.
+# User-filled configs. The .template.json files are the source of truth in
+# the repo; brand.json / auth.json / constraints.json are produced per-user
+# by `reframe init` (or by Stage 0's bootstrap) and may contain customer
+# branding, test logins, or domain-specific rules. Keep them local.
+config/brand.json
+config/auth.json
+config/constraints.json
+
+# Video composition (internal source for the demo gif). The rendered gif
+# lives in assets/ and ships with the repo; the source is authoring-only.
+video/
+
+# Local agent skills + lockfiles (3rd-party content, not part of the engine).
 .agents/
 skills-lock.json
 

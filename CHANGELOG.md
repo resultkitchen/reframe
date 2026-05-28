@@ -2,7 +2,7 @@
 
 All notable changes to Reframe are recorded here. Format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [SemVer](https://semver.org/).
 
-## [Unreleased] — v0.2.0 sprint
+## [0.2.0] — 2026-05-27
 
 Theme: **the dual-register sprint**. Every finding the pipeline emits now ships in two registers — plain-English for the founder, technical for the engineer — and the UI, CI integration, and review surfaces all light up around that.
 
