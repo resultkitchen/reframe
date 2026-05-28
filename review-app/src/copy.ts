@@ -20,7 +20,7 @@ const COPY: CopyMap = {
   // Top bar
   'topbar.tagline':          { vibe: 'Find what\'s broken. Ship the fix.',     technical: 'Visual Refactoring Workspace' },
   'topbar.serverOnline':     { vibe: 'Connected',                              technical: 'LOCAL SERVER ONLINE' },
-  'topbar.serverOffline':    { vibe: 'Disconnected',                           technical: 'OFFLINE MOCK MODE' },
+  'topbar.serverOffline':    { vibe: 'Showing mock data',                      technical: 'SIMULATED RUN' },
   'topbar.primary':          { vibe: 'Send approved fixes to my IDE',          technical: 'Export approval bundle' },
   'topbar.primaryHint':      { vibe: 'Copies a prompt and a resume command — paste both into Claude Code or your terminal.', technical: 'Writes approvals.json and emits the resume command for npx reframe rebuild.' },
   'topbar.toggleVibe':       { vibe: 'Vibe',                                   technical: 'Vibe' },

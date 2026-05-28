@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useUi } from '../store';
 import { t } from '../copy';
 import type { PageData } from '../types';
@@ -17,6 +17,7 @@ export function PreviewPane({ page, baseUrl }: Props) {
   const { ui, dispatch } = useUi();
   const r = ui.register;
   const [bp, setBp] = useState<Bp>('desktop');
+  const panelId = useId();
 
   // Treat the desktop screenshot as a usable fallback for the smaller
   // breakpoints when per-breakpoint captures weren't recorded — the user
@@ -25,6 +26,9 @@ export function PreviewPane({ page, baseUrl }: Props) {
   // without breakpoint captures, which the dogfood (2026-05-28T22-03-35
   // g2) flagged as a high-severity dead control.
   const desktopShot = page.hasScreenshot || page.audit?.breakpointScreenshots?.desktop != null;
+  const anyShot = desktopShot
+    || page.audit?.breakpointScreenshots?.mobile != null
+    || page.audit?.breakpointScreenshots?.tablet != null;
   const available: Record<Bp, boolean> = {
     mobile:  page.audit?.breakpointScreenshots?.mobile != null || desktopShot,
     tablet:  page.audit?.breakpointScreenshots?.tablet != null || desktopShot,
@@ -42,6 +46,7 @@ export function PreviewPane({ page, baseUrl }: Props) {
         <button
           className="rf-card-toggle"
           aria-expanded={!collapsed}
+          aria-controls={panelId}
           onClick={() => dispatch({ type: 'togglePanel', key: 'preview' })}
           type="button"
         >
@@ -49,21 +54,23 @@ export function PreviewPane({ page, baseUrl }: Props) {
           <h2 className="rf-card-title">{t('preview.heading', r)}</h2>
         </button>
         <div className="rf-card-actions">
-          <div className="rf-bp-toggle" role="tablist">
-            {(['mobile', 'tablet', 'desktop'] as Bp[]).map((k) => (
-              <button
-                key={k}
-                role="tab"
-                aria-selected={bp === k}
-                className={`rf-bp ${bp === k ? 'on' : ''}`}
-                onClick={() => setBp(k)}
-                disabled={!available[k]}
-                type="button"
-              >
-                {k === 'mobile' ? t('preview.phone', r) : k === 'tablet' ? t('preview.tablet', r) : t('preview.desktop', r)}
-              </button>
-            ))}
-          </div>
+          {anyShot && (
+            <div className="rf-bp-toggle" role="tablist">
+              {(['mobile', 'tablet', 'desktop'] as Bp[]).map((k) => (
+                <button
+                  key={k}
+                  role="tab"
+                  aria-selected={bp === k}
+                  className={`rf-bp ${bp === k ? 'on' : ''}`}
+                  onClick={() => setBp(k)}
+                  disabled={!available[k]}
+                  type="button"
+                >
+                  {k === 'mobile' ? t('preview.phone', r) : k === 'tablet' ? t('preview.tablet', r) : t('preview.desktop', r)}
+                </button>
+              ))}
+            </div>
+          )}
           {openUrl && (
             <a className="rf-btn rf-btn-ghost rf-btn-sm" href={openUrl} target="_blank" rel="noopener noreferrer">
               {t('preview.openTab', r)} ↗
@@ -73,8 +80,8 @@ export function PreviewPane({ page, baseUrl }: Props) {
       </header>
 
       {!collapsed && (
-        <div className="rf-preview-frame" style={{ ['--rf-frame-w' as string]: `${FRAME_WIDTH[bp]}px` }}>
-          {page.hasScreenshot || page.audit?.breakpointScreenshots ? (
+        <div id={panelId} className="rf-preview-frame" style={{ ['--rf-frame-w' as string]: `${FRAME_WIDTH[bp]}px` }}>
+          {anyShot ? (
             <div className="rf-preview-scroll">
               <img src={src} alt={`${page.slug} (${bp})`} className="rf-preview-img" />
             </div>

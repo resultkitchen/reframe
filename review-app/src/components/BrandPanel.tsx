@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useUi } from '../store';
 import { t } from '../copy';
 import type { BrandTokens } from '../types';
@@ -15,6 +15,7 @@ export function BrandPanel({ brand }: Props) {
   const r = ui.register;
   const [copied, setCopied] = useState<string | null>(null);
   const [stubOpen, setStubOpen] = useState(false);
+  const panelId = useId();
 
   const collapsed = ui.collapsed.brand;
 
@@ -53,6 +54,7 @@ export function BrandPanel({ brand }: Props) {
         <button
           className="rf-card-toggle"
           aria-expanded={!collapsed}
+          aria-controls={panelId}
           onClick={() => dispatch({ type: 'togglePanel', key: 'brand' })}
           type="button"
         >
@@ -62,7 +64,7 @@ export function BrandPanel({ brand }: Props) {
       </header>
 
       {!collapsed && (
-        <div className="rf-brand-body">
+        <div id={panelId} className="rf-brand-body">
           {sortedColors.length > 0 && (
             <div className="rf-brand-section">
               <h3 className="rf-brand-sub">{t('brand.colors', r)}</h3>

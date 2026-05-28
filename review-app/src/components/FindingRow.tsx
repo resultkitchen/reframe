@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useUi } from '../store';
 import { t } from '../copy';
 import type { Gap } from '../types';
@@ -21,6 +21,7 @@ export function FindingRow({ gap, decision, onToggle, onComment, onCopyPrompt }:
   const [commenting, setCommenting] = useState(false);
   const [draft, setDraft] = useState('');
   const [copied, setCopied] = useState(false);
+  const bodyId = useId();
 
   const claim = (r === 'vibe' && gap.plain) ? gap.plain : gap.description;
   const why = gap.whyItMatters;
@@ -47,6 +48,7 @@ export function FindingRow({ gap, decision, onToggle, onComment, onCopyPrompt }:
         className="rf-finding-row"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
+        aria-controls={bodyId}
         type="button"
       >
         <span className={`rf-sev rf-sev-${sev}`}>{sev.toUpperCase()}</span>
@@ -56,7 +58,7 @@ export function FindingRow({ gap, decision, onToggle, onComment, onCopyPrompt }:
       </button>
 
       {open && (
-        <div className="rf-finding-body">
+        <div id={bodyId} className="rf-finding-body">
           {why && (
             <div className="rf-finding-block">
               <h4 className="rf-finding-sub">{t('findings.whyHeader', r)}</h4>

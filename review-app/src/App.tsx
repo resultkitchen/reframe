@@ -143,17 +143,22 @@ function AppInner() {
 
   useEffect(() => { fetchRunData(); }, [fetchRunData]);
 
-  // Cross-run telemetry insights. Fail open — drawer just hides the section.
+  // Cross-run telemetry insights. Skipped entirely in offline-mock mode
+  // (where /api/run already 503'd) — there's no scenario where /api/telemetry
+  // would respond when /api/run didn't, and probing it just adds another
+  // 503 to the console for no gain.
   useEffect(() => {
+    if (isOfflineMock) return;
+    if (!data) return;
     (async () => {
       try {
         const r = await fetch('/api/telemetry');
         if (!r.ok) return;
         const j = await r.json();
         if (j && Array.isArray(j.insights)) setTelemetry(j);
-      } catch { /* offline / endpoint absent → leave null */ }
+      } catch { /* endpoint absent → leave null */ }
     })();
-  }, []);
+  }, [isOfflineMock, data]);
 
   // Sync the local approval draft when the active page changes.
   useEffect(() => {
@@ -240,16 +245,28 @@ function AppInner() {
     return { findings, pagesWithFindings, totalPages: data?.pages.length ?? 0, critical, high };
   }, [data]);
 
+  // Best-effort clipboard write. navigator.clipboard.writeText throws
+  // synchronously on permission denial (and headless / non-https origins),
+  // and the throw would otherwise interrupt the surrounding handler.
+  const safeCopy = async (text: string): Promise<boolean> => {
+    try {
+      await navigator.clipboard?.writeText(text);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const onCopyPrompt = (g: Gap) => {
     if (!activePage) return;
     const block = `# Reframe finding\n\nRoute: ${activePage.route}\nSeverity: ${g.severity.toUpperCase()}\n\n## Issue\n${g.plain ?? g.description}\n\n## Why it matters\n${g.whyItMatters ?? '(none stated)'}\n\n## Suggested fix\n${g.recommendation}\n\n## File refs\n(none recorded by the audit)\n\nApply this fix and run \`npx reframe verify ${data?.runDir ?? '<runDir>'}\` when done.`;
-    void navigator.clipboard?.writeText(block);
+    void safeCopy(block);
   };
 
   const onCopyTerminal = () => {
     if (!data) return;
     const cmd = `npx reframe rebuild --resume "${data.runDir}" --apply-mode pr`;
-    void navigator.clipboard?.writeText(cmd);
+    void safeCopy(cmd);
   };
 
   const onPrimary = () => {
@@ -268,7 +285,7 @@ function AppInner() {
         }
       }
       lines.push(`\nResume with: npx reframe rebuild --resume "${data.runDir}" --apply-mode pr`);
-      void navigator.clipboard?.writeText(lines.join('\n'));
+      void safeCopy(lines.join('\n'));
       flashToast('Approved fixes + resume command copied. Paste into Claude Code or your terminal.');
     } else {
       const blob = new Blob([JSON.stringify(data.approvals, null, 2)], { type: 'application/json' });
@@ -359,7 +376,7 @@ function AppInner() {
 
       {isOfflineMock && (
         <div className="rf-offline-banner" role="status">
-          Offline preview — no backend.{' '}
+          Showing mock data — no run server reached.{' '}
           <button
             type="button"
             className="rf-btn rf-btn-ghost rf-btn-sm"

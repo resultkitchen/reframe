@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { useUi } from '../store';
 import { t } from '../copy';
 import type { ScopeData } from '../types';
@@ -12,6 +13,7 @@ export function ContractPanel({ scope, activeRoute }: Props) {
   const { ui, dispatch } = useUi();
   const r = ui.register;
   const collapsed = ui.collapsed.contract;
+  const panelId = useId();
 
   const calls = (scope?.dataCalls ?? []).filter((c) => !activeRoute || c.page === activeRoute);
   const broken = (scope?.brokenContracts ?? []).filter((b) => !activeRoute || b.page === activeRoute || !b.page);
@@ -22,6 +24,7 @@ export function ContractPanel({ scope, activeRoute }: Props) {
         <button
           className="rf-card-toggle"
           aria-expanded={!collapsed}
+          aria-controls={panelId}
           onClick={() => dispatch({ type: 'togglePanel', key: 'contract' })}
           type="button"
         >
@@ -31,7 +34,7 @@ export function ContractPanel({ scope, activeRoute }: Props) {
       </header>
 
       {!collapsed && (
-        <div className="rf-contract-body">
+        <div id={panelId} className="rf-contract-body">
           <div className="rf-contract-section">
             <h3 className="rf-brand-sub">{t('contract.callsHeading', r)}</h3>
             {calls.length === 0 ? (

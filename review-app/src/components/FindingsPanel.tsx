@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { useUi } from '../store';
 import { t } from '../copy';
 import { SEVERITY_ORDER, type Gap, type PageApproval, type PageData, type RunData } from '../types';
@@ -32,6 +32,7 @@ export function FindingsPanel({ page, approval, onToggleGap, onComment, onCopyPr
   const { ui, dispatch } = useUi();
   const r = ui.register;
   const [filter, setFilter] = useState<FilterKey>('all');
+  const panelId = useId();
 
   const gaps = useMemo(() => {
     const list = [...(page.audit?.gaps ?? [])];
@@ -55,6 +56,7 @@ export function FindingsPanel({ page, approval, onToggleGap, onComment, onCopyPr
         <button
           className="rf-card-toggle"
           aria-expanded={!collapsed}
+          aria-controls={panelId}
           onClick={() => dispatch({ type: 'togglePanel', key: 'findings' })}
           type="button"
         >
@@ -69,7 +71,7 @@ export function FindingsPanel({ page, approval, onToggleGap, onComment, onCopyPr
       </header>
 
       {!collapsed && (
-        <>
+        <div id={panelId}>
           <div className="rf-filter-chips" role="tablist">
             {(['all', 'functional', 'a11y', 'brand', 'compliance'] as FilterKey[]).map((k) => (
               <button
@@ -112,7 +114,7 @@ export function FindingsPanel({ page, approval, onToggleGap, onComment, onCopyPr
               ))}
             </ul>
           )}
-        </>
+        </div>
       )}
     </section>
   );
