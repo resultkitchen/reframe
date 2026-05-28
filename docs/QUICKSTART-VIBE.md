@@ -44,18 +44,20 @@ npx reframe review ./runs/my-app-<stamp>
   <img src="../assets/screenshots/03-review-overview.png" alt="Run Overview — every finding across every screen, ranked" width="92%">
 </p>
 
-**What you're looking at:** the Run Overview. Every finding across every page, ranked by severity × confidence. Sidebar lists every screen with a status badge: ✓ Approved, ⚪ Bypassed, ⏳ Unreviewed.
+**What you're looking at:** the Run Overview. The 5-second answer — what the product is, how many screens, how many findings, what's HIGH. Sidebar lists every screen with status chips (Approved / Skipped / findings count).
 
-**What to do:** click a finding. You get the dual-register:
+**What to do:** click a screen. Findings on the left, preview + brand + data contracts on the right. Each finding is collapsed by default — click to expand.
 
 <p align="center">
-  <img src="../assets/screenshots/04-finding-card.png" alt="A finding card — plain register, technical register, tier chips" width="92%">
+  <img src="../assets/screenshots/04-finding-card.png" alt="A finding row — severity, claim, why, suggested fix, row-anchored Approve / Skip / Comment / Copy-as-prompt" width="92%">
 </p>
 
-- **Plain:** "The Submit button doesn't actually do anything"
+**The Vibe / Technical toggle in the top bar swaps every label and the finding text register atomically:**
+
+- **Vibe:** "The Submit button doesn't actually do anything"
 - **Technical:** `handleSubmit is not a function in intake.tsx:42`
 
-One click flips between them. The plain version is for the founder. The technical version is for the engineer.
+Vibe is the founder voice. Technical is the engineer voice. One toggle, the whole SPA flips.
 
 For each finding:
 - **Approve** → Reframe will rewrite the code in the apply pass
