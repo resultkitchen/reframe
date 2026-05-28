@@ -1,13 +1,14 @@
 import { useId, useMemo, useState } from 'react';
 import { useUi } from '../store';
 import { t } from '../copy';
-import { SEVERITY_ORDER, type Gap, type PageApproval, type PageData, type RunData } from '../types';
+import { SEVERITY_ORDER, type Gap, type PageApproval, type PageData } from '../types';
 import { FindingRow } from './FindingRow';
 
 interface Props {
   page: PageData;
   approval: PageApproval | null;
   onToggleGap: (gapId: string) => void;
+  onBulkDecision: (gapIds: string[], decision: 'apply' | 'skip') => void;
   onComment: (gapId: string, text: string) => void;
   onCopyPrompt: (gap: Gap) => void;
   onCopyTerminal: () => void;
@@ -28,10 +29,11 @@ function classify(gap: Gap): FilterKey {
 }
 
 /** Findings list with filter chips, expandable rows, row-anchored controls. */
-export function FindingsPanel({ page, approval, onToggleGap, onComment, onCopyPrompt, onCopyTerminal, runDir, isOfflineMock }: Props) {
+export function FindingsPanel({ page, approval, onToggleGap, onBulkDecision, onComment, onCopyPrompt, onCopyTerminal, isOfflineMock }: Props) {
   const { ui, dispatch } = useUi();
   const r = ui.register;
   const [filter, setFilter] = useState<FilterKey>('all');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const panelId = useId();
 
   const gaps = useMemo(() => {
@@ -47,8 +49,57 @@ export function FindingsPanel({ page, approval, onToggleGap, onComment, onCopyPr
   }, [gaps]);
 
   const visible = filter === 'all' ? gaps : gaps.filter((g) => classify(g) === filter);
+  const visibleIds = useMemo(() => visible.map((g) => g.id), [visible]);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+  const someVisibleSelected = visibleIds.some((id) => selected.has(id));
+  const selectedCount = selected.size;
 
   const collapsed = ui.collapsed.findings;
+
+  const toggleSelect = (gapId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(gapId)) next.delete(gapId); else next.add(gapId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (allVisibleSelected) {
+      // Deselect just the currently-visible ones.
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const id of visibleIds) next.delete(id);
+        return next;
+      });
+    } else {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const id of visibleIds) next.add(id);
+        return next;
+      });
+    }
+  };
+
+  const clearSelection = () => setSelected(new Set());
+
+  const bulkApprove = () => { onBulkDecision(Array.from(selected), 'apply'); clearSelection(); };
+  const bulkSkip    = () => { onBulkDecision(Array.from(selected), 'skip');  clearSelection(); };
+
+  const bulkCopyPrompts = async () => {
+    const blocks: string[] = [];
+    for (const id of selected) {
+      const g = gaps.find((x) => x.id === id);
+      if (!g) continue;
+      blocks.push(
+        `## [${g.severity.toUpperCase()}] ${g.plain ?? g.description}\n` +
+        `Why: ${g.whyItMatters ?? '(none)'}\n` +
+        `Fix: ${g.recommendation}`,
+      );
+    }
+    const out = `# Reframe — ${blocks.length} approved fix${blocks.length === 1 ? '' : 'es'}\n\nRoute: ${page.route}\n\n` + blocks.join('\n\n');
+    try { await navigator.clipboard?.writeText(out); } catch { /* swallow */ }
+  };
 
   return (
     <section className={`rf-card rf-findings ${collapsed ? 'rf-collapsed' : ''}`}>
@@ -96,6 +147,32 @@ export function FindingsPanel({ page, approval, onToggleGap, onComment, onCopyPr
             <p className="rf-note">Showing demo findings — connect a real run with <span className="rf-mono">npx reframe review &lt;runDir&gt;</span>.</p>
           )}
 
+          {visible.length > 0 && (
+            <div className="rf-select-bar">
+              <label className="rf-checkbox">
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  ref={(el) => { if (el) el.indeterminate = !allVisibleSelected && someVisibleSelected; }}
+                  onChange={toggleSelectAll}
+                />
+                <span>
+                  {selectedCount > 0
+                    ? `${selectedCount} selected`
+                    : `Select all ${visibleIds.length}`}
+                </span>
+              </label>
+              {selectedCount > 0 && (
+                <div className="rf-select-actions">
+                  <button className="rf-btn rf-btn-primary rf-btn-sm" onClick={bulkApprove} type="button">{t('findings.approve', r)} {selectedCount}</button>
+                  <button className="rf-btn rf-btn-ghost rf-btn-sm" onClick={bulkSkip} type="button">{t('findings.skip', r)} {selectedCount}</button>
+                  <button className="rf-btn rf-btn-ghost rf-btn-sm" onClick={bulkCopyPrompts} type="button">Copy {selectedCount} as prompts</button>
+                  <button className="rf-btn rf-btn-ghost rf-btn-sm" onClick={clearSelection} type="button">Clear</button>
+                </div>
+              )}
+            </div>
+          )}
+
           {visible.length === 0 ? (
             <p className="rf-empty">{t('findings.empty', r)}</p>
           ) : (
@@ -105,11 +182,11 @@ export function FindingsPanel({ page, approval, onToggleGap, onComment, onCopyPr
                   key={g.id}
                   gap={g}
                   decision={approval?.gaps?.[g.id] ?? 'apply'}
+                  selected={selected.has(g.id)}
+                  onToggleSelect={() => toggleSelect(g.id)}
                   onToggle={() => onToggleGap(g.id)}
                   onComment={(text) => onComment(g.id, text)}
                   onCopyPrompt={() => onCopyPrompt(g)}
-                  runDir={runDir}
-                  pageRoute={page.route}
                 />
               ))}
             </ul>

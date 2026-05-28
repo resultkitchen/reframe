@@ -6,15 +6,15 @@ import type { Gap } from '../types';
 interface Props {
   gap: Gap;
   decision: 'apply' | 'skip';
+  selected: boolean;
+  onToggleSelect: () => void;
   onToggle: () => void;
   onComment: (text: string) => void;
   onCopyPrompt: () => void;
-  runDir: string;
-  pageRoute: string;
 }
 
 /** One finding. Collapsed = severity + plain claim. Expanded = why + fix + actions. */
-export function FindingRow({ gap, decision, onToggle, onComment, onCopyPrompt }: Props) {
+export function FindingRow({ gap, decision, selected, onToggleSelect, onToggle, onComment, onCopyPrompt }: Props) {
   const { ui } = useUi();
   const r = ui.register;
   const [open, setOpen] = useState(false);
@@ -43,19 +43,28 @@ export function FindingRow({ gap, decision, onToggle, onComment, onCopyPrompt }:
   };
 
   return (
-    <li className={`rf-finding ${decision === 'skip' ? 'rf-skipped' : ''}`}>
-      <button
-        className="rf-finding-row"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        aria-controls={bodyId}
-        type="button"
-      >
-        <span className={`rf-sev rf-sev-${sev}`}>{sev.toUpperCase()}</span>
-        <span className="rf-finding-claim">{claim}</span>
-        {gap.dimension && <span className="rf-dim">{gap.dimension}</span>}
-        <span className="rf-finding-caret" aria-hidden>{open ? '▾' : '▸'}</span>
-      </button>
+    <li className={`rf-finding ${decision === 'skip' ? 'rf-skipped' : ''} ${selected ? 'rf-selected' : ''}`}>
+      <div className="rf-finding-row-wrap">
+        <label
+          className="rf-finding-check"
+          onClick={(e) => e.stopPropagation()}
+          aria-label={`Select finding ${gap.id}`}
+        >
+          <input type="checkbox" checked={selected} onChange={onToggleSelect} />
+        </label>
+        <button
+          className="rf-finding-row"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls={bodyId}
+          type="button"
+        >
+          <span className={`rf-sev rf-sev-${sev}`}>{sev.toUpperCase()}</span>
+          <span className="rf-finding-claim">{claim}</span>
+          {gap.dimension && <span className="rf-dim">{gap.dimension}</span>}
+          <span className="rf-finding-caret" aria-hidden>{open ? '▾' : '▸'}</span>
+        </button>
+      </div>
 
       {open && (
         <div id={bodyId} className="rf-finding-body">

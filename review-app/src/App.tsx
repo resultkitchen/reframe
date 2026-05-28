@@ -223,6 +223,14 @@ function AppInner() {
     setCurrentApproval({ ...currentApproval, gaps: { ...currentApproval.gaps, [gapId]: nextDecision } });
   };
 
+  /** Bulk-set a decision across many gap ids in one update. */
+  const setBulkDecision = (gapIds: string[], decision: 'apply' | 'skip') => {
+    if (!currentApproval || gapIds.length === 0) return;
+    const next = { ...(currentApproval.gaps ?? {}) };
+    for (const id of gapIds) next[id] = decision;
+    setCurrentApproval({ ...currentApproval, gaps: next });
+  };
+
   const addComment = (gapId: string, text: string) => {
     if (!currentApproval) return;
     const prefixed = `[${gapId}] ${text}`;
@@ -346,6 +354,7 @@ function AppInner() {
                     page={activePage}
                     approval={currentApproval}
                     onToggleGap={toggleGap}
+                    onBulkDecision={setBulkDecision}
                     onComment={addComment}
                     onCopyPrompt={onCopyPrompt}
                     onCopyTerminal={onCopyTerminal}
@@ -417,11 +426,18 @@ function OverviewView({ data, onPick, overview }: OverviewProps) {
       </section>
 
       <section className="rf-card">
-        <header className="rf-card-header"><h2 className="rf-card-title">Screens</h2></header>
+        <header className="rf-card-header">
+          <h2 className="rf-card-title">Screens</h2>
+        </header>
         <ul className="rf-screen-list">
           {data.pages.map((p) => {
-            const n = p.audit?.gaps?.length ?? 0;
-            const crit = (p.audit?.gaps ?? []).filter((g) => g.severity === 'critical').length;
+            const gaps = p.audit?.gaps ?? [];
+            const n = gaps.length;
+            const crit = gaps.filter((g) => g.severity === 'critical').length;
+            const a = data.approvals.pages[p.slug];
+            const approvedCount = gaps.filter((g) => (a?.gaps?.[g.id] ?? 'apply') === 'apply').length;
+            const skippedCount = n - approvedCount;
+            const commentCount = a?.comments?.length ?? 0;
             return (
               <li key={p.slug}>
                 <button className="rf-screen-card" onClick={() => onPick(p.slug)} type="button">
@@ -432,13 +448,67 @@ function OverviewView({ data, onPick, overview }: OverviewProps) {
                     {n > 0 ? <span className="rf-chip rf-chip-info">{n} {n === 1 ? 'finding' : 'findings'}</span>
                             : <span className="rf-chip rf-chip-ok">Clean</span>}
                   </span>
+                  {n > 0 && (
+                    <span className="rf-screen-progress" aria-label={`${approvedCount} approved, ${skippedCount} skipped, ${commentCount} comments`}>
+                      <span className="rf-screen-stat">
+                        <span className="rf-screen-stat-num">{approvedCount}</span>
+                        <span className="rf-screen-stat-label">will fix</span>
+                      </span>
+                      {skippedCount > 0 && (
+                        <span className="rf-screen-stat">
+                          <span className="rf-screen-stat-num">{skippedCount}</span>
+                          <span className="rf-screen-stat-label">skipped</span>
+                        </span>
+                      )}
+                      {commentCount > 0 && (
+                        <span className="rf-screen-stat">
+                          <span className="rf-screen-stat-num">{commentCount}</span>
+                          <span className="rf-screen-stat-label">comment{commentCount === 1 ? '' : 's'}</span>
+                        </span>
+                      )}
+                    </span>
+                  )}
                 </button>
               </li>
             );
           })}
         </ul>
       </section>
+
+      <AllCommentsSection data={data} onPick={onPick} />
     </div>
+  );
+}
+
+function AllCommentsSection({ data, onPick }: { data: RunData; onPick: (slug: string) => void }) {
+  const items: Array<{ slug: string; route: string; comments: string[] }> = [];
+  for (const p of data.pages) {
+    const c = data.approvals.pages[p.slug]?.comments ?? [];
+    if (c.length > 0) items.push({ slug: p.slug, route: p.route, comments: c });
+  }
+  if (items.length === 0) return null;
+  const total = items.reduce((acc, x) => acc + x.comments.length, 0);
+  return (
+    <section className="rf-card">
+      <header className="rf-card-header">
+        <h2 className="rf-card-title">All comments · {total}</h2>
+      </header>
+      <ul className="rf-comments-feed">
+        {items.flatMap((it) =>
+          it.comments.map((c, i) => (
+            <li key={`${it.slug}-${i}`}>
+              <button className="rf-comment-row" onClick={() => onPick(it.slug)} type="button">
+                <span className="rf-comment-source">
+                  <span className="rf-screen-name">{it.slug}</span>
+                  <span className="rf-mono rf-screen-route">{it.route}</span>
+                </span>
+                <span className="rf-comment-text">{c}</span>
+              </button>
+            </li>
+          )),
+        )}
+      </ul>
+    </section>
   );
 }
 
