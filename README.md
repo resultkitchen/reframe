@@ -5,9 +5,9 @@
 </p>
 
 <p align="center">
-  <strong>Point it at any GitHub URL or local repo.</strong><br>
-  Reframe maps the codebase, boots it, and fans out a <strong>1-mapper + 6-agent</strong> pipeline across every screen in parallel —<br>
-  then opens a clean Pull Request with <em>verified, human-reviewed</em> fixes. Not vibes. A diff you can merge.
+  <strong>Your AI shipped 32 screens. 18 of them lie.</strong><br>
+  Reframe drives every page in a real browser, catches the lies, and hands you a Pull Request that fixes them.<br>
+  Not vibes. A diff you can merge.
 </p>
 
 <p align="center">
@@ -16,198 +16,113 @@
   <img src="https://img.shields.io/badge/drives-Playwright%20Chromium-2EAD33?style=flat-square&logo=playwright&logoColor=white" alt="Playwright">
   <img src="https://img.shields.io/badge/LLM-Gemini%20%7C%20Claude%20%7C%20OpenAI%20%7C%20local-8B5CF6?style=flat-square" alt="LLM agnostic">
   <img src="https://img.shields.io/badge/output-a%20real%20PR-34E7D6?style=flat-square&logo=github&logoColor=white" alt="Outputs a real PR">
-  <img src="https://img.shields.io/badge/status-research%20preview-FFC857?style=flat-square" alt="Research preview">
+  <img src="https://img.shields.io/badge/license-Apache--2.0-FFC857?style=flat-square" alt="Apache-2.0">
 </p>
 
 <p align="center">
-  <a href="#quickstart"><b>Quickstart</b></a> ·
-  <a href="#how-it-works">How it works</a> ·
-  <a href="#the-model--1-mapper--6-agents">The 6 agents</a> ·
-  <a href="#human-in-the-loop-the-clincher">Review gate</a> ·
-  <a href="#swappable-llm-providers">Swap the model</a> ·
-  <a href="#under-the-hood">Internals</a>
+  <a href="docs/QUICKSTART-VIBE.md"><b>Vibe-coder walkthrough →</b></a> ·
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#the-6-agents">The 6 agents</a> ·
+  <a href="#under-the-hood">Internals</a> ·
+  <a href="docs/adr/">ADRs</a>
 </p>
 
 ---
 
 ## TL;DR
 
-You (or your AI agent) shipped an app fast. It mostly works. But which of the 32 screens actually render? Which buttons are dead? Which DB columns does the code reference that don't exist anymore? Where's the TCPA disclaimer that should be on the lead form?
+Vibe-coded apps don't fail. They fake-pass.
 
-**Reframe answers that — screen by screen — and hands you the fix as a Pull Request.**
+The build compiles. Tests go green. Then your customer hits `/leads/new` and the Submit button does nothing, the disclaimer is missing, and a column the code is reading got dropped two weeks ago. You don't know any of this until they tell you.
+
+**Reframe reads every screen with a real browser, audits it through 6 agents, and opens a PR with the fix.** A page that silently redirects to login can't fake a green check anymore.
 
 ```bash
 npx --yes @resultkitchen/reframe rebuild https://github.com/you/your-app --apply-mode review
 ```
 
-One command. It clones, maps, boots, audits every page with a real headless browser, designs the fix in *your* brand tokens, checks it against *your* compliance rules, writes the code, **re-drives the page to prove the fix worked**, and opens a PR. A page that silently redirects to login can't fake a green check.
-
 ---
 
-## See it in 15 seconds
+## See it
 
 <p align="center">
   <img src="assets/reframe.gif" alt="Reframe — three hours of bippity-boop becomes a 20-minute audit" width="82%">
 </p>
 
+<p align="center">
+  <img src="assets/screenshots/03-review-overview.png" alt="Run Overview — every finding across every screen, ranked" width="48%">
+  &nbsp;
+  <img src="assets/screenshots/04-finding-card.png" alt="A finding card — plain + technical register, tier chips, signals" width="48%">
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/05-breakpoint-strip.png" alt="Multi-breakpoint preview — iPhone, iPad, desktop side-by-side" width="48%">
+  &nbsp;
+  <img src="assets/screenshots/07-pr-output.png" alt="The output — a real PR with the human conversation embedded" width="48%">
+</p>
+
+<p align="center"><sub>Walkthrough with all 7 screenshots and step-by-step commands: <a href="docs/QUICKSTART-VIBE.md"><b>docs/QUICKSTART-VIBE.md</b></a></sub></p>
+
 ---
 
-## Why Reframe
+## Why this exists
 
-AI coding agents are great at *generating* apps and terrible at *telling you the truth* about them. The result is the modern vibe-coding hangover:
+Everyone is racing to generate more code. Almost no one is verifying it.
 
-| The problem | What Reframe does about it |
+That's the trap. AI coding agents are great at *writing* apps and terrible at *telling you the truth* about them. They report success the moment the file saves. They don't know if the page renders. They don't know if the button is wired. They don't know that `submissions.user_id` got renamed last week.
+
+The result: 32 screens you can't trust. Every demo is a coin flip.
+
+| What's actually broken | What Reframe does about it |
 | --- | --- |
-| "It compiles" ≠ "it works" | **Boots the app and drives every page** in a real browser. A page that won't load is a first-class result, not a crash. |
-| Hollow green checks | **Honest page-health.** An auth-redirect or a Next.js error overlay can *never* report PASS. |
-| Code that lies about the DB | **Broken-contract diffing** — orphaned tables, missing columns, dead paths, type drift, surfaced with `file:line`. |
-| Off-brand AI redesigns | Agent 3 designs **only** in your pinned brand tokens. No invented colors. |
-| Compliance landmines (TCPA / HIPAA / FTC) | A dedicated compliance agent checks every screen against *your* rules. |
-| "Trust me, I fixed it" | Agent 5 **re-drives the page** and confirms each gap is closed — and flags regressions. |
-| Non-devs can't review a diff | A **visual review app** where anyone leaves comments that get embedded in the PR. |
+| "It compiles" ≠ "it works" | Boots the app and drives every page in a real Chromium |
+| Hollow green checks | Auth-redirect or error-overlay can never report PASS |
+| Code that lies about the DB | Broken-contract diff: orphaned tables, missing columns, type drift — with `file:line` |
+| Off-brand AI redesigns | Design agent uses your pinned brand tokens only. No invented colors |
+| TCPA / HIPAA / FTC landmines | Dedicated compliance agent against your own `constraints.json` |
+| "Trust me, I fixed it" | Verify agent re-drives the page and confirms the gap is closed |
+| Non-devs can't read a diff | Visual review app where anyone leaves comments that ship into the PR |
 
-**The bet:** the scarce thing isn't generating code — it's *verifying* it. Reframe is a verification engine that happens to write code.
+The scarce thing isn't code anymore. It's truth. Reframe is a truth engine that happens to write code.
 
 ---
 
 ## Quickstart
 
-> **Requires Node 20+.** `npm install` also pulls a Playwright Chromium it drives headlessly.
+> Node 20+. `npm install` pulls a Playwright Chromium it drives headlessly.
+
+**1.** Install + init against your project:
 
 ```bash
-git clone https://github.com/resultkitchen/reframe.git
-cd reframe
-npm install
-npm run build
+npx --yes @resultkitchen/reframe init ./my-app
 ```
 
-Set whichever model key you want in `.env.local` — `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`.
+Drops three configs into your repo: `config/brand.json`, `config/auth.json`, `config/constraints.json`. Set a model key in `.env.local` (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`).
 
-### 1 — Initialize against your project
+**2.** Run a review pass (no code written yet):
 
 ```bash
-npm run reframe init ./my-app
+npx reframe rebuild ./my-app --apply-mode review --auth config/auth.json
+npx reframe review ./runs/my-app-<stamp>
 ```
 
-Scaffolds three config templates so the AI codes against *your* product, not a generic one:
+Opens the visual review app. Approve / skip / comment per finding.
 
-- `config/brand.json` — colors, type scale, spacing, voice (the design agent's only palette)
-- `config/auth.json` — **test** logins per role, so gated pages get audited *logged in*
-- `config/constraints.json` — your compliance/correctness rules
-
-### 2 — Run a review pass (no code written yet)
+**3.** Apply only what you approved:
 
 ```bash
-npm run reframe rebuild ./my-app --apply-mode review --auth config/auth.json
+npx reframe rebuild ./my-app --resume runs/my-app-<stamp> --apply-mode pr
 ```
 
-Produces a `proposed-changes.md` + an `approvals.json` ledger. Open the visual review app:
+Rewrites only the approved blocks, re-drives the pages to confirm, opens a PR with the full human conversation embedded.
 
-```bash
-npm run reframe review ./runs/my-app-<stamp>
-```
-
-### 3 — Apply only what you approved
-
-```bash
-npm run reframe rebuild ./my-app --resume runs/my-app-<stamp> --apply-mode pr
-```
-
-Reframe rewrites **only** the approved blocks, re-verifies, and opens a PR — with the entire human review conversation embedded in the PR description.
-
-<details>
-<summary><b>More CLI recipes</b></summary>
-
-```bash
-# Bootstrap: map the app, derive a brand candidate, exit — no agents, no PR.
-# The friction-free first run. Prints the brand summary inline and
-# interactively offers to pin to config/brand.json so the next run is fully
-# deterministic.
-npm run reframe bootstrap ./my-app
-
-# Pin a bootstrapped brand without the interactive prompt (CI / shell scripts).
-npm run reframe pin ./runs/my-app-<stamp>
-
-# Inspect a previously-bootstrapped brand without firing up the review SPA.
-npm run reframe show-brand ./runs/my-app-<stamp>
-
-# Re-run only Agent 5 against an existing run — fix a finding by hand,
-# verify in seconds without re-running the full pipeline.
-npm run reframe verify ./runs/my-app-<stamp>
-
-# Per-PR audit: only screens whose source files this branch touches.
-# The flag that makes Reframe usable as a CI gate on big repos.
-npm run reframe rebuild ./my-app --diff-only --diff-base origin/main
-
-# Notify reviewers via a PR conversation comment after opening the PR
-# (GitHub sends comment notifications, not body-edit notifications).
-npm run reframe rebuild ./my-app --apply-mode pr --post-findings
-
-# CI-friendly: print a single-line JSON summary on stdout as the LAST line —
-# `tail -n 1 | jq` works without parsing markdown.
-npm run reframe rebuild ./my-app --json-summary | tee run.log
-
-# Map a public repo and propose diffs only (no branch, no PR)
-npm run reframe rebuild https://github.com/acme/todo-saas --apply-mode propose --concurrency 4
-
-# Cost / speed controls: cap pages + route review agents to the cheap model tier
-npm run reframe rebuild https://github.com/acme/todo-saas --max-pages 10 --quick-scan
-
-# Drive dynamic routes with sample params so /leads/[id] is actually exercised
-npm run reframe rebuild ./my-app --params '{ "id": "1", "slug": "demo" }'
-
-# Point at a LIVE install: keep the real .env.local, skip destructive clicks
-npm run reframe rebuild ./my-app --real-env   # implies --read-only
-
-# Resume an interrupted run — completed page/agent checkpoints are skipped
-npm run reframe rebuild ./my-app --resume runs/my-app-<stamp>
-```
-
-**Exit codes:** `0` = every processed page passed verification · `1` = a page failed or the run errored.
-</details>
+The full vibe-coder walkthrough with screenshots: **[docs/QUICKSTART-VIBE.md](docs/QUICKSTART-VIBE.md)**.
 
 ---
 
-## How it works
+## The 6 agents
 
-```mermaid
-flowchart LR
-    IN(["GitHub URL or local path"]):::io
-    subgraph ENGINE [reframe engine, sandboxed]
-      direction LR
-      S0["Stage 0 · MAP<br/>pages, routes, DB,<br/>broken contracts"]:::map
-      PIN{{"brand pin gate"}}:::gate
-      S05["Stage 0.5 · BOOT<br/>install, run server,<br/>stub integrations"]:::boot
-      FAN[["per-page fan-out<br/>concurrency pool"]]:::fan
-      S0 --> PIN --> S05 --> FAN
-    end
-    IN --> S0
-    FAN --> PR["commit + Pull Request"]:::pr
-    FAN --> TS["test-user scaffold"]:::scaf
-    FAN --> MAN["run manifest"]:::scaf
-    PR --> OUT(["reviewed PR + human comments"]):::io
-
-    classDef io fill:#0E1A2E,stroke:#5BC8FF,color:#EAF1FB;
-    classDef map fill:#0E1A2E,stroke:#34E7D6,color:#EAF1FB;
-    classDef gate fill:#141233,stroke:#8B5CF6,color:#E4DCFF;
-    classDef boot fill:#0E1A2E,stroke:#5BC8FF,color:#EAF1FB;
-    classDef fan fill:#1A1030,stroke:#B07CF0,color:#EEE6FF;
-    classDef pr fill:#0E1F18,stroke:#34E7D6,color:#DFFFF4;
-    classDef scaf fill:#11192B,stroke:#3A4866,color:#C7D3E6;
-```
-
-1. **Map** the whole app — pages, routes, DB tables, data calls, component and library inventories — and diff code against schema to surface **broken contracts**.
-2. **Boot** it in a provisioned, integration-stubbed environment. *"Won't start"* is a recorded outcome, not an exception.
-3. **Fan out per page** through a parallel pool (default concurrency 8).
-4. **Apply** on a per-run branch and open a PR (`pr`), or emit diffs only (`propose`), or stop at the review gate (`review`).
-5. **Scaffold** a real test user per role with plain-English test scripts.
-6. Write a **run manifest** — per-page pass/fail, wall-clock, and alerts.
-
----
-
-## The model — 1 mapper + 6 agents
-
-Every page gets its own crew. They run as a DAG, not a chat:
+Every page gets its own crew. They run as a DAG, not a chat.
 
 ```mermaid
 flowchart LR
@@ -225,59 +140,18 @@ flowchart LR
     classDef f fill:#1E1024,stroke:#F062A6,color:#FFCBE6;
 ```
 
-| Stage / Agent | Role | Output |
+| # | Agent | What it actually does |
 | --- | --- | --- |
-| **Stage 0 — Map** | mapper | `ScopeDoc`: pages, DB tables, data calls, inventories, **broken contracts**, a bootstrapped brand candidate |
-| **Stage 0.5 — Boot** | — | `BootResult`: installs deps, boots the dev server, stubs external integrations |
-| **1 · Audit** | per page | Drives the live page at **3 viewports** (mobile / tablet / desktop), exercises it, runs a 4-persona collaborative scan — Arthur (QA), Elena (UX + responsive), Marcus (a11y + compliance), Camille (brand voice + microcopy) — and returns dual-register gaps with `plain`, `whyItMatters`, `confidence`, `dimension`, plus honest health. |
-| **2 · UX** | per page | Wireframe + functional spec — constrained to libraries already in the repo |
-| **3 · Design** | per page | Visual spec expressed **only** in pinned brand tokens |
-| **6 · Compliance** | per page | Domain/legal findings vs the pinned `constraints.json`, dual-register output (same `plain` / `whyItMatters` shape as Audit) |
-| **4 · Code** | per page | Implements the page per agents 1, 2, 3, 6 |
-| **5 · Verify** | per page | Re-drives the page, confirms gaps closed, reports regressions |
-| **Final — Scaffold** | — | Seeds a real test user per role + numbered manual test scripts |
+| **0** | Map | Lists pages, routes, DB tables, data calls. Diffs code against schema → broken contracts |
+| **0.5** | Boot | Installs deps, runs the dev server, stubs external integrations |
+| **1** | Audit | Drives the live page at 3 viewports. Four personas: QA, UX, a11y, brand-voice |
+| **2** | UX | Wireframe + spec, restricted to libraries already in your repo |
+| **3** | Design | Visual spec in pinned brand tokens. No invented colors |
+| **6** | Compliance | Domain/legal findings against your `constraints.json` |
+| **4** | Code | Implements the page per agents 1, 2, 3, 6 |
+| **5** | Verify | Re-drives the page, confirms gaps closed, catches regressions |
 
-Every JSON-emitting agent runs through a **Zod-validated** call path: the schema enforces output shape, and a single-shot retry feeds validation issues back into the prompt before failing. Catches the cross-LLM drift that makes provider swaps painful elsewhere.
-
----
-
-## Human-in-the-loop (the clincher)
-
-Reframe is built to keep the developer, designer, *and* a non-technical client in control.
-
-- **`--apply-mode review`** runs only the read-only agents (audit / ux / design / compliance), writes **zero** code, and compiles a clean review dashboard.
-- **Dual-register findings.** Every gap ships in two registers — a `plain` field for the vibe-coding founder ("the Submit button doesn't actually do anything") and a `description` field for the engineer ("`handleSubmit` is not a function in `intake.tsx:42`"). The review app has a one-click toggle. The PR description leads with the plain version.
-- **Founder Digest at the top of every page.** Top-N findings by user impact (severity × confidence), so non-technical reviewers see "fix these first" before the full list.
-- **Multi-breakpoint preview strip.** Every page is captured at iPhone 14 / iPad / Desktop. The review app shows them side-by-side and includes a CSS-resize handle for arbitrary widths — your customer was always going to see it on their phone first.
-- **Filter chips** — severity, dimension (functional / brand-voice / accessibility / responsive / microcopy / compliance / data-contract / …), and a confidence-threshold slider. Power-user noise reduction without losing the long tail.
-- **Threaded comments** — anyone can review screen cards and type plain-English feedback (*"make the submit button royal-blue,"* *"this disclaimer is missing"*) and toggle **Approve** / **Skip** per fix.
-- **Resume and apply** — on the apply pass, Reframe reads your decisions from `approvals.json`, rewrites **only** the approved blocks, re-verifies, and opens a PR with **the entire human conversation embedded in the PR description** and a plain-English summary at the top of the body. With `--post-findings`, also posts the top-3 digest as a PR conversation comment so subscribed reviewers actually get notified.
-- **Run Overview** — sidebar entry above the per-screen list. A cross-page "criticals first" triage view that ranks every finding across every audited page by severity × confidence, with per-row Skip / Restore that works for both audit gaps AND compliance findings. The flag that makes a 34-screen audit reviewable in 10 minutes instead of an hour.
-- **Pattern insights** — after a few runs, the Overview surfaces high-skip-rate patterns ("you've skipped 14/17 low-severity a11y findings across recent runs — consider hiding the dimension by default"). Computed cross-run by the local server; no telemetry leaves the box.
-- **Tight dev loop with `reframe verify`** — fix a finding by hand, then `reframe verify <runDir>` re-runs only Agent 5 against the existing audit results. ~30 seconds instead of the full pipeline's minutes.
-
-```text
-audit ─→ ux ─→ design ┐
-                      ├─→ code ─→ verify
-compliance ───────────┘
-```
-
-The review app is a React 19 + Vite SPA served by a zero-dependency Node server (`reframe review <run-dir>`), reading and writing the same `approvals.json` the engine consumes — so the hosted version and the local one share one contract.
-
----
-
-## Swappable LLM providers
-
-Pick your tradeoff. Set the provider with `--llm-provider` and pin model IDs in `config/models.json`.
-
-| Provider | Sweet spot | Concurrency | ~30-screen app |
-| --- | --- | --- | --- |
-| **Gemini** *(default)* | fast, cheap, great general runs | `8+` | **10–15 min** |
-| **Claude** | premium visual design + tricky coding | `2` *(rate limits)* | 40–60 min |
-| **OpenAI** | drop-in interchangeable | tuned per tier | — |
-| **OpenAI-compatible** | local models — Ollama, LM Studio | local | set base URL, e.g. `http://localhost:11434/v1` |
-
-Non-Gemini providers are auto-capped to `concurrency: 2` with backoff so you don't get throttled.
+Every JSON-emitting agent runs through a **Zod-validated** call path with one retry on validation failure. That's what catches cross-LLM drift when you swap providers.
 
 ---
 
@@ -285,23 +159,76 @@ Non-Gemini providers are auto-capped to `concurrency: 2` with backoff so you don
 
 The parts that make it trustworthy instead of a toy:
 
-- **Honest page-health (`PageHealth`).** Every drive is classified `ok` / `auth-redirect` / `error-overlay` / `http-error` / `navigation-failed`, captured from the *actual* navigation response. A page that isn't `ok` cannot pass — no hollow green checks.
-- **Resumable by checkpoint.** A durable `RunState` ledger records per-page, per-agent status after every step. Crash, rate-limit, or `Ctrl-C`, then `--resume`: finished agents reload from disk, the rest continue.
-- **Auth-aware auditing.** `--auth` form-fills your real login in the same browser context (real keystrokes via `pressSequentially`, not value-injection), so gated routes are audited as the logged-in user — not as a redirect to the landing page.
-- **Live-backend safety.** `--real-env` keeps the target's real `.env.local`; `--read-only` makes the browser skip destructive clicks (delete / send / pay / submit). Point it at production-adjacent installs without firing mutations.
-- **Broken-contract detection.** Code-vs-schema diffing catches `missing-table`, `missing-column`, `dead-path`, `type-drift`, and `orphaned-feature` with `file:line` and severity.
-- **Bootstrap brand inference.** Stage 0 statically extracts tokens from `tailwind.config.*`, CSS custom properties, shadcn-ui `components.json`, and pure-JS palette files via regex (no sandboxed user-code execution). Detects the UI framework from `package.json`, samples real product copy from `<h1>` / `<button>` content, then asks the LLM to **normalize and characterize** — not parse. `reframe bootstrap <target>` exposes this as a friction-free first run that ends with an interactive prompt to pin the inferred brand to `config/brand.json`.
-- **Per-PR diff-only mode.** `--diff-only` filters the fan-out to pages whose source file changed on the current branch (vs `origin/main` by default). Stage 0 still maps the whole app so contracts hold; only the audit pool narrows. The flag that makes Reframe tractable as a CI gate on big repos.
-- **Schema-validated LLM I/O.** Every JSON-emitting agent goes through Zod schemas (`src/schemas/agent-outputs.ts`) with a single-shot retry that appends validation issues back into the prompt before failing. Cross-LLM drift caught at the wire.
-- **Fixture suite + assertion eval.** `tests/fixtures/<agent>/*.json` is the contributor-facing test format: hand-curated `(input, expected, assertions)` triples per agent. `npm run check-fixtures` validates shape; `npm run eval` runs assertions against expected output. The format is designed to absorb a future live-LLM eval mode without migration.
-- **No-dependency concurrency pool.** N workers pull from a shared queue; one page throwing never aborts the pool. Scratch (clone + `node_modules` + dev server) is **always** torn down in a `finally`.
-- **Windows-hardened.** Unique-per-run scratch and run paths plus atomic state writes with retry — learned the hard way from EPERM file-lock failures.
+- **Honest page-health.** Every drive is classified `ok` / `auth-redirect` / `error-overlay` / `http-error` / `navigation-failed` from the actual nav response. A page that isn't `ok` cannot pass.
+- **Resumable by checkpoint.** `RunState` ledger records per-page, per-agent status after every step. Crash, Ctrl-C, rate-limit — `--resume` continues.
+- **Auth-aware.** `--auth` form-fills a real login in the same browser context (real keystrokes, not value-injection). Gated routes get audited logged in.
+- **Live-backend safety.** `--real-env` keeps the target's real `.env.local`. `--read-only` skips destructive clicks (delete / send / pay / submit). Point at production-adjacent installs without firing mutations.
+- **Broken-contract detection.** Code-vs-schema diffing catches `missing-table`, `missing-column`, `dead-path`, `type-drift`, `orphaned-feature` with `file:line`.
+- **Per-PR diff-only mode.** `--diff-only --diff-base origin/main` narrows the audit pool to pages whose source changed on the branch. Makes Reframe tractable as a CI gate on big repos.
+- **Bootstrap brand inference.** Static extraction from `tailwind.config.*`, CSS custom properties, shadcn-ui `components.json`. No sandboxed user-code execution.
+- **Windows-hardened.** Unique-per-run scratch paths, atomic state writes with retry. EPERM file-lock failures eliminated.
+- **No-dep concurrency pool.** N workers pull from a shared queue. One page throwing doesn't abort the pool. Scratch is always torn down in a `finally`.
 
----
+<details>
+<summary><b>More CLI recipes</b></summary>
 
-## CI integration
+```bash
+# Bootstrap: map the app, derive a brand candidate, exit — no agents, no PR
+npx reframe bootstrap ./my-app
 
-`.github/workflows/reframe-pr-template.yml` is a drop-in GitHub Action you copy into the app repo you want audited (not into rebuild-pipeline itself — this repo doesn't audit its own PRs). It runs Reframe on every PR with:
+# Pin a bootstrapped brand without the interactive prompt (CI / shell scripts)
+npx reframe pin ./runs/my-app-<stamp>
+
+# Inspect a previously-bootstrapped brand without firing up the review SPA
+npx reframe show-brand ./runs/my-app-<stamp>
+
+# Re-run only Agent 5 — fix by hand, verify in ~30s without full pipeline
+npx reframe verify ./runs/my-app-<stamp>
+
+# Per-PR audit: only screens whose source files this branch touches
+npx reframe rebuild ./my-app --diff-only --diff-base origin/main
+
+# Notify reviewers via a PR conversation comment (GitHub doesn't notify on body edits)
+npx reframe rebuild ./my-app --apply-mode pr --post-findings
+
+# CI-friendly: single-line JSON summary as the LAST stdout line
+npx reframe rebuild ./my-app --json-summary | tee run.log
+
+# Cap pages + route review agents to the cheap model tier
+npx reframe rebuild https://github.com/acme/todo-saas --max-pages 10 --quick-scan
+
+# Drive dynamic routes with sample params
+npx reframe rebuild ./my-app --params '{ "id": "1", "slug": "demo" }'
+
+# Point at a LIVE install: keep real .env.local, skip destructive clicks
+npx reframe rebuild ./my-app --real-env   # implies --read-only
+
+# Resume an interrupted run
+npx reframe rebuild ./my-app --resume runs/my-app-<stamp>
+```
+
+**Exit codes:** `0` = every processed page passed verification · `1` = a page failed or the run errored.
+</details>
+
+<details>
+<summary><b>Swap the LLM provider</b></summary>
+
+Pick your tradeoff. Set with `--llm-provider`, pin model IDs in `config/models.json`.
+
+| Provider | Sweet spot | Concurrency | ~30-screen app |
+| --- | --- | --- | --- |
+| **Gemini** *(default)* | fast, cheap, great general runs | `8+` | **10–15 min** |
+| **Claude** | premium visual design + tricky coding | `2` *(rate limits)* | 40–60 min |
+| **OpenAI** | drop-in interchangeable | tuned per tier | — |
+| **OpenAI-compatible** | local — Ollama, LM Studio | local | base URL e.g. `http://localhost:11434/v1` |
+
+Non-Gemini providers auto-cap at `concurrency: 2` with backoff so you don't get throttled.
+</details>
+
+<details>
+<summary><b>CI integration — drop-in PR audit Action</b></summary>
+
+`.github/workflows/reframe-pr-template.yml` is a drop-in GitHub Action you copy into the app repo you want audited (not into this repo — Reframe doesn't audit itself).
 
 ```bash
 reframe rebuild "$GITHUB_WORKSPACE" \
@@ -310,57 +237,18 @@ reframe rebuild "$GITHUB_WORKSPACE" \
   --post-findings --quick-scan --max-pages 12 --json-summary
 ```
 
-What that gets you:
-- **Diff-scoped audit** — only the screens this PR touches.
-- **Comment on the PR** — top-3 findings, with `whyItMatters`, ranked by impact.
-- **JSON summary on stdout** — `tail -n 1 reframe-output.log > reframe-summary.json` is the line a CI script branches on for "merge / block" decisions.
-- **Run artifacts uploaded** — the full `runs/` directory + the JSON summary, 14-day retention, so reviewers can pull the audit when they need detail.
-
-Set `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` per `--llm-provider`) as a repository secret. The default `GITHUB_TOKEN` is enough for `gh pr comment` to post.
+What you get: diff-scoped audit, a PR comment with top-3 findings ranked by impact, a JSON summary on stdout for merge/block branching, and run artifacts uploaded (14-day retention). Set `GEMINI_API_KEY` (or your provider key) as a repo secret.
+</details>
 
 ---
 
-## Project layout
+## Links
 
-```text
-config/    models.json · brand.template.json · constraints.template.json · auth.template.json
-src/
-  types.ts          single source of truth — every module and agent codes against this
-  config.ts         env + flags + files -> PipelineConfig
-  cli.ts            reframe rebuild | bootstrap | verify | show-brand | pin | init | review
-  orchestrator.ts   the DAG, the concurrency pool, resumability
-  gemini.ts         swappable LLM client + callJsonSchema (Zod-validated, retry-on-failure)
-  git.ts            clone · branch · commit · diff · PR · getChangedFiles · postPrComment
-  browser.ts        Playwright PageDriver — open / health / exercise / loginAs · multi-breakpoint
-  auth.ts           auth-aware auditing (role -> route matching, real login)
-  scratch.ts        scratch lifecycle + disk guard
-  state.ts          durable RunState (the resume ledger)
-  manifest.ts       RunManifest read/write + markdown render
-  proposed-changes.ts   review-gate report + severity-weighted effort estimate
-  sample-params.ts  dynamic-route ([id] / [slug] / [...rest]) resolution
-  server.ts         zero-dep server for the React review app · /api/telemetry
-  show-brand.ts     pretty-print the bootstrapped brand candidate from a run dir
-  pin.ts            non-interactive equivalent of `bootstrap`'s y/N pin prompt
-  verify.ts         `reframe verify` entrypoint — re-runs only Agent 5
-  schemas/          Zod schemas for every JSON-emitting agent's output
-  stages/           stage0-map (with static brand extraction) · stage0_5-boot · init-scaffold · final-scaffold
-  agents/           agent1..6
-review-app/         React 19 + Vite visual review SPA (breakpoint strip · Founder Digest · filter chips)
-tests/
-  fixtures/         contributor-facing test format — audit/ + compliance/ + README + validate.ts
-  eval/             assertion runner — `npm run eval`
-.github/workflows/  reframe-pr-template.yml — drop-in PR audit action for your app repo
-docs/
-  customer-journey*.html   ICP journey maps (Maya / Devon / Priya)
-  BRAND_SPEC.md            how the bootstrapped brand pin gate works
-runs/               run output dirs (gitignored)
-```
-
----
-
-## Roadmap
-
-Local-first today, designed toward a hosted tier on Google Cloud (Cloud Run Jobs for the engine, Cloud Run for the review API, Firebase Hosting for the SPA, Cloud Storage + Firestore for artifacts and approvals). The `ReviewStore` interface already keeps a `GcsReviewStore` viable.
+- **[Vibe-coder walkthrough](docs/QUICKSTART-VIBE.md)** — full step-by-step with screenshots
+- **[ADRs](docs/adr/)** — every architectural decision, with rationale
+- **[Module API](docs/MODULE-API.md)** — programmatic surface for embedding Reframe
+- **[Brand spec](docs/BRAND_SPEC.md)** — how the brand pin gate works
+- **[CHANGELOG](CHANGELOG.md)** — what shipped, when
 
 ---
 
@@ -369,4 +257,4 @@ Local-first today, designed toward a hosted tier on Google Cloud (Cloud Run Jobs
 </p>
 
 <p align="center"><b>Ship a rebuilt app, not a guess.</b><br>
-<sub>Pin the brand, pin the constraints, review with comments — and every re-run is reproducible.</sub></p>
+<sub>Apache-2.0 · made by <a href="https://github.com/resultkitchen">@resultkitchen</a> · <a href="https://www.npmjs.com/package/@resultkitchen/reframe">npm</a> · <a href="https://github.com/resultkitchen/reframe/issues">issues</a></sub></p>
