@@ -59,6 +59,15 @@ const SEVERITY_RANK: Record<string, number> = {
   low: 1,
 };
 
+/** ADR-0001 — mechanical tier bucketing. Identical to src/findings/signals.ts:tierFor. */
+const TIER_RANK: Record<string, number> = { low: 1, medium: 2, high: 3 };
+
+function tierFromCount(n: number): 'low' | 'medium' | 'high' {
+  if (n >= 3) return 'high';
+  if (n === 2) return 'medium';
+  return 'low';
+}
+
 type AgentName = 'audit' | 'compliance';
 
 interface Assertion {
@@ -233,6 +242,41 @@ function evalAssertion(
       return ok
         ? { pass: true }
         : { pass: false, reason: `${a.id} text mentions none of [${(a.values as string[]).join(', ')}]` };
+    }
+
+    case 'signalsInclude': {
+      const finding = findFinding(output, agent, a.id);
+      if (!finding) return { pass: false, reason: `finding "${a.id}" not found` };
+      const signals = Array.isArray(finding.signals) ? (finding.signals as string[]) : [];
+      const required = a.values as string[];
+      const missing = required.filter((r) => !signals.includes(r));
+      return missing.length === 0
+        ? { pass: true }
+        : {
+            pass: false,
+            reason: `${a.id} signals missing [${missing.join(', ')}] (has: [${signals.join(', ')}])`,
+          };
+    }
+
+    case 'tierAtLeast': {
+      const finding = findFinding(output, agent, a.id);
+      if (!finding) return { pass: false, reason: `finding "${a.id}" not found` };
+      // Prefer the explicit field; fall back to deriving from signal count
+      // so fixtures that only declare `signals` still validate.
+      let actualTier = finding.confidenceTier as string | undefined;
+      if (!actualTier) {
+        const count = Array.isArray(finding.signals) ? (finding.signals as unknown[]).length : 0;
+        actualTier = tierFromCount(count);
+      }
+      const actual = TIER_RANK[actualTier] ?? 0;
+      const required = TIER_RANK[a.value as string] ?? 0;
+      const ok = actual >= required;
+      return ok
+        ? { pass: true }
+        : {
+            pass: false,
+            reason: `${a.id} tier is "${actualTier}" — required >= "${a.value}"`,
+          };
     }
   }
 

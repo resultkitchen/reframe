@@ -77,8 +77,10 @@ Every fixture is one self-describing JSON document:
 | `categoryEquals` | Exact category match (audit only — `functional` or `ux`). |
 | `dimensionIn` | The finding's dimension is one of the listed values. |
 | `fieldPresent` | The named JSON path on the finding is a non-empty string / number. |
-| `confidenceAtLeast` | Confidence ≥ the threshold. |
+| `confidenceAtLeast` | DEPRECATED — confidence float ≥ the threshold. Prefer `tierAtLeast`. |
 | `mentionsAny` | The combined text fields (`description` / `plain` / `whyItMatters` / `recommendation`) contain at least one of the listed substrings (case-insensitive). |
+| `signalsInclude` | (ADR-0001) The finding's `signals` array includes every signal id in `values`. Known signals: `severity-critical`, `browser-evidence`, `broken-contract`, `cross-agent-agreement`, `multi-persona-agreement`, `persistent-across-runs`, `a11y-rule-violation`, `auth-or-billing-surface`, `explicit-user-feedback`. |
+| `tierAtLeast` | (ADR-0001) The finding's `confidenceTier` ≥ value (`low` < `medium` < `high`). Falls back to bucketing `signals.length` when `confidenceTier` is absent. |
 
 `id` is the agent-emitted id (`g1`, `g2`, …) for audit gaps, or the `ruleId` for compliance findings. Use `"any"` to match any finding.
 

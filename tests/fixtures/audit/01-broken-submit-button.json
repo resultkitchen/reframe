@@ -50,7 +50,9 @@
         "evidence": [
           "[pageerror] TypeError: handleSubmit is not a function",
           "click: Submit"
-        ]
+        ],
+        "signals": ["severity-critical", "browser-evidence"],
+        "confidenceTier": "medium"
       }
     ]
   },
@@ -62,6 +64,8 @@
     { "kind": "fieldPresent", "id": "g1", "path": "plain" },
     { "kind": "fieldPresent", "id": "g1", "path": "whyItMatters" },
     { "kind": "confidenceAtLeast", "id": "g1", "value": 0.8 },
-    { "kind": "mentionsAny", "id": "g1", "values": ["submit", "handler", "patient"] }
+    { "kind": "mentionsAny", "id": "g1", "values": ["submit", "handler", "patient"] },
+    { "kind": "signalsInclude", "id": "g1", "values": ["severity-critical", "browser-evidence"] },
+    { "kind": "tierAtLeast", "id": "g1", "value": "medium" }
   ]
 }

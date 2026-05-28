@@ -32,8 +32,24 @@ const KNOWN_ASSERTION_KINDS = [
   'fieldPresent',
   'confidenceAtLeast',
   'mentionsAny',
+  // ADR-0001 — signal-count confidence
+  'signalsInclude',
+  'tierAtLeast',
 ] as const;
 type AssertionKind = (typeof KNOWN_ASSERTION_KINDS)[number];
+
+const VALID_TIERS = ['low', 'medium', 'high'] as const;
+const KNOWN_SIGNALS = [
+  'browser-evidence',
+  'broken-contract',
+  'multi-persona-agreement',
+  'severity-critical',
+  'persistent-across-runs',
+  'cross-agent-agreement',
+  'auth-or-billing-surface',
+  'a11y-rule-violation',
+  'explicit-user-feedback',
+] as const;
 
 const VALID_SEVERITIES = ['critical', 'high', 'medium', 'low'] as const;
 const VALID_CATEGORIES = ['functional', 'ux'] as const;
@@ -148,6 +164,37 @@ function validateAssertion(file: string, agent: KnownAgent, idx: number, a: unkn
         fail(file, `${where} (mentionsAny): "values" must be a non-empty array of strings`);
       } else if (!obj.values.every((v) => typeof v === 'string')) {
         fail(file, `${where} (mentionsAny): every entry of "values" must be a string`);
+      }
+      break;
+
+    case 'signalsInclude':
+      if (typeof obj.id !== 'string' || obj.id === '') {
+        fail(file, `${where} (signalsInclude): "id" is required`);
+      }
+      if (!Array.isArray(obj.values) || obj.values.length === 0) {
+        fail(file, `${where} (signalsInclude): "values" must be a non-empty array of signal ids`);
+      } else {
+        for (const v of obj.values) {
+          if (typeof v !== 'string') {
+            fail(file, `${where} (signalsInclude): every "values" entry must be a string`);
+            break;
+          }
+          if (!(KNOWN_SIGNALS as readonly string[]).includes(v)) {
+            fail(
+              file,
+              `${where} (signalsInclude): unknown signal "${v}". Allowed: ${KNOWN_SIGNALS.join(', ')}`,
+            );
+          }
+        }
+      }
+      break;
+
+    case 'tierAtLeast':
+      if (typeof obj.id !== 'string' || obj.id === '') {
+        fail(file, `${where} (tierAtLeast): "id" is required`);
+      }
+      if (typeof obj.value !== 'string' || !(VALID_TIERS as readonly string[]).includes(obj.value)) {
+        fail(file, `${where} (tierAtLeast): "value" must be one of ${VALID_TIERS.join(', ')}`);
       }
       break;
   }

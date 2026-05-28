@@ -42,7 +42,9 @@
         "plain": "On an iPhone, the big photo at the top of the page fills the whole screen — so the 'get a free quote' form is invisible until you scroll down. Most people won't scroll.",
         "whyItMatters": "This is your primary lead-capture surface and your highest-intent screen. A CTA below the mobile fold typically cuts conversion 30–50%. Every visit you're paying for is leaving with worse odds of converting on phones than on laptops.",
         "recommendation": "Either cap the hero image height at ~60vh on small screens, or stack the form above the hero on widths < 768px. Test at 375×667 (iPhone SE) — the worst-case viewport in your audience.",
-        "evidence": []
+        "evidence": [],
+        "signals": ["severity-critical"],
+        "confidenceTier": "low"
       }
     ]
   },
@@ -53,6 +55,7 @@
     { "kind": "dimensionIn", "id": "g1", "values": ["responsive", "ux", "visual-hierarchy"] },
     { "kind": "fieldPresent", "id": "g1", "path": "plain" },
     { "kind": "fieldPresent", "id": "g1", "path": "whyItMatters" },
-    { "kind": "mentionsAny", "id": "g1", "values": ["mobile", "fold", "responsive", "iphone", "viewport"] }
+    { "kind": "mentionsAny", "id": "g1", "values": ["mobile", "fold", "responsive", "iphone", "viewport"] },
+    { "kind": "signalsInclude", "id": "g1", "values": ["severity-critical"] }
   ]
 }

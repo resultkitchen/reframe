@@ -1,0 +1,64 @@
+{
+  "name": "redesign-broken-intake-form",
+  "agent": "ux",
+  "description": "Patient intake page has audit gaps for a broken submit handler, missing form labels, and no inline validation. The UX proposal must address all three gap ids, produce a usable ASCII wireframe, and stick strictly to the project's existing library inventory (react + react-hook-form + tailwind — no new deps).",
+
+  "input": {
+    "page": {
+      "slug": "patient-intake",
+      "route": "/intake/new",
+      "filePath": "app/intake/new/page.tsx",
+      "purpose": "New patient signs up and submits their contact information.",
+      "userFunction": "Fill out a contact form and submit to create a patient record.",
+      "dataDependencies": [
+        { "page": "/intake/new", "kind": "mutation", "target": "patients", "description": "Insert a new patient row." }
+      ],
+      "libraries": ["react", "react-hook-form", "tailwind"]
+    },
+    "audit": {
+      "gaps": [
+        {
+          "id": "g1",
+          "category": "functional",
+          "severity": "critical",
+          "description": "Submit button is wired to an undefined handleSubmit — clicking does nothing and the patients insert never fires.",
+          "recommendation": "Bind react-hook-form's handleSubmit(onSubmit) to the form element."
+        },
+        {
+          "id": "g2",
+          "category": "ux",
+          "severity": "high",
+          "description": "Inputs have visible <label> text but no `htmlFor`/`id` linking, so screen readers announce them as unlabeled.",
+          "recommendation": "Add matching `htmlFor` and `id` attributes for every input."
+        },
+        {
+          "id": "g3",
+          "category": "ux",
+          "severity": "medium",
+          "description": "No inline validation feedback — errors only surface as a generic toast after submit.",
+          "recommendation": "Use react-hook-form's `formState.errors` to render per-field error text below each input."
+        }
+      ]
+    },
+    "scope": {
+      "libraryInventory": ["react", "react-hook-form", "tailwind"]
+    }
+  },
+
+  "expected": {
+    "page": "/intake/new",
+    "asciiWireframe": "+---------------------------------------------------+\n| New Patient Intake                                |\n+---------------------------------------------------+\n|  Full name                                        |\n|  [_____________________________________________]  |\n|  ! Required                                       |\n|                                                   |\n|  Phone                                            |\n|  [_____________________________________________]  |\n|  ! Must be a valid US phone number                |\n|                                                   |\n|  Email                                            |\n|  [_____________________________________________]  |\n|                                                   |\n|             [   Submit   ]                        |\n+---------------------------------------------------+",
+    "functionalSpec": "Single-column intake form. Each field is a labeled input with htmlFor/id pairing for screen readers (closes g2). The form element binds `onSubmit={handleSubmit(onSubmit)}` from react-hook-form so the Submit button actually fires the patients insert mutation (closes g1). Inline error text renders directly under each input, driven by `formState.errors[<field>]`, in a smaller danger-tinted line so users see the problem without leaving the field (closes g3). Submit button is disabled while `formState.isSubmitting` is true. Empty/error/success states: empty inputs render as plain; invalid inputs render with a red border + error text; on success the form clears and a confirmation toast appears. Tailwind handles all styling — no new dependencies.",
+    "librariesUsed": ["react", "react-hook-form", "tailwind"]
+  },
+
+  "assertions": [
+    { "kind": "outputFieldPresent", "path": "asciiWireframe" },
+    { "kind": "outputFieldPresent", "path": "functionalSpec" },
+    { "kind": "outputFieldPresent", "path": "librariesUsed" },
+    { "kind": "outputArraySubsetOf", "path": "librariesUsed", "values": ["react", "react-hook-form", "tailwind"] },
+    { "kind": "outputArrayLength", "path": "librariesUsed", "min": 1 },
+    { "kind": "outputMentions", "path": "functionalSpec", "values": ["g1", "g2", "g3"] },
+    { "kind": "outputMentions", "path": "functionalSpec", "values": ["handleSubmit", "react-hook-form"] }
+  ]
+}

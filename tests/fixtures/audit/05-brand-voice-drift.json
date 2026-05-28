@@ -45,7 +45,9 @@
         "plain": "The headline at the top of your homepage sounds like generic marketing hype. Your brand voice says 'speak like a knowledgeable peer, avoid all-caps and exclamation points' — and this copy does the opposite.",
         "whyItMatters": "Dental practice managers reading 'REVOLUTIONIZE Your Dental Practice with AI! 🚀' will bounce. You're targeting a serious operations buyer; hype-y copy reads as low-credibility and undermines the premium positioning the rest of the product is built around.",
         "recommendation": "Try a specific, restrained alternative: 'Scheduling, recall, and waitlist — built around the way your front desk already works.' Lead with the workflow, not the technology. No exclamation points. No emoji.",
-        "evidence": ["REVOLUTIONIZE Your Dental Practice with AI! 🚀", "ULTIMATE platform"]
+        "evidence": ["REVOLUTIONIZE Your Dental Practice with AI! 🚀", "ULTIMATE platform"],
+        "signals": ["severity-critical"],
+        "confidenceTier": "low"
       }
     ]
   },
@@ -56,6 +58,7 @@
     { "kind": "severityAtLeast", "id": "g1", "value": "medium" },
     { "kind": "fieldPresent", "id": "g1", "path": "plain" },
     { "kind": "fieldPresent", "id": "g1", "path": "whyItMatters" },
-    { "kind": "mentionsAny", "id": "g1", "values": ["voice", "tone", "hype", "premium", "headline"] }
+    { "kind": "mentionsAny", "id": "g1", "values": ["voice", "tone", "hype", "premium", "headline"] },
+    { "kind": "signalsInclude", "id": "g1", "values": ["severity-critical"] }
   ]
 }

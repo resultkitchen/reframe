@@ -35,7 +35,9 @@
         "problem": "Pricing page headlines 'Save up to 87% vs. legacy providers' with no methodology, no named competitor, no time period, and no disclosed basis for the 87% figure. This is an unsubstantiated quantified savings claim under FTC §5.",
         "plain": "Your pricing page promises customers they'll save up to 87% — but you don't say compared to what, when measured, or based on which provider. Marketing law treats that as a misleading claim, even if it's directionally true.",
         "whyItMatters": "FTC enforcement actions for unsubstantiated savings claims regularly include refund orders to every customer who saw the claim, plus civil penalties. A single state AG complaint citing this line could cost more than the year's marketing budget.",
-        "requiredFix": "Either remove the 87% figure entirely, or add an adjacent disclosure naming the comparison (e.g. 'vs. Competitor X's published 2025 rates, measured on a 5-user plan') with a clear, methodology-backed source the FTC could verify."
+        "requiredFix": "Either remove the 87% figure entirely, or add an adjacent disclosure naming the comparison (e.g. 'vs. Competitor X's published 2025 rates, measured on a 5-user plan') with a clear, methodology-backed source the FTC could verify.",
+        "signals": ["severity-critical"],
+        "confidenceTier": "low"
       }
     ]
   },
@@ -45,6 +47,7 @@
     { "kind": "severityAtLeast", "id": "ftc-substantiated-savings", "value": "high" },
     { "kind": "fieldPresent", "id": "ftc-substantiated-savings", "path": "plain" },
     { "kind": "fieldPresent", "id": "ftc-substantiated-savings", "path": "whyItMatters" },
-    { "kind": "mentionsAny", "id": "ftc-substantiated-savings", "values": ["87", "substantiat", "claim", "ftc"] }
+    { "kind": "mentionsAny", "id": "ftc-substantiated-savings", "values": ["87", "substantiat", "claim", "ftc"] },
+    { "kind": "signalsInclude", "id": "ftc-substantiated-savings", "values": ["severity-critical"] }
   ]
 }

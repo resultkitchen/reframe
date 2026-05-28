@@ -35,7 +35,9 @@
         "problem": "The phone-collecting form has no TCPA express written consent disclosure adjacent to the submit button. The form posts to /api/leads which is positioned for marketing SMS/voice follow-up.",
         "plain": "Your contact form asks for a phone number but doesn't include the legally required note that says 'by submitting, you consent to be contacted by company name'. The TCPA — a US law that governs marketing calls and texts — requires this on every form like this one.",
         "whyItMatters": "Submitting marketing texts or autodialed calls to a number captured without this disclosure exposes the business to TCPA suits with statutory damages of $500–$1,500 per call or text. The risk scales with every lead the form collects.",
-        "requiredFix": "Add a checkbox or visible disclosure adjacent to the submit button along the lines of: 'By clicking Submit, you agree that <Company Name> may contact you at the phone number provided, including by SMS and autodialed calls, for marketing purposes. Consent is not a condition of any purchase. Message and data rates may apply.'"
+        "requiredFix": "Add a checkbox or visible disclosure adjacent to the submit button along the lines of: 'By clicking Submit, you agree that <Company Name> may contact you at the phone number provided, including by SMS and autodialed calls, for marketing purposes. Consent is not a condition of any purchase. Message and data rates may apply.'",
+        "signals": ["severity-critical"],
+        "confidenceTier": "low"
       }
     ]
   },
@@ -45,6 +47,7 @@
     { "kind": "severityAtLeast", "id": "tcpa-express-consent", "value": "high" },
     { "kind": "fieldPresent", "id": "tcpa-express-consent", "path": "plain" },
     { "kind": "fieldPresent", "id": "tcpa-express-consent", "path": "whyItMatters" },
-    { "kind": "mentionsAny", "id": "tcpa-express-consent", "values": ["tcpa", "consent", "phone"] }
+    { "kind": "mentionsAny", "id": "tcpa-express-consent", "values": ["tcpa", "consent", "phone"] },
+    { "kind": "signalsInclude", "id": "tcpa-express-consent", "values": ["severity-critical"] }
   ]
 }

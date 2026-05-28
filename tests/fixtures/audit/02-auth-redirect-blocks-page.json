@@ -44,7 +44,9 @@
         "plain": "We couldn't actually look at the admin dashboard. The app sent us to the login screen instead. To audit this page for real, give us a test admin account.",
         "whyItMatters": "Every authenticated page in your app is invisible to the audit until you provide credentials. Findings you see for these routes are about the login page, not the page you care about.",
         "recommendation": "Run with --auth pointing at a config/auth.json that has a role mapped to /admin/* with a working test admin login. See config/auth.template.json.",
-        "evidence": ["Final URL: /login?next=/admin/dashboard"]
+        "evidence": ["Final URL: /login?next=/admin/dashboard"],
+        "signals": ["severity-critical"],
+        "confidenceTier": "low"
       }
     ]
   },
@@ -54,6 +56,7 @@
     { "kind": "severityAtLeast", "id": "g1", "value": "high" },
     { "kind": "fieldPresent", "id": "g1", "path": "plain" },
     { "kind": "fieldPresent", "id": "g1", "path": "whyItMatters" },
-    { "kind": "mentionsAny", "id": "g1", "values": ["login", "redirect", "auth", "credentials"] }
+    { "kind": "mentionsAny", "id": "g1", "values": ["login", "redirect", "auth", "credentials"] },
+    { "kind": "signalsInclude", "id": "g1", "values": ["severity-critical"] }
   ]
 }
