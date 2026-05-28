@@ -378,20 +378,35 @@ export const FINDING_DIMENSIONS: readonly FindingDimension[] = [
  * Dual-register fields shared across every finding-shaped output (Gap,
  * ComplianceFinding, BrokenContract).
  *
- * - `plain`         : the same issue written for a non-technical reader
- *                     (founder, designer, client). No jargon, concrete impact.
- * - `whyItMatters`  : the user-facing consequence if shipped as-is.
- * - `confidence`    : 0..1 — how certain the agent is the issue is real.
- *                     Reviewers filter on this; ≥0.9 = act, 0.5–0.9 = check.
- * - `dimension`     : finer category for grouping / filtering.
+ * - `plain`           : the same issue written for a non-technical reader
+ *                       (founder, designer, client). No jargon, concrete impact.
+ * - `whyItMatters`    : the user-facing consequence if shipped as-is.
+ * - `dimension`       : finer category for grouping / filtering.
+ * - `signals`         : ADR-0001 — concrete reasons to trust the finding.
+ *                       Each is produced by a known mechanical check
+ *                       (browser evidence, broken-contract match, persona
+ *                       agreement, …). NEVER invented by the LLM.
+ * - `confidenceTier`  : ADR-0001 — derived mechanically from `signals.length`
+ *                       (0–1 → low, 2 → medium, 3+ → high). The new ranking
+ *                       primitive; replaces the float in v0.4.
+ * - `confidence`      : DEPRECATED — kept one release for back-compat with
+ *                       the review-app's slider. Back-filled from
+ *                       `signals` via `confidenceFromSignals()` when the
+ *                       agent doesn't produce one directly. To be removed
+ *                       in v0.4 once the chip-based UI ships.
  *
  * All optional so legacy outputs and older agent versions remain valid.
  */
+import type { ConfidenceTier, FindingSignal } from './findings/signals';
+
 export interface FindingMeta {
   plain?: string;
   whyItMatters?: string;
+  /** DEPRECATED (ADR-0001): use signals + confidenceTier. Removed in v0.4. */
   confidence?: number;
   dimension?: FindingDimension;
+  signals?: FindingSignal[];
+  confidenceTier?: ConfidenceTier;
 }
 
 /** A single functional/UX gap found by Agent 1. */

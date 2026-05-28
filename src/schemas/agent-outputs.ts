@@ -44,6 +44,28 @@ export const FindingDimensionSchema = z.enum([
 ]);
 
 /**
+ * Signal-count confidence — ADR-0001.
+ *
+ * Mirrors the runtime enum in `src/findings/signals.ts`. Kept literal here
+ * (not imported) for the same self-contained-schema reasons as
+ * FindingDimensionSchema above: the runtime check doesn't depend on
+ * TS-only types.
+ */
+export const FindingSignalSchema = z.enum([
+  'browser-evidence',
+  'broken-contract',
+  'multi-persona-agreement',
+  'severity-critical',
+  'persistent-across-runs',
+  'cross-agent-agreement',
+  'auth-or-billing-surface',
+  'a11y-rule-violation',
+  'explicit-user-feedback',
+]);
+
+export const ConfidenceTierSchema = z.enum(['low', 'medium', 'high']);
+
+/**
  * Confidence values come back as either floats in [0,1] or numeric strings
  * (sometimes with a trailing "%"). The agent's coerceConfidence handles the
  * unification — the schema just lets either type through.
@@ -51,6 +73,19 @@ export const FindingDimensionSchema = z.enum([
 export const ConfidenceSchema = z
   .union([z.number(), z.string()])
   .optional();
+
+/**
+ * ADR-0001 finding-meta extensions. Both fields are .optional() so older
+ * fixtures and pre-v0.3 agent outputs still validate. Producers (the
+ * orchestrator + per-agent normalisers) populate `signals`; the
+ * `confidenceTier` is derived from `signals.length` via `tierFor()` and
+ * also written to the finding to keep downstream consumers (review-app,
+ * PR-body templating) from re-deriving it every render.
+ */
+const FindingMetaExtensionFields = {
+  signals: z.array(FindingSignalSchema).optional(),
+  confidenceTier: ConfidenceTierSchema.optional(),
+};
 
 /* ─────────────────────────── Agent 1 — Audit ─────────────────────────── */
 
@@ -65,6 +100,7 @@ export const AuditGapSchema = z.object({
   whyItMatters: z.string().optional(),
   recommendation: z.string().optional(),
   evidence: z.array(z.string()).optional(),
+  ...FindingMetaExtensionFields,
 });
 
 export const AuditOutputSchema = z.object({
@@ -86,6 +122,7 @@ export const ComplianceFindingSchema = z.object({
   plain: z.string().optional(),
   whyItMatters: z.string().optional(),
   requiredFix: z.string().optional(),
+  ...FindingMetaExtensionFields,
 });
 
 export const ComplianceOutputSchema = z.object({
