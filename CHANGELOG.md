@@ -2,6 +2,42 @@
 
 All notable changes to Reframe are recorded here. Format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+Theme: **the SPA earns its labels**. A founder-led critique of the review SPA (every button passes the 5-second "what does this do?" test, brand panel goes visual, broken connectors get wired, and the vibe-coder flow back to Claude Code is named.)
+
+### Added — Review SPA
+
+- **Vibe ⇄ Technical register toggle** in the top bar. One switch swaps every label in the SPA atomically via `review-app/src/copy.ts`. Vibe register avoids engineer vocabulary ("manifest", "fan-out", "approval bundle"); Technical register keeps it.
+- **Product summary card** — 5-second answer generated from `scope.productGoal` + finding counts. The elevator pitch the audit already had, surfaced.
+- **Row-anchored Approve / Skip / Comment / Copy-as-prompt strip** on every finding. Findings collapsed by default (severity + plain claim); expand for why / fix / signals. Auto-saves debounced. Status pills with Undo. No more scrolling to a footer textbox.
+- **"Copy as prompt"** — clipboard-ready markdown block per finding (route + plain claim + suggested fix). **"Copy terminal command"** — the exact `npx reframe rebuild --resume <runDir> --apply-mode pr` invocation. The two connectors between the SPA and a vibe-coder's flow in Claude Code / their terminal.
+- **Phone · Tablet · Desktop preset toggle** in the Preview pane. Native-res images in an `overflow:auto` frame — no scaled-iframe blur. Bound to `audit-{mobile,tablet,desktop}.png` already on disk.
+- **`Open in new tab ↗`** wired to the audited URL. Replaces the dead "Live View" button (the canonical Norman door from the critique).
+- **Visual Brand panel** — clickable color swatch grid (click to copy hex), live type ladder rendered in the brand fonts, voice descriptors as chips. Raw brand bible lives behind `<details>` "Show extracted brand bible". Stubbed `Edit brand & re-audit ↗` CTA points to the existing `npx reframe verify` flow (engine work is out of scope for this PR).
+- **New Data / Contract panel** — parallel to Brand. Renders `scope.dataCalls` table + `scope.brokenContracts` list with honest empty state.
+- **Filter chips with counts** — `All (n) · Functional (n) · A11y (n) · Brand (n) · Compliance (n)`. Each chip classifies findings by dimension + signal.
+- **Resizable, collapsible workspace** — draggable splitter between findings + side column, per-panel collapse toggles, sidebar collapsible. Mobile (`< 1024px`) stacks vertically. Layout persisted to `localStorage` under `reframe.ui.v1`.
+- **Engine drawer** — slides in from the right. Houses raw state + approvals JSON (where the "JS Telemetry Blueprint" debug dump used to sit inline below the fold).
+- **Token-driven theming** — all colors flow through CSS custom properties in `review-app/src/tokens.css`. The SPA writes `brand.resolved.json` colors into `--rf-*` vars on mount, so the review tool itself reflects the brand the audit found.
+
+### Changed
+
+- **`review-app/src/App.tsx`** — 2,739 → ~290 lines of orchestration; 8 focused components under `review-app/src/components/`.
+- **`review-app/src/index.css`** — 40 KB → 18 KB; gzipped CSS bundle now 3.9 KB.
+- **`src/server.ts` `/api/run`** now also returns `brand` and `scope` (read-only file reads of `brand.resolved.json` + `scope.json`) so the SPA can render the Brand and Contract panels without a second fetch.
+
+### Removed
+
+- The "v2 Zen stepper" approve flow (`Step 1 / Step 2 / Step 3 ↓` cards). Replaced by the per-row inline control strip — the user works finding-by-finding, not step-by-step across all findings.
+- The right-edge drag-resize handle on the preview. Replaced by the Phone/Tablet/Desktop preset toggle.
+- "Save Selections" + "Download Changes Bundle" button pair. Replaced by a single register-aware primary action (`Send approved fixes to my IDE` / `Export approval bundle`) and an auto-saved indicator.
+- "Visual Refactoring Workspace" tagline in Vibe register. Replaced with the brief's mandated voice — fragments, weapons.
+
+### Docs
+
+- **README — "Hundreds of small agents, not one big one"** section. Names the 6×30=180 parallel-calls math, the three reasons (accuracy, cost, 15-min runs vs 15-hour incomplete ones), and calls out Gemini Flash as the default for its 3–7× speed/$ ratio.
+
 ## [0.2.0] — 2026-05-27
 
 Theme: **the dual-register sprint**. Every finding the pipeline emits now ships in two registers — plain-English for the founder, technical for the engineer — and the UI, CI integration, and review surfaces all light up around that.

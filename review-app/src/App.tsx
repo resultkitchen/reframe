@@ -85,6 +85,22 @@ function applyBrandTokens(data: RunData | null) {
   }
 }
 
+export interface TelemetryInsight {
+  axis: 'dimension' | 'severity';
+  value: string;
+  applies: number;
+  skips: number;
+  skipRate: number;
+  headline: string;
+}
+
+export interface TelemetryData {
+  schemaVersion: number;
+  scannedRuns: number;
+  totalDecisions: number;
+  insights: TelemetryInsight[];
+}
+
 function AppInner() {
   const { ui } = useUi();
   const [data, setData] = useState<RunData | null>(null);
@@ -94,6 +110,7 @@ function AppInner() {
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [currentApproval, setCurrentApproval] = useState<PageApproval | null>(null);
+  const [telemetry, setTelemetry] = useState<TelemetryData | null>(null);
   const saveTimer = useRef<number | null>(null);
 
   const fetchRunData = useCallback(async () => {
@@ -117,6 +134,18 @@ function AppInner() {
   }, []);
 
   useEffect(() => { fetchRunData(); }, [fetchRunData]);
+
+  // Cross-run telemetry insights. Fail open — drawer just hides the section.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/telemetry');
+        if (!r.ok) return;
+        const j = await r.json();
+        if (j && Array.isArray(j.insights)) setTelemetry(j);
+      } catch { /* offline / endpoint absent → leave null */ }
+    })();
+  }, []);
 
   // Sync the local approval draft when the active page changes.
   useEffect(() => {
@@ -311,7 +340,7 @@ function AppInner() {
         </section>
       </main>
 
-      <EngineDrawer data={data} />
+      <EngineDrawer data={data} telemetry={telemetry} />
 
       {isOfflineMock && (
         <div className="rf-offline-banner" role="status">

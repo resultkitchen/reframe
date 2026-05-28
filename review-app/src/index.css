@@ -544,6 +544,17 @@ input, textarea { font: inherit; }
 .rf-drawer-header h2 { font-size: 16px; }
 .rf-drawer-body { padding: var(--rf-sp-4); overflow: auto; display: flex; flex-direction: column; gap: var(--rf-sp-3); }
 
+.rf-insight-list { list-style: none; display: flex; flex-direction: column; gap: var(--rf-sp-2); }
+.rf-insight {
+  display: grid; grid-template-columns: 56px 1fr; gap: var(--rf-sp-3);
+  background: var(--rf-surface-2); border-radius: var(--rf-r-md);
+  padding: var(--rf-sp-3); align-items: center;
+}
+.rf-insight-rate { font-family: var(--rf-font-display); font-size: 22px; font-weight: 800; color: var(--rf-warning); text-align: center; }
+.rf-insight-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rf-insight-headline { font-size: 13px; font-weight: 600; color: var(--rf-text); line-height: 1.4; }
+.rf-insight-meta { font-size: 11px; color: var(--rf-muted); }
+
 /* ────────────────────────── Offline banner ────────────────────────── */
 
 .rf-offline-banner {
