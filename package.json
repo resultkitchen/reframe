@@ -1,17 +1,46 @@
 {
   "name": "@resultkitchen/reframe",
   "version": "0.2.0",
-  "private": true,
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/resultkitchen/reframe.git"
+    "url": "git+https://github.com/resultkitchen/reframe.git"
   },
-  "description": "Reframe — Portable SaaS screen-by-screen architectural refactoring engine.",
+  "homepage": "https://github.com/resultkitchen/reframe#readme",
+  "bugs": {
+    "url": "https://github.com/resultkitchen/reframe/issues"
+  },
+  "keywords": [
+    "code-review",
+    "audit",
+    "playwright",
+    "llm",
+    "agents",
+    "gemini",
+    "claude",
+    "openai",
+    "ux",
+    "compliance",
+    "accessibility"
+  ],
+  "description": "Reframe — point it at any repo, get back a verified, human-reviewed Pull Request. Screen-by-screen audit + fix engine.",
   "bin": {
-    "reframe": "./dist/cli.js"
+    "reframe": "dist/cli.js"
   },
   "main": "./dist/cli.js",
+  "files": [
+    "dist/",
+    "config/*.template.json",
+    "config/models.json",
+    "tests/fixtures/**",
+    "docs/**",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
