@@ -1,5 +1,5 @@
 {
-  "$comment": "Gemini model pins per pipeline role. Swapped to the flagship, generally available Gemini 3.5 Flash, Gemini 3.1 Pro Preview, and Gemini 3.1 Flash-Lite models as specified by OpenWolf cerebrum memory (May 2026).",
+  "$comment": "Gemini model pins per pipeline role. Pinned to the generally-available Gemini 3.5 Flash, Gemini 3.1 Pro Preview, and Gemini 3.1 Flash-Lite tiers (May 2026). Override any of these via --llm-provider + per-role flags; see docs/MODULE-API.md.",
   "mapper": "gemini-3.1-pro-preview",
   "agent1_audit": "gemini-3.5-flash",
   "agent2_ux": "gemini-3.5-flash",

@@ -1,13 +1,8 @@
-# OpenWolf
+# Reframe — project boundaries
 
-@.wolf/OPENWOLF.md
+## Scope & Boundaries: local-first open source
 
-This project uses OpenWolf for context management. Read and follow .wolf/OPENWOLF.md every session. Check .wolf/cerebrum.md before generating code. Check .wolf/anatomy.md before reading files.
-
----
-
-## 🏛️ Scope & Boundaries: Local-First Open Source
-- **Repository Scope**: This project (`reframe`) contains exclusively the **Open-Source Local-First Engine** and CLI (`reframe review <runDir>`).
-- **No Hosting / SaaS Deployments**: There are **no** Netlify, Vercel, or Google Cloud active web deployments configured in this repository.
-- **Local-Only Flow**: It runs on `localhost`, reads/writes local `approvals.json` files on your disk, and copy-pastes resilient prompts to your local IDE co-pilots.
-- **SaaS Platform**: The commercial SaaS product (Firebase Hosting + Google Cloud Run) will reside in a separate repository (`reframe-saas`), developed independently.
+- **Repository scope:** this project (`reframe`) contains exclusively the **open-source local-first engine** and CLI (`reframe rebuild`, `reframe review <runDir>`, `reframe verify`, `reframe bootstrap`, `reframe init`).
+- **No hosting / SaaS deployments.** No Netlify, Vercel, or Google Cloud active web deployments are configured in this repository.
+- **Local-only flow.** Reframe runs on `localhost`, reads/writes local `approvals.json` files on disk, and produces resilient prompts you paste into your own IDE / co-pilot.
+- **SaaS platform.** The commercial SaaS product (Firebase Hosting + Google Cloud Run) will live in a separate repository (`reframe-saas`), developed independently. Don't add hosting glue here.
