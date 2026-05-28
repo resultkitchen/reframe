@@ -388,6 +388,71 @@ describe('multi-persona-agreement signal (slice 3)', () => {
   });
 });
 
+describe('telemetry-fed signals (slice 4)', () => {
+  const fpGap = (slug: string, description: string): string =>
+    `${slug}::ux::${description.toLowerCase().trim().replace(/\s+/g, ' ').slice(0, 80)}`;
+
+  it('persistent-across-runs fires when fingerprint count >= threshold', () => {
+    const a = audit([gap({
+      severity: 'medium',
+      description: 'Submit button is misaligned on mobile.',
+    })]);
+    const telemetry = {
+      occurrenceCount: new Map([[fpGap('intake', 'Submit button is misaligned on mobile.'), 3]]),
+      hadFeedback: new Set<string>(),
+    };
+    decorateAllFindings(page, a, undefined, [], telemetry);
+    assert.ok(a.gaps[0].signals?.includes('persistent-across-runs'));
+  });
+
+  it('persistent-across-runs does NOT fire below threshold', () => {
+    const a = audit([gap({
+      severity: 'medium',
+      description: 'Submit button is misaligned on mobile.',
+    })]);
+    const telemetry = {
+      occurrenceCount: new Map([[fpGap('intake', 'Submit button is misaligned on mobile.'), 1]]),
+      hadFeedback: new Set<string>(),
+    };
+    decorateAllFindings(page, a, undefined, [], telemetry);
+    assert.ok(!a.gaps[0].signals?.includes('persistent-across-runs'));
+  });
+
+  it('explicit-user-feedback fires when fingerprint is in the feedback set', () => {
+    const a = audit([gap({
+      severity: 'medium',
+      description: 'Phone field accepts non-numeric input.',
+    })]);
+    const telemetry = {
+      occurrenceCount: new Map<string, number>(),
+      hadFeedback: new Set([fpGap('intake', 'Phone field accepts non-numeric input.')]),
+    };
+    decorateAllFindings(page, a, undefined, [], telemetry);
+    assert.ok(a.gaps[0].signals?.includes('explicit-user-feedback'));
+  });
+
+  it('both telemetry signals + severity lift a finding to HIGH', () => {
+    const a = audit([gap({
+      severity: 'critical',
+      description: 'Critical broken submit.',
+    })]);
+    const fp = fpGap('intake', 'Critical broken submit.');
+    const telemetry = {
+      occurrenceCount: new Map([[fp, 5]]),
+      hadFeedback: new Set([fp]),
+    };
+    decorateAllFindings(page, a, undefined, [], telemetry);
+    assert.equal(a.gaps[0].confidenceTier, 'high');
+  });
+
+  it('an absent telemetry feed leaves both signals unset (default empty map)', () => {
+    const a = audit([gap({ severity: 'medium', description: 'something' })]);
+    decorateAllFindings(page, a, undefined, []); // no telemetry arg
+    assert.ok(!a.gaps[0].signals?.includes('persistent-across-runs'));
+    assert.ok(!a.gaps[0].signals?.includes('explicit-user-feedback'));
+  });
+});
+
 describe('decoration is idempotent', () => {
   it('running twice produces the same signals (de-duped)', () => {
     const a = audit(

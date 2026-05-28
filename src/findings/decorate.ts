@@ -41,6 +41,13 @@ import {
 } from './signals';
 import { matchA11yRule } from './a11y-rules';
 import { isRiskSurface } from './risk-surfaces';
+import {
+  PERSISTENT_RUN_THRESHOLD,
+  complianceFingerprint,
+  emptyTelemetrySignals,
+  gapFingerprint,
+  type TelemetrySignals,
+} from './telemetry-signals';
 
 /**
  * One-shot decorator covering the two finding shapes that exist today.
@@ -53,6 +60,7 @@ export function decorateAllFindings(
   audit: AuditResult | undefined,
   compliance: ComplianceResult | undefined,
   brokenContracts: readonly BrokenContract[],
+  telemetry: TelemetrySignals = emptyTelemetrySignals(),
 ): void {
   // Snapshot the cross-agent agreement table BEFORE mutating either side
   // so the order Agent 1/Agent 6 happened to finish in doesn't change
@@ -61,10 +69,10 @@ export function decorateAllFindings(
   const complianceLocations = collectComplianceLocations(compliance);
 
   if (audit) {
-    decorateAuditGaps(audit, page, brokenContracts, complianceLocations);
+    decorateAuditGaps(audit, page, brokenContracts, complianceLocations, telemetry);
   }
   if (compliance) {
-    decorateComplianceFindings(compliance, page, brokenContracts, auditLocations);
+    decorateComplianceFindings(compliance, page, brokenContracts, auditLocations, telemetry);
   }
 }
 
@@ -75,6 +83,7 @@ function decorateAuditGaps(
   page: PageScope,
   brokenContracts: readonly BrokenContract[],
   complianceLocations: ReadonlySet<string>,
+  telemetry: TelemetrySignals,
 ): void {
   const browserEvidencePresent = hasBrowserEvidence(audit.consoleErrors);
   const pageBrokenContracts = brokenContracts.filter((bc) =>
@@ -118,6 +127,16 @@ function decorateAuditGaps(
       signals.push('multi-persona-agreement');
     }
 
+    // Telemetry-fed signals — slice 4. The fingerprint is per-page so the
+    // same gap text on a different page does NOT collide.
+    const fp = gapFingerprint(page.slug, gap);
+    if ((telemetry.occurrenceCount.get(fp) ?? 0) >= PERSISTENT_RUN_THRESHOLD) {
+      signals.push('persistent-across-runs');
+    }
+    if (telemetry.hadFeedback.has(fp)) {
+      signals.push('explicit-user-feedback');
+    }
+
     applySignals(gap, signals);
   }
 }
@@ -129,6 +148,7 @@ function decorateComplianceFindings(
   page: PageScope,
   brokenContracts: readonly BrokenContract[],
   auditLocations: ReadonlySet<string>,
+  telemetry: TelemetrySignals,
 ): void {
   const pageBrokenContracts = brokenContracts.filter((bc) =>
     locationTouchesFile(bc.location, page.filePath),
@@ -160,6 +180,17 @@ function decorateComplianceFindings(
       if (auditLocations.has(normaliseLocation(finding.location))) {
         signals.push('cross-agent-agreement');
       }
+    }
+
+    // Telemetry-fed signals — slice 4. Compliance fingerprint is
+    // (slug, ruleId, location); a re-occurring TCPA finding rooted in
+    // the same file across multiple runs lights both up.
+    const fp = complianceFingerprint(page.slug, finding);
+    if ((telemetry.occurrenceCount.get(fp) ?? 0) >= PERSISTENT_RUN_THRESHOLD) {
+      signals.push('persistent-across-runs');
+    }
+    if (telemetry.hadFeedback.has(fp)) {
+      signals.push('explicit-user-feedback');
     }
 
     applySignals(finding, signals);

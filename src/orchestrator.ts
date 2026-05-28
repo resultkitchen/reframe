@@ -37,6 +37,7 @@ import { runVerify } from './agents/agent5-verify';
 import { runCompliance } from './agents/agent6-compliance';
 
 import { decorateAllFindings } from './findings/decorate';
+import { loadTelemetrySignals } from './findings/telemetry-signals';
 
 import type {
   PipelineConfig,
@@ -492,6 +493,21 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       `[reframe] fan-out: ${scope.pages.length} page(s), ` +
         `concurrency ${config.concurrency}.`,
     );
+
+    // ADR-0001 slice 4 — compute the cross-run telemetry signals ONCE
+    // before the per-page fan-out and pass the result into every
+    // decorateAllFindings call. Runs in milliseconds (~50 small JSON
+    // reads); a per-page recompute would be O(pages × priors) for the
+    // same answer.
+    const runsParent = path.dirname(config.runDir);
+    const telemetrySignals = loadTelemetrySignals(runsParent, config.runDir);
+    if (telemetrySignals.occurrenceCount.size > 0 || telemetrySignals.hadFeedback.size > 0) {
+      console.log(
+        `[reframe] telemetry: ${telemetrySignals.occurrenceCount.size} recurring ` +
+          `finding fingerprint(s), ${telemetrySignals.hadFeedback.size} with prior feedback.`,
+      );
+    }
+
     const pageEntries: PageManifestEntry[] = [];
 
     const processPage = async (page: PageScope): Promise<void> => {
@@ -637,7 +653,13 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       // ctx.compliance.findings in place so review-app, PR body, Founder
       // Digest, and Agent 4's prompt all see the enriched data without
       // additional wiring.
-      decorateAllFindings(page, ctx.audit, ctx.compliance, scope.brokenContracts);
+      decorateAllFindings(
+        page,
+        ctx.audit,
+        ctx.compliance,
+        scope.brokenContracts,
+        telemetrySignals,
+      );
 
       // 'review' mode stops at the four review agents: no code, no verify —
       // the operator approves proposed-changes.md before any apply pass.
