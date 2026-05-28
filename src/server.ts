@@ -333,6 +333,20 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
           isGitRepo = fs.existsSync(path.join(process.cwd(), '.git'));
         }
 
+        // Surface brand + scope as read-only artifacts so the SPA can render
+        // visual brand and data-contract panels without a separate fetch.
+        // (No engine logic change — just additional file reads.)
+        let brand: any = null;
+        const brandPath = path.join(absRunDir, 'brand.resolved.json');
+        if (fs.existsSync(brandPath)) {
+          try { brand = JSON.parse(fs.readFileSync(brandPath, 'utf8')); } catch {}
+        }
+        let scope: any = null;
+        const scopePath = path.join(absRunDir, 'scope.json');
+        if (fs.existsSync(scopePath)) {
+          try { scope = JSON.parse(fs.readFileSync(scopePath, 'utf8')); } catch {}
+        }
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           runDir: absRunDir,
@@ -340,6 +354,8 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
           state,
           approvals,
           pages,
+          brand,
+          scope,
         }));
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });

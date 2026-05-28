@@ -1,0 +1,69 @@
+/**
+ * Brand-driven design tokens.
+ *
+ * Defaults come from the engine's bootstrap brand (brand.resolved.json).
+ * `App.tsx` overrides these at runtime from data.brand once the run loads —
+ * that way the SPA itself reflects the brand the audit detected.
+ *
+ * Rule: NO hardcoded hex inside components. Every colour comes through a var.
+ */
+
+:root {
+  /* Surface */
+  --rf-bg:       #f8fafc;
+  --rf-surface:  #ffffff;
+  --rf-surface-2:#f1f5f9;
+  --rf-border:   #e2e8f0;
+  --rf-border-2: #cbd5e1;
+
+  /* Text */
+  --rf-text:     #0f172a;
+  --rf-muted:    #64748b;
+  --rf-muted-2:  #94a3b8;
+
+  /* Intent */
+  --rf-primary:  #2563eb;
+  --rf-primary-2:#1d4ed8;
+  --rf-success:  #15803d;
+  --rf-success-bg:#dcfce7;
+  --rf-danger:   #b91c1c;
+  --rf-danger-bg:#fee2e2;
+  --rf-warning:  #92400e;
+  --rf-warning-bg:#fef3c7;
+  --rf-info-bg:  #dbeafe;
+
+  /* Severity */
+  --rf-sev-critical-bg: #fee2e2; --rf-sev-critical-fg: #991b1b;
+  --rf-sev-high-bg:     #fed7aa; --rf-sev-high-fg:     #9a3412;
+  --rf-sev-medium-bg:   #dbeafe; --rf-sev-medium-fg:   #1e40af;
+  --rf-sev-low-bg:      #f1f5f9; --rf-sev-low-fg:      #475569;
+
+  /* Type */
+  --rf-font-body:    'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --rf-font-display: 'Outfit', 'Inter', sans-serif;
+  --rf-font-mono:    ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* Sizes */
+  --rf-r-sm: 4px;
+  --rf-r-md: 8px;
+  --rf-r-lg: 12px;
+  --rf-r-xl: 16px;
+
+  --rf-sp-1: 4px;
+  --rf-sp-2: 8px;
+  --rf-sp-3: 12px;
+  --rf-sp-4: 16px;
+  --rf-sp-5: 20px;
+  --rf-sp-6: 24px;
+  --rf-sp-8: 32px;
+
+  --rf-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --rf-shadow-md: 0 4px 12px rgba(15, 23, 42, 0.06);
+  --rf-shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.08);
+
+  /* Layout driven by useUi() */
+  --rf-col-sidebar:  280px;
+  --rf-col-left:     540px;
+  --rf-col-right:    420px;
+  --rf-header-h:     56px;
+}
