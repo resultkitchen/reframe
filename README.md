@@ -96,6 +96,21 @@ Plus a Map stage (Stage 0) before Agent 1, and a Boot gate (Stage 0.5) right aft
 
 ---
 
+## Hundreds of small agents, not one big one
+
+A 30-screen app fans out into **6 × 30 = 180 small agent calls.** Each one sees only its page, its job, its contract. No 200k-token monolith holding the whole repo in context.
+
+Why this matters:
+
+- **Higher accuracy.** A small focused prompt with one screenshot and one task beats a giant context with 30 screens fighting for attention. Hallucinations track context size.
+- **Lower cost.** 180 small calls cost less than 1 huge one — by an order of magnitude, often two.
+- **15-minute refactors, not 15-hour half-done ones.** Parallelism caps runtime at the slowest single page, not the sum of all pages.
+- **Cheap to re-run.** A bad finding? Re-fire just that one agent (`--resume`), not the whole repo.
+
+This is why **Gemini is the default.** Gemini Flash runs 3–7× faster than competing SOTA models at a fraction of the price, and at 180-calls-per-run scale that speed/$ compounds. Premium Claude or OpenAI runs work — they're just slower and more expensive at this fan-out. Pick the tradeoff per provider in `config/models.json`.
+
+---
+
 ## What's actually in here
 
 | The trap | What Reframe does |
