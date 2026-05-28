@@ -2,11 +2,17 @@ import React, { useState, useEffect, useMemo } from 'react';
 
 /**
  * Dual-register fields emitted by every engine v0.2+ finding:
- * `plain`         — same issue, written for a non-technical reader
- * `whyItMatters`  — concrete user-facing consequence if shipped
- * `confidence`    — 0..1, agent confidence the issue is real
- * `dimension`     — finer-grained classification for filter chips
+ * `plain`           — same issue, written for a non-technical reader
+ * `whyItMatters`    — concrete user-facing consequence if shipped
+ * `confidence`      — DEPRECATED: 0..1 LLM self-assessment, back-filled
+ *                     from `confidenceTier` for one release (ADR-0001).
+ * `confidenceTier`  — 'low' | 'medium' | 'high', derived mechanically
+ *                     from `signals.length` (0–1 LOW, 2 MEDIUM, 3+ HIGH).
+ * `signals`         — concrete, non-LLM reasons to trust the finding.
+ * `dimension`       — finer-grained classification for filter chips
  */
+type ConfidenceTier = 'low' | 'medium' | 'high';
+
 interface Gap {
   id: string;
   category: 'functional' | 'ux';
@@ -16,6 +22,8 @@ interface Gap {
   plain?: string;
   whyItMatters?: string;
   confidence?: number;
+  confidenceTier?: ConfidenceTier;
+  signals?: string[];
   dimension?: string;
 }
 
@@ -29,7 +37,60 @@ interface Finding {
   plain?: string;
   whyItMatters?: string;
   confidence?: number;
+  confidenceTier?: ConfidenceTier;
+  signals?: string[];
   dimension?: string;
+}
+
+/**
+ * Tier filter: 'all' = show everything, 'medium' = ≥2 signals, 'high' = ≥3 signals.
+ * Findings without a tier fall back to the back-filled confidence number.
+ */
+type TierFilter = 'all' | 'medium' | 'high';
+
+const TIER_RANK: Record<ConfidenceTier, number> = { low: 1, medium: 2, high: 3 };
+
+/** Does this finding clear the tier threshold? */
+function passesTierFilter(
+  f: { confidenceTier?: ConfidenceTier; confidence?: number },
+  filter: TierFilter,
+): boolean {
+  if (filter === 'all') return true;
+  if (f.confidenceTier) {
+    return TIER_RANK[f.confidenceTier] >= TIER_RANK[filter];
+  }
+  // Legacy back-compat: map the float to a tier the same way the engine does.
+  // 0.35→low, 0.5→low, 0.65→medium, 0.9+→high. Treat unknown as 'low'.
+  const c = typeof f.confidence === 'number' ? f.confidence : 0.35;
+  const tier: ConfidenceTier = c >= 0.85 ? 'high' : c >= 0.6 ? 'medium' : 'low';
+  return TIER_RANK[tier] >= TIER_RANK[filter];
+}
+
+/** Color tokens for tier chips. Teal=high, blue=medium, slate=low. */
+const TIER_STYLES: Record<ConfidenceTier, { bg: string; fg: string; border: string }> = {
+  high:   { bg: '#ccfbf1', fg: '#0f766e', border: '#5eead4' },
+  medium: { bg: '#dbeafe', fg: '#1e40af', border: '#93c5fd' },
+  low:    { bg: '#f1f5f9', fg: '#475569', border: '#cbd5e1' },
+};
+
+/** Compact human label for a signal id. Keep < 24 chars. */
+const SIGNAL_LABELS: Record<string, string> = {
+  'browser-evidence':         'browser evidence',
+  'broken-contract':          'broken contract',
+  'multi-persona-agreement':  'multi-persona',
+  'severity-critical':        'severity',
+  'persistent-across-runs':   'seen before',
+  'cross-agent-agreement':    'cross-agent',
+  'auth-or-billing-surface':  'risk surface',
+  'a11y-rule-violation':      'a11y rule',
+  'explicit-user-feedback':   'user feedback',
+};
+
+/** Derive the tier shown on a finding card. Same fallback logic as the filter. */
+function tierFor(f: { confidenceTier?: ConfidenceTier; confidence?: number }): ConfidenceTier {
+  if (f.confidenceTier) return f.confidenceTier;
+  const c = typeof f.confidence === 'number' ? f.confidence : 0.35;
+  return c >= 0.85 ? 'high' : c >= 0.6 ? 'medium' : 'low';
 }
 
 interface PageData {
@@ -166,9 +227,11 @@ export default function App() {
   // Filter chips — applied to the gap/finding list. Empty set = no filter.
   const [severityFilter, setSeverityFilter] = useState<Set<string>>(new Set());
   const [dimensionFilter, setDimensionFilter] = useState<Set<string>>(new Set());
-  // Confidence threshold: only show findings with confidence >= this (0..1).
-  // 0 = show everything (including findings without a confidence score).
-  const [minConfidence, setMinConfidence] = useState<number>(0);
+  // Tier filter — ADR-0001. 'all' = show everything (default), 'medium' =
+  // findings with ≥2 signals, 'high' = ≥3 signals. Replaces the legacy
+  // continuous confidence slider; the float-based threshold meant nothing
+  // to non-technical reviewers and didn't survive provider swaps.
+  const [minTier, setMinTier] = useState<TierFilter>('all');
 
   // EXCLUSION filters set by clicking "Apply" on a pattern-insight card.
   // Independent from the inclusion chips above — applied as an additional
@@ -633,12 +696,12 @@ ${pmNotes}
     return all.filter(gap => {
       if (severityFilter.size > 0 && !severityFilter.has(gap.severity)) return false;
       if (dimensionFilter.size > 0 && (!gap.dimension || !dimensionFilter.has(gap.dimension))) return false;
-      if (minConfidence > 0 && (gap.confidence ?? 1) < minConfidence) return false;
+      if (!passesTierFilter(gap, minTier)) return false;
       if (hiddenDimensions.size > 0 && gap.dimension && hiddenDimensions.has(gap.dimension)) return false;
       if (hiddenSeverities.size > 0 && hiddenSeverities.has(gap.severity)) return false;
       return true;
     });
-  }, [activePage, severityFilter, dimensionFilter, minConfidence, hiddenDimensions, hiddenSeverities]);
+  }, [activePage, severityFilter, dimensionFilter, minTier, hiddenDimensions, hiddenSeverities]);
 
   /**
    * Set of dimensions present on the current page — used to render only
@@ -849,6 +912,8 @@ ${pmNotes}
       headline: string;
       whyItMatters?: string;
       confidence?: number;
+      confidenceTier?: ConfidenceTier;
+      signals?: string[];
       impact: number;
       source: 'audit' | 'compliance';
       /**
@@ -885,6 +950,8 @@ ${pmNotes}
           headline: g.plain || g.description,
           whyItMatters: g.whyItMatters,
           confidence: g.confidence,
+          confidenceTier: g.confidenceTier,
+          signals: g.signals,
           impact: sev * conf,
           source: 'audit',
           gapId: g.id,
@@ -905,6 +972,8 @@ ${pmNotes}
           headline: f.plain || f.problem,
           whyItMatters: f.whyItMatters,
           confidence: f.confidence,
+          confidenceTier: f.confidenceTier,
+          signals: f.signals,
           impact: sev * conf,
           source: 'compliance',
           complianceFindingKey: complianceKey,
@@ -1275,7 +1344,9 @@ ${pmNotes}
                               : item.severity === 'high'     ? { bg: '#fed7aa', fg: '#9a3412' }
                               : item.severity === 'medium'   ? { bg: '#fef3c7', fg: '#854d0e' }
                               :                                 { bg: '#e0e7ff', fg: '#3730a3' };
-                    const confPct = typeof item.confidence === 'number' ? Math.round(item.confidence * 100) : null;
+                    // ADR-0001 — tier chip in the Run Overview row.
+                    const overviewTier = tierFor(item);
+                    const overviewTierStyle = TIER_STYLES[overviewTier];
                     // Per-row apply/skip state — works for both audit gaps
                     // (via approvals.gaps[gapId]) and compliance findings
                     // (via approvals.complianceFindings[complianceFindingKey]).
@@ -1348,11 +1419,16 @@ ${pmNotes}
                                 compliance
                               </span>
                             )}
-                            {confPct !== null && (
-                              <span style={{ fontFamily: 'monospace', fontSize: '0.65rem' }}>
-                                {confPct}%
-                              </span>
-                            )}
+                            <span
+                              title={`${(item.signals ?? []).length} mechanical signal${(item.signals ?? []).length === 1 ? '' : 's'} — ${overviewTier.toUpperCase()} trust`}
+                              style={{
+                                fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.05em',
+                                padding: '0.1rem 0.4rem', borderRadius: '4px',
+                                background: overviewTierStyle.bg, color: overviewTierStyle.fg,
+                                border: `1px solid ${overviewTierStyle.border}`,
+                                textTransform: 'uppercase',
+                              }}
+                            >{overviewTier}</span>
                             {isSkipped && (
                               <span style={{ padding: '0.1rem 0.4rem', borderRadius: '999px', background: '#fef3c7', color: '#854d0e', fontSize: '0.65rem', fontWeight: 700 }}>
                                 {pageBypassed ? 'page bypassed' : 'skipped'}
@@ -1761,22 +1837,34 @@ ${pmNotes}
                                     })}
 
                                     <span style={{ marginLeft: '0.5rem', fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#64748b', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                                      Min confidence
+                                      Trust
                                     </span>
-                                    <input
-                                      type="range" min={0} max={1} step={0.05}
-                                      value={minConfidence}
-                                      onChange={(e) => setMinConfidence(parseFloat(e.target.value))}
-                                      style={{ width: '90px' }}
-                                      aria-label="Minimum confidence threshold"
-                                      aria-valuemin={0}
-                                      aria-valuemax={1}
-                                      aria-valuenow={minConfidence}
-                                      aria-valuetext={`${Math.round(minConfidence * 100)} percent`}
-                                    />
-                                    <span style={{ fontSize: '0.75rem', color: '#475569', fontFamily: 'monospace', minWidth: '32px' }}>
-                                      {Math.round(minConfidence * 100)}%
-                                    </span>
+                                    {(['all', 'medium', 'high'] as TierFilter[]).map(tier => {
+                                      const active = minTier === tier;
+                                      const label = tier === 'all' ? 'all' : tier === 'medium' ? '≥ medium' : '≥ high';
+                                      return (
+                                        <button
+                                          key={tier}
+                                          onClick={() => setMinTier(tier)}
+                                          title={
+                                            tier === 'all'
+                                              ? 'Show every finding regardless of signal count'
+                                              : tier === 'medium'
+                                                ? 'Only findings with 2+ mechanical signals'
+                                                : 'Only findings with 3+ mechanical signals'
+                                          }
+                                          aria-pressed={active}
+                                          style={{
+                                            padding: '0.25rem 0.6rem', fontSize: '0.7rem', fontWeight: 600,
+                                            border: '1px solid ' + (active ? '#0f766e' : '#cbd5e1'),
+                                            borderRadius: '999px', cursor: 'pointer',
+                                            background: active ? '#ccfbf1' : '#fff',
+                                            color: active ? '#0f766e' : '#475569',
+                                            textTransform: 'lowercase',
+                                          }}
+                                        >{label}</button>
+                                      );
+                                    })}
                                   </div>
 
                                   {availableDimensions.length > 0 && (
@@ -1805,7 +1893,7 @@ ${pmNotes}
                                     <div style={{ fontSize: '0.7rem', color: '#64748b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                       <span>Showing {filteredGaps.length} of {activePage.audit.gaps.length} findings.</span>
                                       <button
-                                        onClick={() => { setSeverityFilter(new Set()); setDimensionFilter(new Set()); setMinConfidence(0); }}
+                                        onClick={() => { setSeverityFilter(new Set()); setDimensionFilter(new Set()); setMinTier("all"); }}
                                         style={{ background: 'transparent', border: 'none', color: '#2563eb', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600, textDecoration: 'underline' }}
                                       >Clear filters</button>
                                     </div>
@@ -1816,7 +1904,7 @@ ${pmNotes}
                                   {filteredGaps.length === 0 ? (
                                     <p className="no-gaps-placeholder" style={{ fontSize: '0.85rem' }}>
                                       No findings match the current filters. <button
-                                        onClick={() => { setSeverityFilter(new Set()); setDimensionFilter(new Set()); setMinConfidence(0); }}
+                                        onClick={() => { setSeverityFilter(new Set()); setDimensionFilter(new Set()); setMinTier("all"); }}
                                         style={{ background: 'transparent', border: 'none', color: '#2563eb', cursor: 'pointer', textDecoration: 'underline' }}
                                       >Clear filters</button>
                                     </p>
@@ -1829,16 +1917,12 @@ ${pmNotes}
                                     const mainText = languageRegister === 'plain' && gap.plain
                                       ? gap.plain
                                       : gap.description;
-                                    const confPct = typeof gap.confidence === 'number'
-                                      ? Math.round(gap.confidence * 100)
-                                      : null;
-                                    // Color-code the confidence chip: ≥90% = strong (teal),
-                                    // 70–90% = moderate (blue), <70% = soft (slate).
-                                    const confColor = confPct === null
-                                      ? null
-                                      : confPct >= 90 ? { bg: '#ccfbf1', fg: '#0f766e' }
-                                      : confPct >= 70 ? { bg: '#dbeafe', fg: '#1e40af' }
-                                      : { bg: '#f1f5f9', fg: '#475569' };
+                                    // ADR-0001 — tier chip + signal pills replace the float %.
+                                    // Tier is mechanical (signal count); back-fills from
+                                    // `confidence` for legacy runs.
+                                    const gapTier = tierFor(gap);
+                                    const tierStyle = TIER_STYLES[gapTier];
+                                    const gapSignals = (gap.signals ?? []).slice(0, 4);
 
                                     return (
                                       <div
@@ -1868,20 +1952,36 @@ ${pmNotes}
                                             ) : (
                                               <span className="gap-row-category">{gap.category}</span>
                                             )}
-                                            {confColor && (
-                                              <span
-                                                title="Agent confidence this finding is real"
-                                                style={{
-                                                  fontSize: '0.65rem', fontWeight: 700, fontFamily: 'monospace',
-                                                  padding: '0.15rem 0.45rem', borderRadius: '4px',
-                                                  background: confColor.bg, color: confColor.fg,
-                                                }}
-                                              >{confPct}%</span>
-                                            )}
+                                            <span
+                                              title={`${gapSignals.length} mechanical signal${gapSignals.length === 1 ? '' : 's'} — ${gapTier.toUpperCase()} trust`}
+                                              style={{
+                                                fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.05em',
+                                                padding: '0.15rem 0.45rem', borderRadius: '4px',
+                                                background: tierStyle.bg, color: tierStyle.fg,
+                                                border: `1px solid ${tierStyle.border}`,
+                                                textTransform: 'uppercase',
+                                              }}
+                                            >{gapTier}</span>
                                             <span className={`gap-row-pill ${!isSkipped ? 'pill-green' : 'pill-orange'}`}>
                                               {!isSkipped ? 'WILL APPLY FIX' : 'WILL SKIP FIX'}
                                             </span>
                                           </div>
+                                          {gapSignals.length > 0 && (
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginTop: '0.25rem', marginBottom: '0.1rem' }}>
+                                              {gapSignals.map(sig => (
+                                                <span
+                                                  key={sig}
+                                                  title={sig}
+                                                  style={{
+                                                    fontSize: '0.6rem', fontWeight: 500,
+                                                    padding: '0.1rem 0.4rem', borderRadius: '999px',
+                                                    background: '#f8fafc', color: '#475569',
+                                                    border: '1px solid #e2e8f0',
+                                                  }}
+                                                >{SIGNAL_LABELS[sig] ?? sig}</span>
+                                              ))}
+                                            </div>
+                                          )}
                                           <p className="gap-row-desc">{mainText}</p>
                                           {gap.whyItMatters && languageRegister === 'plain' && (
                                             <p style={{
@@ -2317,8 +2417,10 @@ ${pmNotes}
                                 : finding.severity === 'high'    ? { bg: '#fed7aa', fg: '#9a3412' }
                                 : finding.severity === 'medium'  ? { bg: '#fef3c7', fg: '#854d0e' }
                                 :                                   { bg: '#e0e7ff', fg: '#3730a3' };
-                              const confPct = typeof finding.confidence === 'number'
-                                ? Math.round(finding.confidence * 100) : null;
+                              // ADR-0001 — tier chip + signal pills.
+                              const findingTier = tierFor(finding);
+                              const findingTierStyle = TIER_STYLES[findingTier];
+                              const findingSignals = (finding.signals ?? []).slice(0, 4);
                               const mainText = languageRegister === 'plain' && finding.plain
                                 ? finding.plain
                                 : finding.problem;
@@ -2358,17 +2460,38 @@ ${pmNotes}
                                           {finding.dimension}
                                         </span>
                                       )}
-                                      {confPct !== null && (
-                                        <span style={{ fontFamily: 'monospace', fontSize: '0.65rem', color: '#475569' }}>
-                                          {confPct}%
-                                        </span>
-                                      )}
+                                      <span
+                                        title={`${findingSignals.length} mechanical signal${findingSignals.length === 1 ? '' : 's'} — ${findingTier.toUpperCase()} trust`}
+                                        style={{
+                                          fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.05em',
+                                          padding: '0.1rem 0.4rem', borderRadius: '4px',
+                                          background: findingTierStyle.bg, color: findingTierStyle.fg,
+                                          border: `1px solid ${findingTierStyle.border}`,
+                                          textTransform: 'uppercase',
+                                        }}
+                                      >{findingTier}</span>
                                       {isSkipped && (
                                         <span style={{ padding: '0.1rem 0.4rem', borderRadius: '999px', background: '#fef3c7', color: '#854d0e', fontSize: '0.65rem', fontWeight: 700 }}>
                                           {pageBypassed ? 'page bypassed' : 'skipped'}
                                         </span>
                                       )}
                                     </div>
+                                    {findingSignals.length > 0 && (
+                                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginBottom: '0.35rem' }}>
+                                        {findingSignals.map(sig => (
+                                          <span
+                                            key={sig}
+                                            title={sig}
+                                            style={{
+                                              fontSize: '0.6rem', fontWeight: 500,
+                                              padding: '0.1rem 0.4rem', borderRadius: '999px',
+                                              background: '#f8fafc', color: '#475569',
+                                              border: '1px solid #e2e8f0',
+                                            }}
+                                          >{SIGNAL_LABELS[sig] ?? sig}</span>
+                                        ))}
+                                      </div>
+                                    )}
                                     <div style={{
                                       fontSize: '0.85rem', color: '#1e293b', lineHeight: 1.5,
                                       textDecoration: isSkipped ? 'line-through' : 'none',
