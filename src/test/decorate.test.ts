@@ -304,6 +304,52 @@ describe('a11y-rule-violation signal (slice 5)', () => {
   });
 });
 
+describe('auth-or-billing-surface signal (slice 6)', () => {
+  const authPage: PageScope = { ...page, filePath: 'app/auth/login/page.tsx', route: '/auth/login' };
+  const billingPage: PageScope = { ...page, filePath: 'app/billing/page.tsx', route: '/billing' };
+  const checkoutPage: PageScope = { ...page, filePath: 'app/checkout/page.tsx', route: '/checkout' };
+
+  it('fires for an auth/login page on every gap', () => {
+    const a = audit([gap({ severity: 'medium' })]);
+    decorateAllFindings(authPage, a, undefined, []);
+    assert.ok(a.gaps[0].signals?.includes('auth-or-billing-surface'));
+  });
+
+  it('fires for a /billing page', () => {
+    const a = audit([gap({ severity: 'low' })]);
+    decorateAllFindings(billingPage, a, undefined, []);
+    assert.ok(a.gaps[0].signals?.includes('auth-or-billing-surface'));
+  });
+
+  it('fires for /checkout', () => {
+    const a = audit([gap({ severity: 'low' })]);
+    decorateAllFindings(checkoutPage, a, undefined, []);
+    assert.ok(a.gaps[0].signals?.includes('auth-or-billing-surface'));
+  });
+
+  it('does NOT fire for an unrelated page', () => {
+    const a = audit([gap({ severity: 'medium' })]);
+    decorateAllFindings(page, a, undefined, []); // intake page
+    assert.ok(!a.gaps[0].signals?.includes('auth-or-billing-surface'));
+  });
+
+  it('fires on a compliance finding when finding.location is on a risk surface', () => {
+    const c = compliance([{
+      ruleId: 'rule-x', domain: 'TCPA', severity: 'high',
+      location: 'app/billing/page.tsx:42',
+      problem: 'p', requiredFix: 'r',
+    }]);
+    decorateAllFindings(page, undefined, c, []); // page itself not risky
+    assert.ok(c.findings[0].signals?.includes('auth-or-billing-surface'));
+  });
+
+  it('combined with severity-critical lifts an auth-surface gap to MEDIUM', () => {
+    const a = audit([gap({ severity: 'high', description: 'login form misaligned' })]);
+    decorateAllFindings(authPage, a, undefined, []);
+    assert.equal(a.gaps[0].confidenceTier, 'medium');
+  });
+});
+
 describe('decoration is idempotent', () => {
   it('running twice produces the same signals (de-duped)', () => {
     const a = audit(

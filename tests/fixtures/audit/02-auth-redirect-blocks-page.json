@@ -45,8 +45,8 @@
         "whyItMatters": "Every authenticated page in your app is invisible to the audit until you provide credentials. Findings you see for these routes are about the login page, not the page you care about.",
         "recommendation": "Run with --auth pointing at a config/auth.json that has a role mapped to /admin/* with a working test admin login. See config/auth.template.json.",
         "evidence": ["Final URL: /login?next=/admin/dashboard"],
-        "signals": ["severity-critical"],
-        "confidenceTier": "low"
+        "signals": ["severity-critical", "auth-or-billing-surface"],
+        "confidenceTier": "medium"
       }
     ]
   },
@@ -57,6 +57,7 @@
     { "kind": "fieldPresent", "id": "g1", "path": "plain" },
     { "kind": "fieldPresent", "id": "g1", "path": "whyItMatters" },
     { "kind": "mentionsAny", "id": "g1", "values": ["login", "redirect", "auth", "credentials"] },
-    { "kind": "signalsInclude", "id": "g1", "values": ["severity-critical"] }
+    { "kind": "signalsInclude", "id": "g1", "values": ["severity-critical", "auth-or-billing-surface"] },
+    { "kind": "tierAtLeast", "id": "g1", "value": "medium" }
   ]
 }

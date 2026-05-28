@@ -40,6 +40,7 @@ import {
   type FindingSignal,
 } from './signals';
 import { matchA11yRule } from './a11y-rules';
+import { isRiskSurface } from './risk-surfaces';
 
 /**
  * One-shot decorator covering the two finding shapes that exist today.
@@ -79,6 +80,9 @@ function decorateAuditGaps(
   const pageBrokenContracts = brokenContracts.filter((bc) =>
     locationTouchesFile(bc.location, page.filePath),
   );
+  // slice 6 — page-level surface check: filePath OR route covers e.g.
+  // file-paths like `app/auth/page.tsx` AND framework-y routes like `/billing`.
+  const pageOnRiskSurface = isRiskSurface(page.filePath) || isRiskSurface(page.route);
 
   for (const gap of audit.gaps ?? []) {
     const signals: FindingSignal[] = [...(gap.signals ?? [])];
@@ -105,6 +109,8 @@ function decorateAuditGaps(
       signals.push('a11y-rule-violation');
     }
 
+    if (pageOnRiskSurface) signals.push('auth-or-billing-surface');
+
     applySignals(gap, signals);
   }
 }
@@ -120,6 +126,7 @@ function decorateComplianceFindings(
   const pageBrokenContracts = brokenContracts.filter((bc) =>
     locationTouchesFile(bc.location, page.filePath),
   );
+  const pageOnRiskSurface = isRiskSurface(page.filePath) || isRiskSurface(page.route);
 
   for (const finding of compliance.findings ?? []) {
     const signals: FindingSignal[] = [...(finding.signals ?? [])];
@@ -127,6 +134,13 @@ function decorateComplianceFindings(
     if (isHighSeverity(finding.severity)) signals.push('severity-critical');
 
     if (pageBrokenContracts.length > 0) signals.push('broken-contract');
+
+    // slice 6 — the compliance finding's own `location` can also tag it
+    // as a risk surface (e.g. a TCPA finding rooted in `/billing/page.tsx`
+    // even if the parent page route is unrelated). Either lights up.
+    if (pageOnRiskSurface || isRiskSurface(finding.location)) {
+      signals.push('auth-or-billing-surface');
+    }
 
     if (
       finding.location &&
