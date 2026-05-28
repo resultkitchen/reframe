@@ -312,29 +312,32 @@ export default function App() {
       }
       return true;
     } catch (err) {
-      console.warn('API fetch failed, falling back to rich mock data:', err);
+      console.warn('API fetch failed, falling back to demo mock data:', err);
       setIsOfflineMock(true);
-      // High fidelity mock data fallback to prevent the application from breaking when API server is inactive
+      // Generic demo data so the dashboard renders something useful when
+      // the Node companion isn't running (eg. `npm run dev` in review-app
+      // without a live `reframe review <runDir>` server). Intentionally
+      // anonymous — no real client paths or project slugs leak here.
       const mockData: RunData = {
-        runDir: "C:\\projects\\should-i-fight-all-tasks\\casesdaily",
+        runDir: "./runs/demo",
         state: {
-          projectSlug: "casesdaily",
+          projectSlug: "demo-app",
           startedAt: new Date().toISOString(),
         },
         approvals: {
           pages: {
-            "admin-dashboard": {
+            "dashboard": {
               decision: "apply",
               gaps: { "g1": "apply", "g2": "skip", "g3": "apply" },
-              note: "Refining admin metrics per PM instructions. Approved slug layout.",
-              comments: ["Collaborator: Metrics load perfectly now. Verified CTA contrast."]
+              note: "Demo run — connect a real audit to replace these findings.",
+              comments: ["Reviewer: looks good once contrast is fixed."]
             }
           }
         },
         pages: [
           {
-            slug: "admin-dashboard",
-            route: "/admin/dashboard",
+            slug: "dashboard",
+            route: "/dashboard",
             // Both false in offline-mock: the assets live on the Node
             // companion that isn't running, so renderers should show
             // the "no preview" placeholder instead of issuing 503s.
@@ -351,39 +354,39 @@ export default function App() {
                   id: "g1",
                   category: "functional",
                   severity: "critical",
-                  description: "Broken lead exporting: clicking the 'Export CSV' button throws a silent console TypeMismatch error.",
-                  recommendation: "Update the payload parsing in export-csv.ts to map database integer types to strings."
+                  description: "Export button throws a silent TypeError in the console — the click handler resolves the payload before the data hook settles.",
+                  recommendation: "Await the data hook in the click handler before serialising the payload."
                 },
                 {
                   id: "g2",
                   category: "ux",
                   severity: "medium",
-                  description: "Interface contrast: CTA 'Add Lead' button uses slate-400 text on slate-500 background, failing WCAG 2.2 color contrast guidelines.",
-                  recommendation: "Elevate styling to slate-50 text on slate-900 background for a clean premium appearance."
+                  description: "Primary CTA fails WCAG 2.2 contrast — slate-400 text on a slate-500 background.",
+                  recommendation: "Move to slate-50 on slate-900 (or any pair clearing 4.5:1)."
                 },
                 {
                   id: "g3",
                   category: "ux",
                   severity: "high",
-                  description: "Missing form labels: lead search bar input element lacks a linked HTML <label> or aria-label attribute.",
-                  recommendation: "Add aria-label='Search active attorney leads' to the search input element."
+                  description: "Search input lacks an associated <label> or aria-label, so screen readers announce it as an unlabeled edit.",
+                  recommendation: "Add aria-label=\"Search\" to the input element."
                 }
               ]
             },
             ux: {
-              asciiWireframe: "  +--------------------------------------------+\n  | [ADMIN] Leads | Search: [_________] [GO]   |\n  +--------------------------------------------+\n  | ACTIVE LEADS (142)                         |\n  | - John Doe    | personal injury | [EXPORT] |\n  | - Jane Smith  | auto accident   | [EXPORT] |\n  +--------------------------------------------+",
-              functionalSpec: "Admin control dashboard for lead tracking."
+              asciiWireframe: "  +--------------------------------------------+\n  | [APP]  Dashboard  | Search: [_______] [GO] |\n  +--------------------------------------------+\n  | RESULTS (142)                              |\n  | - Item one     |  type A  | [EXPORT]       |\n  | - Item two     |  type B  | [EXPORT]       |\n  +--------------------------------------------+",
+              functionalSpec: "Generic dashboard listing — replace with your audited route."
             },
             design: {
-              spec: "Standard clean modern slate visual specs.",
+              spec: "Clean, modern, neutral palette.",
               brandTokensUsed: ["colors.primary", "colors.background", "radii.md"]
             },
-            codeDiff: "@@ -12,4 +12,6 @@\n- <button onClick={exportCsv} className=\"btn-slate\">Export CSV</button>\n+ <button onClick={exportCsv} className=\"btn-slate-export\" aria-label=\"Export lead database to CSV\">\n+   Export Lead CSV\n+ </button>"
+            codeDiff: "@@ -12,4 +12,6 @@\n- <button onClick={onExport} className=\"btn\">Export CSV</button>\n+ <button onClick={onExport} className=\"btn btn-primary\" aria-label=\"Export results to CSV\">\n+   Export CSV\n+ </button>"
           }
         ]
       };
       setData(mockData);
-      setActiveSlug("admin-dashboard");
+      setActiveSlug("dashboard");
       return false;
     } finally {
       setLoading(false);
