@@ -14,7 +14,8 @@ export function BrandPanel({ brand }: Props) {
   const { ui, dispatch } = useUi();
   const r = ui.register;
   const [copied, setCopied] = useState<string | null>(null);
-  const [stubOpen, setStubOpen] = useState(false);
+  const [verifyState, setVerifyState] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
+  const [verifyLog, setVerifyLog] = useState<string>('');
   const panelId = useId();
 
   const collapsed = ui.collapsed.brand;
@@ -42,11 +43,16 @@ export function BrandPanel({ brand }: Props) {
     ...Object.keys(colors).filter((k) => !COLOR_ORDER.includes(k)),
   ].map((k) => [k, colors[k]] as const);
 
+  // Split brand.voice into short chip-sized descriptors. We split on
+  // sentence terminators only (`.`, `;`) — splitting on commas chopped
+  // single sentences into orphan fragments ("precise" / "and system-
+  // oriented" from "functional, precise, and system-oriented"). Now: one
+  // sentence → one chip, then drop empty/long/orphan ones.
   const voiceDescriptors = (brand.voice || '')
-    .split(/[.,;]/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0 && s.length < 60)
-    .slice(0, 6);
+    .split(/[.;]/)
+    .map((s) => s.trim().replace(/^and\s+/i, ''))
+    .filter((s) => s.length > 4 && s.length < 80)
+    .slice(0, 4);
 
   return (
     <section className={`rf-card rf-brand ${collapsed ? 'rf-collapsed' : ''}`}>
@@ -109,10 +115,52 @@ export function BrandPanel({ brand }: Props) {
           </details>
 
           <div className="rf-brand-rerun">
-            <button className="rf-btn rf-btn-ghost rf-btn-sm" onClick={() => setStubOpen((o) => !o)} type="button">
-              {t('brand.editRerun', r)} ↗
+            <button
+              className="rf-btn rf-btn-ghost rf-btn-sm"
+              onClick={async () => {
+                if (verifyState === 'running') return;
+                setVerifyState('running');
+                setVerifyLog('');
+                try {
+                  const r0 = await fetch('/api/verify', { method: 'POST' });
+                  if (!r0.ok) throw new Error(`verify trigger failed (${r0.status})`);
+                  // Poll status every 1.5s until done.
+                  const startedAt = Date.now();
+                  const tick = async () => {
+                    try {
+                      const s = await fetch('/api/verify/status');
+                      const j = await s.json();
+                      setVerifyLog((j.log as string) || '');
+                      if (!j.running) {
+                        setVerifyState('done');
+                        return;
+                      }
+                    } catch { /* keep polling */ }
+                    if (Date.now() - startedAt > 5 * 60_000) {
+                      setVerifyState('error');
+                      return;
+                    }
+                    window.setTimeout(tick, 1500);
+                  };
+                  window.setTimeout(tick, 1000);
+                } catch {
+                  setVerifyState('error');
+                }
+              }}
+              disabled={verifyState === 'running'}
+              type="button"
+            >
+              {verifyState === 'running' ? 'Re-verifying…' : `Re-verify this run ↗`}
             </button>
-            {stubOpen && <p className="rf-note">{t('brand.editRerunStub', r)}</p>}
+            <p className="rf-brand-hint">
+              Re-runs Agent 5 (verify) against this run dir. To edit the brand bible, open <span className="rf-mono">brand.resolved.json</span> in this run dir and re-trigger.
+            </p>
+            {verifyState !== 'idle' && verifyLog && (
+              <details open className="rf-bible-details">
+                <summary>{verifyState === 'done' ? 'Verify finished' : verifyState === 'error' ? 'Verify failed' : 'Verify log'}</summary>
+                <pre className="rf-mono rf-pre">{verifyLog}</pre>
+              </details>
+            )}
           </div>
         </div>
       )}

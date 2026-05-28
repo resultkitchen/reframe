@@ -674,6 +674,64 @@ ${pmNotes}
       return;
     }
 
+    // 6. POST /api/verify — Re-run Agent 5 against the current run dir.
+    //    Mirrors /api/apply's pattern: spawn the CLI in the background,
+    //    return the log-file path so the SPA can poll for progress.
+    if (pathname === '/api/verify' && req.method === 'POST') {
+      try {
+        const { spawn } = await import('node:child_process');
+        const cliPath = path.resolve(path.join(__dirname, 'cli.js'));
+        const logFilePath = path.join(absRunDir, 'logs', 'verify.log');
+        const logsDir = path.dirname(logFilePath);
+        if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+
+        const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
+        logStream.write(`\n--- Re-verify at ${new Date().toISOString()} ---\n`);
+        logStream.write(`Command: node "${cliPath}" verify "${absRunDir}"\n\n`);
+
+        const cp = spawn('node', [cliPath, 'verify', absRunDir], {
+          cwd: process.cwd(),
+          env: process.env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        cp.stdout?.pipe(logStream);
+        cp.stderr?.pipe(logStream);
+        cp.on('error', (err) => { logStream.write(`Process spawn error: ${err.message}\n`); });
+        cp.unref();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: 'Verify pass triggered.', logFile: logFilePath }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
+      }
+      return;
+    }
+
+    // 7. GET /api/verify/status — Tail the verify log; returns last 4KB and
+    //    a boolean done-ness derived from the log's final lines.
+    if (pathname === '/api/verify/status' && req.method === 'GET') {
+      const logFilePath = path.join(absRunDir, 'logs', 'verify.log');
+      if (!fs.existsSync(logFilePath)) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ running: false, log: '' }));
+        return;
+      }
+      const stat = fs.statSync(logFilePath);
+      const start = Math.max(0, stat.size - 4096);
+      const fd = fs.openSync(logFilePath, 'r');
+      const buf = Buffer.alloc(stat.size - start);
+      fs.readSync(fd, buf, 0, buf.length, start);
+      fs.closeSync(fd);
+      const tail = buf.toString('utf8');
+      const done = /run complete|verify done|--- Re-verify .* ---\s*$/m.test(tail) === false
+        ? /run complete/.test(tail)
+        : false;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ running: !done, log: tail }));
+      return;
+    }
+
     // ────────────────────────── STATIC ASSET ROUTER ──────────────────────────
 
     // Resolve file path to static web app
