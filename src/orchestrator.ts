@@ -36,6 +36,8 @@ import { runCode } from './agents/agent4-code';
 import { runVerify } from './agents/agent5-verify';
 import { runCompliance } from './agents/agent6-compliance';
 
+import { decorateAllFindings } from './findings/decorate';
+
 import type {
   PipelineConfig,
   RunManifest,
@@ -627,6 +629,15 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
         })();
         await Promise.all([auditChain, complianceChain]);
       }
+
+      // ADR-0001: decorate every finding with mechanical signals before
+      // anything downstream reads them. Runs once per page, after both
+      // Agent 1 and Agent 6 have produced their outputs (or after the
+      // --verify-only rehydration above). Mutates ctx.audit.gaps and
+      // ctx.compliance.findings in place so review-app, PR body, Founder
+      // Digest, and Agent 4's prompt all see the enriched data without
+      // additional wiring.
+      decorateAllFindings(page, ctx.audit, ctx.compliance, scope.brokenContracts);
 
       // 'review' mode stops at the four review agents: no code, no verify —
       // the operator approves proposed-changes.md before any apply pass.
