@@ -399,6 +399,20 @@ export const FINDING_DIMENSIONS: readonly FindingDimension[] = [
  */
 import type { ConfidenceTier, FindingSignal } from './findings/signals';
 
+/**
+ * Agent 1's collaborative scan runs as four personas (ADR-0001 slice 3).
+ * Each gap can be attributed to one or more personas; when two or more
+ * agree, the decorator fires the `multi-persona-agreement` signal.
+ */
+export type AuditPersona = 'arthur' | 'elena' | 'marcus' | 'camille';
+
+export const AUDIT_PERSONAS: readonly AuditPersona[] = [
+  'arthur',
+  'elena',
+  'marcus',
+  'camille',
+] as const;
+
 export interface FindingMeta {
   plain?: string;
   whyItMatters?: string;
@@ -407,6 +421,12 @@ export interface FindingMeta {
   dimension?: FindingDimension;
   signals?: FindingSignal[];
   confidenceTier?: ConfidenceTier;
+  /**
+   * Which Agent-1 personas raised this gap. ≥2 = `multi-persona-agreement`
+   * signal at decoration time. Only set on audit gaps; absent on compliance
+   * findings (Agent 6 isn't a multi-persona scan).
+   */
+  personas?: AuditPersona[];
 }
 
 /** A single functional/UX gap found by Agent 1. */

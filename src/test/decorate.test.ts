@@ -350,6 +350,44 @@ describe('auth-or-billing-surface signal (slice 6)', () => {
   });
 });
 
+describe('multi-persona-agreement signal (slice 3)', () => {
+  it('fires when ≥2 personas tagged the gap', () => {
+    const a = audit([gap({
+      severity: 'high',
+      personas: ['arthur', 'marcus'],
+    })]);
+    decorateAllFindings(page, a, undefined, []);
+    assert.ok(a.gaps[0].signals?.includes('multi-persona-agreement'));
+  });
+
+  it('does NOT fire when only one persona tagged the gap', () => {
+    const a = audit([gap({
+      severity: 'medium',
+      personas: ['camille'],
+    })]);
+    decorateAllFindings(page, a, undefined, []);
+    assert.ok(!a.gaps[0].signals?.includes('multi-persona-agreement'));
+  });
+
+  it('does NOT fire when personas array is empty or missing', () => {
+    const a = audit([gap({ severity: 'medium', personas: [] })]);
+    decorateAllFindings(page, a, undefined, []);
+    assert.ok(!a.gaps[0].signals?.includes('multi-persona-agreement'));
+    const b = audit([gap({ severity: 'medium' })]);
+    decorateAllFindings(page, b, undefined, []);
+    assert.ok(!b.gaps[0].signals?.includes('multi-persona-agreement'));
+  });
+
+  it('dedupes duplicates — same persona listed twice does NOT fake agreement', () => {
+    const a = audit([gap({
+      severity: 'medium',
+      personas: ['arthur', 'arthur'],
+    })]);
+    decorateAllFindings(page, a, undefined, []);
+    assert.ok(!a.gaps[0].signals?.includes('multi-persona-agreement'));
+  });
+});
+
 describe('decoration is idempotent', () => {
   it('running twice produces the same signals (de-duped)', () => {
     const a = audit(

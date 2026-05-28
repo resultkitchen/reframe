@@ -15,13 +15,14 @@ import { matchAuthRole } from '../auth';
 import { resolveRoutePath } from '../sample-params';
 import type {
   AgentContext,
+  AuditPersona,
   AuditResult,
   Gap,
   Severity,
   PageHealth,
   FindingDimension,
 } from '../types';
-import { FINDING_DIMENSIONS } from '../types';
+import { AUDIT_PERSONAS, FINDING_DIMENSIONS } from '../types';
 import { AuditOutputSchema } from '../schemas/agent-outputs';
 
 /**
@@ -41,6 +42,7 @@ interface AuditModelResponse {
     whyItMatters?: string;
     recommendation?: string;
     evidence?: string[];
+    personas?: string[];
   }>;
 }
 
@@ -63,6 +65,31 @@ function coerceDimension(value: unknown): FindingDimension | undefined {
   return (FINDING_DIMENSIONS as readonly string[]).includes(value)
     ? (value as FindingDimension)
     : undefined;
+}
+
+/**
+ * Coerce a raw personas array to a deduped list of known persona ids.
+ * The model is asked to emit lower-case ids (`arthur`, `elena`, `marcus`,
+ * `camille`) but real LLMs sometimes emit "Arthur Vance" or "ARTHUR". We
+ * lower-case and check the first word against the enum so the natural
+ * variants still land. Returns undefined when nothing valid remains so
+ * the field can be omitted from the gap entirely (the decorator just
+ * doesn't fire the signal).
+ */
+function coercePersonas(value: unknown): AuditPersona[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const known = new Set<AuditPersona>(AUDIT_PERSONAS);
+  const seen = new Set<AuditPersona>();
+  const out: AuditPersona[] = [];
+  for (const raw of value) {
+    if (typeof raw !== 'string') continue;
+    const head = raw.trim().toLowerCase().split(/[\s,\.]+/)[0] ?? '';
+    if (known.has(head as AuditPersona) && !seen.has(head as AuditPersona)) {
+      seen.add(head as AuditPersona);
+      out.push(head as AuditPersona);
+    }
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /**
@@ -122,6 +149,8 @@ export function normaliseGap(raw: AuditModelResponse['gaps'][number], index: num
   if (conf !== undefined) gap.confidence = conf;
   const dim = coerceDimension(raw.dimension);
   if (dim) gap.dimension = dim;
+  const personas = coercePersonas(raw.personas);
+  if (personas) gap.personas = personas;
   return gap;
 }
 
@@ -261,6 +290,7 @@ For EVERY gap also write:
 - "whyItMatters": the concrete real-world consequence if shipped unfixed. Who is affected, when, and how. One or two sentences. Avoid restating the description.
 - "confidence":   a number in [0, 1]. 0.95 = "I'd stake my reputation on this." 0.8 = "strong signal, worth fixing." 0.5 = "worth a look but I'm not sure." Be honest — overconfidence damages trust.
 - "dimension":    a fine-grained classifier — use the MOST SPECIFIC applicable from: functional | ux | visual-hierarchy | brand-voice | microcopy | responsive | accessibility | performance | data-contract | security. Don't default everything to "functional" or "ux" — those are the broad buckets, and the more specific dimensions are what differentiate a useful audit from a generic one.
+- "personas":     an array of which persona(s) above raised the gap, lower-case ids only: ["arthur"] | ["elena"] | ["marcus"] | ["camille"]. When two or more personas would independently flag the same gap (e.g. an unlabeled button is BOTH a functional defect and an accessibility violation), list them all — the downstream system treats multi-persona agreement as a separate trust signal. Always include at least one persona per gap.
 
 TONE — write findings the way a senior designer gives a junior a crit: warm, specific, opinionated, never blame-y. Use "Try" not "Fix." Lead with the user, never with the code.
 
@@ -336,11 +366,12 @@ Return JSON of EXACTLY this shape:
       "plain":       "PLAIN ENGLISH: same issue, no jargon, written for a non-technical reader. Lead with the user-visible consequence.",
       "whyItMatters":"Concrete real-world consequence if shipped unfixed. Who is affected and how.",
       "recommendation": "What to change to fix it",
-      "evidence": ["console error text or exercised interaction that proves it"]
+      "evidence": ["console error text or exercised interaction that proves it"],
+      "personas":  ["arthur", "elena", "marcus", "camille"]
     }
   ]
 }
-Use sequential ids starting at g1. "evidence" is optional but include it whenever a console error or interaction supports the gap. "plain", "whyItMatters", "confidence", and "dimension" are REQUIRED for every gap. If the page is fully sound, return {"gaps": []}.`;
+Use sequential ids starting at g1. "evidence" is optional but include it whenever a console error or interaction supports the gap. "plain", "whyItMatters", "confidence", "dimension", and "personas" are REQUIRED for every gap. List MULTIPLE personas when the gap is multi-disciplinary — that drives the multi-persona-agreement trust signal. If the page is fully sound, return {"gaps": []}.`;
 }
 
 export async function runAudit(ctx: AgentContext): Promise<AuditResult> {

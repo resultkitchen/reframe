@@ -66,6 +66,13 @@ export const FindingSignalSchema = z.enum([
 export const ConfidenceTierSchema = z.enum(['low', 'medium', 'high']);
 
 /**
+ * The four collaborative personas Agent 1 runs as. ADR-0001 slice 3 —
+ * each gap can be tagged with the persona(s) that raised it so the
+ * decorator can fire `multi-persona-agreement` mechanically.
+ */
+export const AuditPersonaSchema = z.enum(['arthur', 'elena', 'marcus', 'camille']);
+
+/**
  * Confidence values come back as either floats in [0,1] or numeric strings
  * (sometimes with a trailing "%"). The agent's coerceConfidence handles the
  * unification — the schema just lets either type through.
@@ -100,6 +107,8 @@ export const AuditGapSchema = z.object({
   whyItMatters: z.string().optional(),
   recommendation: z.string().optional(),
   evidence: z.array(z.string()).optional(),
+  /** ADR-0001 slice 3 — personas that raised this gap. */
+  personas: z.array(AuditPersonaSchema).optional(),
   ...FindingMetaExtensionFields,
 });
 

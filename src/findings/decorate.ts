@@ -111,6 +111,13 @@ function decorateAuditGaps(
 
     if (pageOnRiskSurface) signals.push('auth-or-billing-surface');
 
+    // multi-persona-agreement — slice 3. ≥2 of Agent 1's personas tagged
+    // this gap. The check is on the unique persona count, not the raw
+    // array length, so a malformed double-entry doesn't fake agreement.
+    if (Array.isArray(gap.personas) && new Set(gap.personas).size >= 2) {
+      signals.push('multi-persona-agreement');
+    }
+
     applySignals(gap, signals);
   }
 }
