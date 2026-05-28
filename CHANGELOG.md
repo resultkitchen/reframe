@@ -2,7 +2,7 @@
 
 All notable changes to Reframe are recorded here. Format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] — 2026-05-28
 
 Theme: **the SPA earns its labels**. A founder-led critique of the review SPA (every button passes the 5-second "what does this do?" test, brand panel goes visual, broken connectors get wired, and the vibe-coder flow back to Claude Code is named.)
 
