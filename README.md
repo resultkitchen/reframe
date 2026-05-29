@@ -255,8 +255,6 @@ Full surface in [`docs/MODULE-API.md`](docs/MODULE-API.md). Brand pin / static e
 
 ---
 
----
-
 ## See it
 
 <p align="center">
