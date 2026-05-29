@@ -37,6 +37,7 @@ USAGE
   reframe pin <run-dir> [--out <path>] [--force]
   reframe init [target-path]
   reframe review <run-dir> [--port <number>]
+  reframe mcp
   reframe --help
 
 FLAGS
@@ -127,6 +128,11 @@ SUBCOMMANDS
                               propose (verify is read-only). Exits 0
                               when every targeted page verifies.
 
+  mcp                         Spawns the Model Context Protocol (MCP) server
+                              over stdin/stdout. Integrates Reframe directly
+                              with AI coding assistants like gemini-cli,
+                              Claude Code, or Cursor.
+
 ENV
   GEMINI_API_KEY / GOOGLE_API_KEY   Gemini API key (required for Gemini runs).
   PIPELINE_SCRATCH                  Default scratch dir.
@@ -176,6 +182,13 @@ async function main(): Promise<number> {
   const subcommandArgv = wantsJsonSummary
     ? argv.filter((a) => a !== '--json-summary')
     : argv;
+
+  // Handle 'mcp' command.
+  if (subcommandArgv[0] === 'mcp') {
+    const { startMcpServer } = await import('./mcp');
+    await startMcpServer();
+    return 0;
+  }
 
   // Handle 'init' command.
   if (subcommandArgv[0] === 'init') {
