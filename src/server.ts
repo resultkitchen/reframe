@@ -195,17 +195,65 @@ function resolveStaticDir(): string {
   return __dirname;
 }
 
-export function startReviewServer(runDir: string, port: number): Promise<http.Server> {
-  const absRunDir = path.resolve(runDir);
+/**
+ * Resolve a list of run dirs into the primary + per-slug routing map.
+ *
+ * Multi-run mode (review across N persona-scoped runs in one SPA) requires
+ * that each page slug is owned by exactly one run dir. Stage 0's role
+ * filter keeps slugs disjoint across role-scoped runs of the same target,
+ * so collisions are a real bug to surface — not silently merge.
+ */
+function buildRunSet(input: string | string[]): {
+  primary: string;
+  all: string[];
+  slugToRunDir: Map<string, string>;
+} {
+  const list = Array.isArray(input) ? input : [input];
+  const all = list.map((p) => path.resolve(p));
+  for (const dir of all) {
+    if (!fs.existsSync(dir)) {
+      console.error(`Error: target run directory does not exist: ${dir}`);
+      process.exit(1);
+    }
+  }
+  const slugToRunDir = new Map<string, string>();
+  for (const dir of all) {
+    const pagesDir = path.join(dir, 'pages');
+    if (!fs.existsSync(pagesDir)) continue;
+    for (const slug of fs.readdirSync(pagesDir)) {
+      const slugPath = path.join(pagesDir, slug);
+      if (!fs.statSync(slugPath).isDirectory()) continue;
+      const existing = slugToRunDir.get(slug);
+      if (existing && existing !== dir) {
+        console.error(
+          `Error: slug "${slug}" present in multiple run dirs ` +
+            `(${existing} and ${dir}). Multi-run review requires disjoint slugs.`,
+        );
+        process.exit(1);
+      }
+      slugToRunDir.set(slug, dir);
+    }
+  }
+  return { primary: all[0], all, slugToRunDir };
+}
+
+export function startReviewServer(
+  runDir: string | string[],
+  port: number,
+): Promise<http.Server> {
+  const runSet = buildRunSet(runDir);
+  const absRunDir = runSet.primary;
+  const isMultiRun = runSet.all.length > 1;
+  const dirForSlug = (slug: string): string => runSet.slugToRunDir.get(slug) ?? absRunDir;
   const staticDir = resolveStaticDir();
 
-  console.log(`[reframe] starting review server for run: ${absRunDir}`);
-  console.log(`[reframe] static web assets directory: ${staticDir}`);
-
-  if (!fs.existsSync(absRunDir)) {
-    console.error(`Error: target run directory does not exist: ${absRunDir}`);
-    process.exit(1);
+  if (isMultiRun) {
+    console.log(`[reframe] starting review server across ${runSet.all.length} run(s):`);
+    for (const d of runSet.all) console.log(`[reframe]   - ${d}`);
+  } else {
+    console.log(`[reframe] starting review server for run: ${absRunDir}`);
   }
+  console.log(`[reframe] static web assets directory: ${staticDir}`);
 
   const server = http.createServer(async (req, res) => {
     // Enable CORS for development ease
@@ -237,27 +285,36 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
         const stateRaw = fs.readFileSync(statePath, 'utf8');
         const state = JSON.parse(stateRaw);
 
-        // Load approvals
-        let approvals = loadApprovals(absRunDir);
-        if (!approvals) {
-          approvals = {
-            runDir: absRunDir,
-            approvedAt: new Date().toISOString(),
-            pages: {},
-          };
+        // Approvals: load per-run, then merge. In multi-run mode each run's
+        // approvals.json is the source of truth for its own slugs (so a later
+        // `--apply-mode pr` resume against a single run dir sees the right
+        // decisions). The merged view here is read-only — writes route back
+        // to the originating run via the POST handler below.
+        const mergedApprovals: ApprovalsDoc = {
+          runDir: absRunDir,
+          approvedAt: new Date().toISOString(),
+          pages: {},
+        };
+        for (const dir of runSet.all) {
+          const a = loadApprovals(dir);
+          if (!a) continue;
+          for (const [slug, approval] of Object.entries(a.pages)) {
+            mergedApprovals.pages[slug] = approval;
+          }
         }
+        const approvals = mergedApprovals;
 
-        // Aggregate pages details
+        // Aggregate pages details across every run dir in the set.
         const pages: any[] = [];
-        const pagesDir = path.join(absRunDir, 'pages');
-
-        if (fs.existsSync(pagesDir)) {
+        for (const sourceDir of runSet.all) {
+          const pagesDir = path.join(sourceDir, 'pages');
+          if (!fs.existsSync(pagesDir)) continue;
           const slugs = fs.readdirSync(pagesDir);
           for (const slug of slugs) {
             const pageDir = path.join(pagesDir, slug);
             if (!fs.statSync(pageDir).isDirectory()) continue;
 
-            const pageDetails: any = { slug };
+            const pageDetails: any = { slug, originRunDir: sourceDir };
 
             // Load audit
             const auditPath = path.join(pageDir, 'audit.json');
@@ -350,6 +407,7 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           runDir: absRunDir,
+          runDirs: runSet.all,
           isGitRepo,
           state,
           approvals,
@@ -381,10 +439,14 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
               return;
             }
 
-            let approvals = loadApprovals(absRunDir);
+            // Route approval write to the originating run dir for the slug
+            // (so each persona run's approvals.json stays authoritative for
+            // its own pages and a later --resume --apply-mode pr sees them).
+            const targetDir = dirForSlug(update.slug);
+            let approvals = loadApprovals(targetDir);
             if (!approvals) {
               approvals = {
-                runDir: absRunDir,
+                runDir: targetDir,
                 approvedAt: new Date().toISOString(),
                 pages: {},
               };
@@ -393,7 +455,7 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
             approvals.pages[update.slug] = update.approval;
             approvals.approvedAt = new Date().toISOString();
 
-            saveApprovals(absRunDir, approvals);
+            saveApprovals(targetDir, approvals);
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: true, approvals }));
@@ -455,12 +517,13 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
         filename = `audit-${breakpoint}.png`;
       }
 
-      const screenshotPath = path.join(absRunDir, 'pages', slug, filename);
+      const slugDir = dirForSlug(slug);
+      const screenshotPath = path.join(slugDir, 'pages', slug, filename);
       // Fall back to the default audit.png when a breakpoint-specific
       // capture wasn't recorded for this run. Lets the SPA's Phone /
       // Tablet preset tabs show *something* even on runs that didn't
       // exercise multi-breakpoint capture, instead of dead 404s.
-      const fallbackPath = path.join(absRunDir, 'pages', slug, 'audit.png');
+      const fallbackPath = path.join(slugDir, 'pages', slug, 'audit.png');
       const servePath = fs.existsSync(screenshotPath) ? screenshotPath
         : (filename !== 'audit.png' && fs.existsSync(fallbackPath)) ? fallbackPath
         : null;
@@ -483,7 +546,7 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
         return;
       }
 
-      const htmlPath = path.join(absRunDir, 'pages', slug, 'audit.html');
+      const htmlPath = path.join(dirForSlug(slug), 'pages', slug, 'audit.html');
       if (fs.existsSync(htmlPath)) {
         res.writeHead(200, {
           'Content-Type': 'text/html; charset=utf-8',
@@ -507,7 +570,7 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
         return;
       }
 
-      const diffPath = path.join(absRunDir, 'pages', slug, 'code.diff');
+      const diffPath = path.join(dirForSlug(slug), 'pages', slug, 'code.diff');
       if (fs.existsSync(diffPath)) {
         res.writeHead(200, {
           'Content-Type': 'text/plain',
@@ -531,7 +594,8 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
       }
 
       try {
-        const pageDir = path.join(absRunDir, 'pages', slug);
+        const slugDir = dirForSlug(slug);
+        const pageDir = path.join(slugDir, 'pages', slug);
         if (!fs.existsSync(pageDir)) {
           res.writeHead(404);
           res.end('Page directory not found');
@@ -551,7 +615,7 @@ export function startReviewServer(runDir: string, port: number): Promise<http.Se
           try { design = JSON.parse(fs.readFileSync(designPath, 'utf8')); } catch {}
         }
 
-        const approvals = loadApprovals(absRunDir);
+        const approvals = loadApprovals(slugDir);
         const pageApproval = approvals?.pages?.[slug];
 
         // Format gaps
@@ -600,72 +664,62 @@ ${pmNotes}
       return;
     }
 
-    // 5. POST /api/apply — Apply approved code refactor via resume command
+    // 5. POST /api/apply — Apply approved code refactor via resume command.
+    // In multi-run mode, fan out: spawn one `rebuild --resume <dir>` per run
+    // so each persona PR's against its own scope. Returns `logFiles[]` plus
+    // `logFile` (first) for backward compat with single-run SPAs.
     if (pathname === '/api/apply' && req.method === 'POST') {
       try {
-        const manifestPath = path.join(absRunDir, 'manifest.json');
-        if (!fs.existsSync(manifestPath)) {
-          res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'manifest.json not found in run directory' }));
-          return;
-        }
-
-        const manifestRaw = fs.readFileSync(manifestPath, 'utf8');
-        const manifest = JSON.parse(manifestRaw);
-
-        const target = manifest.target;
-        if (!target) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Target path not found in manifest' }));
-          return;
-        }
-
-        // Spawn rebuild in background
         const { spawn } = await import('node:child_process');
-        
-        // Find CLI path
         const cliPath = path.resolve(path.join(__dirname, 'cli.js'));
-        const logFilePath = path.join(absRunDir, 'logs', 'apply-rebuild.log');
-        
-        // Ensure logs directory exists
-        const logsDir = path.dirname(logFilePath);
-        if (!fs.existsSync(logsDir)) {
-          fs.mkdirSync(logsDir, { recursive: true });
+        const logFiles: string[] = [];
+        const errors: string[] = [];
+
+        for (const dir of runSet.all) {
+          const manifestPath = path.join(dir, 'manifest.json');
+          if (!fs.existsSync(manifestPath)) {
+            errors.push(`manifest.json not found in ${dir}`);
+            continue;
+          }
+          const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+          const target = manifest.target;
+          if (!target) {
+            errors.push(`Target path not found in manifest of ${dir}`);
+            continue;
+          }
+          const logFilePath = path.join(dir, 'logs', 'apply-rebuild.log');
+          const logsDir = path.dirname(logFilePath);
+          if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+          const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
+          logStream.write(`\n--- Applying Rebuild at ${new Date().toISOString()} ---\n`);
+          logStream.write(`Command: node "${cliPath}" rebuild "${target}" --resume "${dir}" --apply-mode pr\n\n`);
+          const cp = spawn('node', [cliPath, 'rebuild', target, '--resume', dir, '--apply-mode', 'pr'], {
+            cwd: process.cwd(),
+            env: process.env,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+          cp.stdout?.pipe(logStream);
+          cp.stderr?.pipe(logStream);
+          cp.on('error', (err) => { logStream.write(`Process spawn error: ${err.message}\n`); });
+          cp.unref();
+          logFiles.push(logFilePath);
         }
-        
-        const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
 
-        logStream.write(`\n--- Applying Rebuild at ${new Date().toISOString()} ---\n`);
-        logStream.write(`Command: node "${cliPath}" rebuild "${target}" --resume "${absRunDir}" --apply-mode pr\n\n`);
-
-        const cp = spawn('node', [
-          cliPath,
-          'rebuild',
-          target,
-          '--resume',
-          absRunDir,
-          '--apply-mode',
-          'pr'
-        ], {
-          cwd: process.cwd(),
-          env: process.env,
-          stdio: ['ignore', 'pipe', 'pipe']
-        });
-
-        cp.stdout?.pipe(logStream);
-        cp.stderr?.pipe(logStream);
-
-        cp.on('error', (err) => {
-          logStream.write(`Process spawn error: ${err.message}\n`);
-        });
-
-        cp.unref();
+        if (logFiles.length === 0) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: errors.join('; ') || 'No applicable runs' }));
+          return;
+        }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ 
-          success: true, 
-          message: 'Rebuild apply process triggered in background.',
-          logFile: logFilePath
+        res.end(JSON.stringify({
+          success: true,
+          message: isMultiRun
+            ? `Rebuild apply triggered across ${logFiles.length} run(s).`
+            : 'Rebuild apply process triggered in background.',
+          logFile: logFiles[0],
+          logFiles,
+          errors: errors.length ? errors : undefined,
         }));
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -674,33 +728,42 @@ ${pmNotes}
       return;
     }
 
-    // 6. POST /api/verify — Re-run Agent 5 against the current run dir.
-    //    Mirrors /api/apply's pattern: spawn the CLI in the background,
-    //    return the log-file path so the SPA can poll for progress.
+    // 6. POST /api/verify — Re-run Agent 5 against the run set.
+    //    Mirrors /api/apply: in multi-run mode, spawn one verify per run.
     if (pathname === '/api/verify' && req.method === 'POST') {
       try {
         const { spawn } = await import('node:child_process');
         const cliPath = path.resolve(path.join(__dirname, 'cli.js'));
-        const logFilePath = path.join(absRunDir, 'logs', 'verify.log');
-        const logsDir = path.dirname(logFilePath);
-        if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+        const logFiles: string[] = [];
 
-        const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
-        logStream.write(`\n--- Re-verify at ${new Date().toISOString()} ---\n`);
-        logStream.write(`Command: node "${cliPath}" verify "${absRunDir}"\n\n`);
-
-        const cp = spawn('node', [cliPath, 'verify', absRunDir], {
-          cwd: process.cwd(),
-          env: process.env,
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
-        cp.stdout?.pipe(logStream);
-        cp.stderr?.pipe(logStream);
-        cp.on('error', (err) => { logStream.write(`Process spawn error: ${err.message}\n`); });
-        cp.unref();
+        for (const dir of runSet.all) {
+          const logFilePath = path.join(dir, 'logs', 'verify.log');
+          const logsDir = path.dirname(logFilePath);
+          if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
+          const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
+          logStream.write(`\n--- Re-verify at ${new Date().toISOString()} ---\n`);
+          logStream.write(`Command: node "${cliPath}" verify "${dir}"\n\n`);
+          const cp = spawn('node', [cliPath, 'verify', dir], {
+            cwd: process.cwd(),
+            env: process.env,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+          cp.stdout?.pipe(logStream);
+          cp.stderr?.pipe(logStream);
+          cp.on('error', (err) => { logStream.write(`Process spawn error: ${err.message}\n`); });
+          cp.unref();
+          logFiles.push(logFilePath);
+        }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, message: 'Verify pass triggered.', logFile: logFilePath }));
+        res.end(JSON.stringify({
+          success: true,
+          message: isMultiRun
+            ? `Verify pass triggered across ${logFiles.length} run(s).`
+            : 'Verify pass triggered.',
+          logFile: logFiles[0],
+          logFiles,
+        }));
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }));
@@ -708,27 +771,29 @@ ${pmNotes}
       return;
     }
 
-    // 7. GET /api/verify/status — Tail the verify log; returns last 4KB and
-    //    a boolean done-ness derived from the log's final lines.
+    // 7. GET /api/verify/status — Tail the verify log(s); returns last 4KB
+    //    per run (concatenated with run-dir headers in multi-run mode) and
+    //    a boolean done-ness derived from each log's final lines.
     if (pathname === '/api/verify/status' && req.method === 'GET') {
-      const logFilePath = path.join(absRunDir, 'logs', 'verify.log');
-      if (!fs.existsSync(logFilePath)) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ running: false, log: '' }));
-        return;
+      const sections: string[] = [];
+      let anyRunning = false;
+      for (const dir of runSet.all) {
+        const logFilePath = path.join(dir, 'logs', 'verify.log');
+        if (!fs.existsSync(logFilePath)) continue;
+        const stat = fs.statSync(logFilePath);
+        const start = Math.max(0, stat.size - 4096);
+        const fd = fs.openSync(logFilePath, 'r');
+        const buf = Buffer.alloc(stat.size - start);
+        fs.readSync(fd, buf, 0, buf.length, start);
+        fs.closeSync(fd);
+        const tail = buf.toString('utf8');
+        const thisDone = /run complete/.test(tail);
+        if (!thisDone) anyRunning = true;
+        sections.push(isMultiRun ? `=== ${path.basename(dir)} ===\n${tail}` : tail);
       }
-      const stat = fs.statSync(logFilePath);
-      const start = Math.max(0, stat.size - 4096);
-      const fd = fs.openSync(logFilePath, 'r');
-      const buf = Buffer.alloc(stat.size - start);
-      fs.readSync(fd, buf, 0, buf.length, start);
-      fs.closeSync(fd);
-      const tail = buf.toString('utf8');
-      const done = /run complete|verify done|--- Re-verify .* ---\s*$/m.test(tail) === false
-        ? /run complete/.test(tail)
-        : false;
+      const log = sections.join('\n\n');
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ running: !done, log: tail }));
+      res.end(JSON.stringify({ running: anyRunning && sections.length > 0, log }));
       return;
     }
 

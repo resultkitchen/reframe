@@ -36,7 +36,7 @@ USAGE
   reframe show-brand <run-dir>
   reframe pin <run-dir> [--out <path>] [--force]
   reframe init [target-path]
-  reframe review <run-dir> [--port <number>]
+  reframe review <run-dir> [<run-dir> ...] [--port <number>]
   reframe mcp
   reframe --help
 
@@ -197,21 +197,28 @@ async function main(): Promise<number> {
   }
 
   // Handle 'review' command.
+  // Accepts one or more positional run-dir args (multi-run mode merges them
+  // into a single SPA — page slugs must be disjoint across runs, which is
+  // the natural shape when each run was scoped by --only-roles).
   if (subcommandArgv[0] === 'review') {
-    const runDir = subcommandArgv[1];
-    if (!runDir) {
-      console.error('Error: "review" command requires a target run directory.');
-      console.error('Usage: reframe review <run-dir> [--port <number>]');
-      return 1;
-    }
     let port = 3000;
     const portIndex = subcommandArgv.indexOf('--port');
     if (portIndex !== -1 && subcommandArgv[portIndex + 1]) {
       port = parseInt(subcommandArgv[portIndex + 1], 10) || 3000;
     }
+    const runDirs = subcommandArgv.slice(1).filter((tok, i, arr) => {
+      if (tok.startsWith('--')) return false;
+      if (i > 0 && arr[i - 1] === '--port') return false;
+      return true;
+    });
+    if (runDirs.length === 0) {
+      console.error('Error: "review" command requires at least one target run directory.');
+      console.error('Usage: reframe review <run-dir> [<run-dir> ...] [--port <number>]');
+      return 1;
+    }
 
     const { startReviewServer } = await import('./server');
-    await startReviewServer(runDir, port);
+    await startReviewServer(runDirs, port);
     await new Promise(() => {}); // Keep server running
     return 0;
   }

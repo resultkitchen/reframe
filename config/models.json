@@ -1,11 +1,11 @@
 {
-  "$comment": "Gemini model pins per pipeline role. Pinned to the generally-available Gemini 3.5 Flash, Gemini 3.1 Pro Preview, and Gemini 3.1 Flash-Lite tiers (May 2026). Override any of these via --llm-provider + per-role flags; see docs/MODULE-API.md.",
+  "$comment": "Gemini model pins per pipeline role. Flash tier on 2.5 (gemini-3.5-flash backend is flaky in May 2026 — upstream 404s with internal alias 'gemini-v4p1s-rev24-ajax-sentinel'). Pro tier on 3.1 preview, lite on 3.1 lite. Override via --llm-provider + per-role flags; see docs/MODULE-API.md.",
   "mapper": "gemini-3.1-pro-preview",
-  "agent1_audit": "gemini-3.5-flash",
-  "agent2_ux": "gemini-3.5-flash",
-  "agent3_design": "gemini-3.5-flash",
+  "agent1_audit": "gemini-2.5-flash",
+  "agent2_ux": "gemini-2.5-flash",
+  "agent3_design": "gemini-2.5-flash",
   "agent4_code": "gemini-3.1-pro-preview",
-  "agent5_verify": "gemini-3.5-flash",
+  "agent5_verify": "gemini-2.5-flash",
   "agent6_compliance": "gemini-3.1-pro-preview",
   "mechanical": "gemini-3.1-flash-lite"
 }
