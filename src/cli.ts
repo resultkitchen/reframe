@@ -49,6 +49,10 @@ FLAGS
                                        proposed-changes.md for approval. Resume
                                        with --apply-mode pr to apply.
   --max-pages <n>             Cap pages processed in the fan-out (cost/speed control).
+  --routes <list>             Comma-separated route/slug filter. Exact routes
+                              (/reports), prefixes (/reports/*), or slugs
+                              (reports-builder). Runs after role filtering and
+                              before --max-pages.
   --quick-scan                Route per-page review agents to the cheap model tier.
   --params <path>             JSON map of dynamic-route sample values, e.g.
                               { "id": "1", "slug": "demo" } — so /leads/[id] is driven.
@@ -143,6 +147,7 @@ EXAMPLES
   reframe review ./runs/casesdaily-2026-05-25T15-29-40Z
   reframe rebuild https://github.com/acme/todo-saas
   reframe rebuild https://github.com/acme/todo-saas --max-pages 10 --quick-scan
+  reframe rebuild ./project --routes /reports,/reports/builder,/google-ads --apply-mode review
   reframe rebuild ./local/project --apply-mode propose --concurrency 4
   reframe rebuild ./project --resume runs/project-2026-05-15T10-00-00-000Z
 

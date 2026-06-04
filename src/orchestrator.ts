@@ -38,6 +38,7 @@ import { runCompliance } from './agents/agent6-compliance';
 
 import { decorateAllFindings } from './findings/decorate';
 import { loadTelemetrySignals } from './findings/telemetry-signals';
+import { filterPagesByRoutes } from './route-filter';
 
 import type {
   PipelineConfig,
@@ -297,6 +298,16 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       );
     }
 
+    if (config.routePatterns && config.routePatterns.length > 0) {
+      const originalLength = scope.pages.length;
+      scope.pages = filterPagesByRoutes(scope.pages, config.routePatterns);
+      const msg = `Route filter: processing ${scope.pages.length} of ${originalLength} mapped pages matching: ${config.routePatterns.join(', ')}`;
+      console.log(`[reframe] ${msg}`);
+      if (scope.pages.length === 0) {
+        extraAlerts.push(`${msg}. No mapped page matched the requested route filter.`);
+      }
+    }
+
     if (config.maxPages !== undefined && scope.pages.length > config.maxPages) {
       const originalLength = scope.pages.length;
       scope.pages = scope.pages.slice(0, config.maxPages);
@@ -312,8 +323,11 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
        whether stage 0 emitted absolute or repo-relative paths. */
     if (config.diffOnly) {
       try {
+        const diffWorkDir = config.isLocalPath
+          ? path.resolve(config.target)
+          : config.workDir;
         const { base, files: changedFiles } = await getChangedFiles(
-          config.workDir,
+          diffWorkDir,
           config.diffBase,
         );
         const changedSet = new Set<string>();

@@ -159,6 +159,7 @@ interface ParsedArgs {
   readOnly?: boolean;
   auth?: string;
   maxPages?: number;
+  routes?: string[];
   quickScan?: boolean;
   params?: string;
   llmProvider?: string;
@@ -224,6 +225,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       const n = Number.parseInt(next(), 10);
       if (Number.isNaN(n) || n < 1) throw new Error('--max-pages must be a positive integer');
       out.maxPages = n;
+    } else if (tok === '--routes') {
+      out.routes = next().split(',').map((r) => r.trim()).filter((r) => r.length > 0);
     } else if (tok === '--quick-scan') {
       out.quickScan = true;
     } else if (tok === '--params') {
@@ -388,6 +391,7 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     maxRetries: 2,
     ...(args.resume ? { resumeRunDir: path.resolve(args.resume) } : {}),
     maxPages: args.maxPages,
+    routePatterns: args.routes,
     quickScan: args.quickScan ?? false,
     sampleParams: loadSampleParams(args.params),
     onlyRoles: args.onlyRoles,

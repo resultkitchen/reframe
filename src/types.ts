@@ -129,6 +129,12 @@ export interface PipelineConfig {
   sampleParams: Record<string, string>;
   /** Filter run to only pages matching specific role names (e.g. ['admin', 'media_buyer']). */
   onlyRoles?: string[];
+  /**
+   * Filter run to specific routes or page slugs. Supports exact routes
+   * (`/reports`), route prefixes (`/reports/*`), and slugs
+   * (`reports-builder`).
+   */
+  routePatterns?: string[];
   /** Path to static JSON mock routing mappings. */
   mocksPath?: string;
   /** Selected LLM provider, e.g. 'gemini', 'openai', 'anthropic', 'openai-compatible'. Default 'gemini' */
