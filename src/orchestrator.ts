@@ -198,6 +198,8 @@ function deriveOutcome(boot: BootResult, audit: AuditResult | undefined): PageOu
       return 'errored';
     case 'navigation-failed':
       return 'drive-failed';
+    case 'route-drift':
+      return 'route-drift';
     default:
       return 'drive-failed';
   }
@@ -289,6 +291,50 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
         `[reframe] Stage 0 done — ${scope.pages.length} page(s), ` +
           `${scope.brokenContracts.length} broken contract(s).`,
       );
+    }
+
+    if (config.scenario) {
+      const scenariosPath = path.join(config.workDir, '.reframe', 'scenarios.json');
+      if (fs.existsSync(scenariosPath)) {
+        try {
+          const scenariosContent = fs.readFileSync(scenariosPath, 'utf8');
+          const scenariosDoc = JSON.parse(scenariosContent);
+          const scenario = scenariosDoc.scenarios?.[config.scenario] || scenariosDoc[config.scenario];
+          if (scenario) {
+            console.log(`[reframe] Applying workflow scenario "${config.scenario}"`);
+            if (scenario.routes && Array.isArray(scenario.routes)) {
+              config.routePatterns = scenario.routes;
+              console.log(`[reframe] Scenario routes: ${scenario.routes.join(', ')}`);
+            }
+            if (scenario.brief && typeof scenario.brief === 'string') {
+              config.brief = scenario.brief;
+              console.log(`[reframe] Scenario brief: "${config.brief}"`);
+            }
+            if (scenario.seedCmd && typeof scenario.seedCmd === 'string') {
+              config.seedCmd = scenario.seedCmd;
+              console.log(`[reframe] Scenario seed command: "${config.seedCmd}"`);
+            }
+            if (scenario.requiredSeedFiles && Array.isArray(scenario.requiredSeedFiles)) {
+              for (const fileRel of scenario.requiredSeedFiles) {
+                const absFile = path.join(config.workDir, fileRel);
+                if (!fs.existsSync(absFile)) {
+                  const msg = `Preflight error: Required seed file "${fileRel}" not found for scenario "${config.scenario}".`;
+                  console.error(`[reframe] ${msg}`);
+                  extraAlerts.push(msg);
+                } else {
+                  console.log(`[reframe] Preflight check passed: Seed file "${fileRel}" exists.`);
+                }
+              }
+            }
+          } else {
+            console.warn(`[reframe] Scenario "${config.scenario}" not found in ${scenariosPath}`);
+          }
+        } catch (err) {
+          console.error(`[reframe] Failed to parse scenarios.json: ${errMsg(err)}`);
+        }
+      } else {
+        console.warn(`[reframe] scenarios.json not found at ${scenariosPath}`);
+      }
     }
 
     if (config.onlyRoles && config.onlyRoles.length > 0) {
@@ -595,6 +641,12 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
           );
           return loadAgentResult<T>(pageDir, agent);
         }
+        if (pageState.agents[agent] === 'skipped') {
+          console.log(
+            `[${page.slug}] ${agent}: skipped.`,
+          );
+          return undefined;
+        }
         mark(agent, 'running');
         try {
           if (config.llmProvider !== 'gemini') {
@@ -650,9 +702,15 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
         mark('compliance', ctx.compliance ? 'done' : 'skipped');
       } else {
         // DAG: audit → (ux → design); compliance ∥ that chain; then code; then verify.
-        const auditChain = (async () => {
-          ctx.audit = (await runAgent('audit', () => runAudit(ctx))) ?? ctx.audit;
+        ctx.audit = (await runAgent('audit', () => runAudit(ctx))) ?? ctx.audit;
 
+        if (ctx.audit?.health && (ctx.audit.health.status === 'route-drift' || ctx.audit.health.status === 'auth-redirect')) {
+          console.log(`[${page.slug}] route-drift or auth-redirect detected (${ctx.audit.health.status}). Skipping downstream agents.`);
+          const skipAgents: AgentName[] = ['ux', 'design', 'compliance', 'code', 'verify'];
+          for (const a of skipAgents) {
+            mark(a, 'skipped');
+          }
+        } else {
           // Coaching & Auto-Remediation Check
           while (ctx.audit && (ctx.audit.health?.status === 'soft-lockout' || ctx.audit.health?.status === 'degraded-empty')) {
             console.log(`\n================================================================================`);
@@ -746,8 +804,8 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
                           if (['node_modules', '.git', '.next', 'dist', 'build', 'runs'].includes(entry.name)) continue;
                           scanAndOverwrite(abs);
                         } else if (entry.isFile() && ['.db', '.sqlite', '.sqlite3'].includes(path.extname(entry.name).toLowerCase()) && !abs.includes('.reframe')) {
-                          console.log(`[reframe] Replacing database file: ${abs}`);
-                          fs.copyFileSync(mockDb, abs);
+                           console.log(`[reframe] Replacing database file: ${abs}`);
+                           fs.copyFileSync(mockDb, abs);
                         }
                       }
                     };
@@ -778,14 +836,24 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
             }
           }
 
-          ctx.ux = (await runAgent('ux', () => runUx(ctx))) ?? ctx.ux;
-          ctx.design = (await runAgent('design', () => runDesign(ctx))) ?? ctx.design;
-        })();
-        const complianceChain = (async () => {
-          ctx.compliance =
-            (await runAgent('compliance', () => runCompliance(ctx))) ?? ctx.compliance;
-        })();
-        await Promise.all([auditChain, complianceChain]);
+          if (ctx.audit?.health && (ctx.audit.health.status === 'route-drift' || ctx.audit.health.status === 'auth-redirect')) {
+            console.log(`[${page.slug}] route-drift or auth-redirect detected after coaching (${ctx.audit.health.status}). Skipping downstream agents.`);
+            const skipAgents: AgentName[] = ['ux', 'design', 'compliance', 'code', 'verify'];
+            for (const a of skipAgents) {
+              mark(a, 'skipped');
+            }
+          } else {
+            const reviewChain = (async () => {
+              ctx.ux = (await runAgent('ux', () => runUx(ctx))) ?? ctx.ux;
+              ctx.design = (await runAgent('design', () => runDesign(ctx))) ?? ctx.design;
+            })();
+            const complianceChain = (async () => {
+              ctx.compliance =
+                (await runAgent('compliance', () => runCompliance(ctx))) ?? ctx.compliance;
+            })();
+            await Promise.all([reviewChain, complianceChain]);
+          }
+        }
       }
 
       // ADR-0001: decorate every finding with mechanical signals before

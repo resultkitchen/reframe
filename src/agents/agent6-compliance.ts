@@ -177,6 +177,7 @@ export function buildCompliancePrompt(
   filePath: string,
   matchedRules: ConstraintRule[],
   source: string,
+  knownCovered?: string[],
 ): string {
   const rulesBlock = matchedRules
     .map(
@@ -185,12 +186,16 @@ export function buildCompliancePrompt(
     )
     .join('\n');
 
+  const knownCoveredBlock = knownCovered && knownCovered.length > 0
+    ? `Known covered surfaces / features (Do NOT complain about these being missing):\n${knownCovered.map((s) => `- ${s}`).join('\n')}\n`
+    : '';
+
   return [
     `Page: ${pageId}`,
     `Purpose: ${purpose}`,
     `User function: ${userFunction}`,
     `Source file: ${filePath}`,
-    '',
+    knownCoveredBlock,
     'Compliance rules in force for this page:',
     rulesBlock,
     '',
@@ -305,7 +310,7 @@ export async function runCompliance(ctx: AgentContext): Promise<ComplianceResult
   }
 
   const systemInstruction = COMPLIANCE_SYSTEM_INSTRUCTION;
-  const prompt = buildCompliancePrompt(pageId, ctx.page.purpose, ctx.page.userFunction, ctx.page.filePath, matchedRules, source);
+  const prompt = buildCompliancePrompt(pageId, ctx.page.purpose, ctx.page.userFunction, ctx.page.filePath, matchedRules, source, ctx.constraints?.knownCovered);
 
   let findings: ComplianceFinding[] = [];
   try {

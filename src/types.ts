@@ -183,6 +183,8 @@ export interface PipelineConfig {
   evidence?: string;
   /** Optional custom database seeding command. */
   seedCmd?: string;
+  /** Optional active workflow scenario key from scenarios.json config. */
+  scenario?: string;
 }
 
 /* ─────────────────────────── Approvals & Comments Ledger ─────────────────────────── */
@@ -240,6 +242,8 @@ export interface ConstraintRule {
 export interface ConstraintsSpec {
   project: string;
   rules: ConstraintRule[];
+  /** Optional list of known covered surfaces to prevent redundant agent cycles. */
+  knownCovered?: string[];
 }
 
 /* ─────────────────────────── Stage 0 — Map ─────────────────────────── */
@@ -329,7 +333,8 @@ export type PageHealthStatus =
   | 'navigation-failed'  // the browser could not navigate to the route
   | 'boot-failed'        // the app server failed to boot
   | 'degraded-empty'     // empty page or missing backing data detected
-  | 'soft-lockout';      // page displays an expired auth connection / lockout state
+  | 'soft-lockout'       // page displays an expired auth connection / lockout state
+  | 'route-drift';       // landed on a different non-auth page than expected
 
 export interface PageHealth {
   status: PageHealthStatus;
@@ -341,6 +346,8 @@ export interface PageHealth {
   httpStatus?: number;
   /** Human-readable explanation — always populated. */
   detail: string;
+  /** True if the Playwright browser ended up on a different route than requested. */
+  routeDrift?: boolean;
 }
 
 /** The honest outcome of a page in the manifest (P1 — meaningful pass/fail). */
@@ -349,7 +356,8 @@ export type PageOutcome =
   | 'redirected'    // bounced to auth — audit did not see the intended page
   | 'errored'       // framework error overlay or HTTP 4xx/5xx
   | 'boot-failed'   // the app never booted
-  | 'drive-failed'; // the browser could not drive the route
+  | 'drive-failed'  // the browser could not drive the route
+  | 'route-drift';  // landed on a different non-auth page than expected
 
 /* ─────────────────────────── Agents ─────────────────────────── */
 

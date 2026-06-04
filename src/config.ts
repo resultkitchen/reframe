@@ -117,6 +117,9 @@ export function loadConstraints(constraintsPath: string): ConstraintsSpec {
   const parsed = JSON.parse(raw) as Record<string, unknown>;
 
   const rules = Array.isArray(parsed.rules) ? parsed.rules : [];
+  const knownCovered = Array.isArray(parsed.knownCovered)
+    ? parsed.knownCovered.map(String)
+    : undefined;
 
   return {
     project: typeof parsed.project === 'string' ? parsed.project : 'Untitled',
@@ -130,6 +133,7 @@ export function loadConstraints(constraintsPath: string): ConstraintsSpec {
         severity: (rule.severity as ConstraintsSpec['rules'][number]['severity']) ?? 'medium',
       };
     }),
+    knownCovered,
   };
 }
 
@@ -173,6 +177,7 @@ interface ParsedArgs {
   brief?: string;
   evidence?: string;
   seedCmd?: string;
+  scenario?: string;
 }
 
 /**
@@ -264,6 +269,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.evidence = next();
     } else if (tok === '--seed-cmd') {
       out.seedCmd = next();
+    } else if (tok === '--scenario') {
+      out.scenario = next();
     } else if (tok.startsWith('--')) {
       throw new Error(`Unknown flag "${tok}"`);
     } else if (target === undefined) {
@@ -414,6 +421,7 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     brief: args.brief,
     evidence: args.evidence,
     seedCmd: args.seedCmd,
+    scenario: args.scenario,
   };
 
   return config;

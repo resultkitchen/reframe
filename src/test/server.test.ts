@@ -12,7 +12,7 @@ import type { RunState, ApprovalsDoc } from '../types';
 
 test('server API /api/run aggregates state and serves screenshots', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-test-'));
-  const port = 3001; // use separate port to avoid collision
+  const port = 3181; // use separate port to avoid collision
 
   try {
     // Scaffold minimal state.json
@@ -83,7 +83,7 @@ test('server API /api/run aggregates state and serves screenshots', async () => 
 
 test('server API POST /api/approvals writes approvals.json atomically', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-post-test-'));
-  const port = 3002;
+  const port = 3182;
 
   try {
     const state: RunState = {

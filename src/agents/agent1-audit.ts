@@ -324,6 +324,10 @@ export function buildAuditPrompt(
       ].filter(Boolean).join('\n')
     : '  (no brand spec available — skip voice findings on this run.)';
 
+  const knownCoveredBlock = ctx.constraints?.knownCovered && ctx.constraints.knownCovered.length > 0
+    ? `\n  knownCoveredSurfaces: \n${ctx.constraints.knownCovered.map((s) => `    - ${s}`).join('\n')}`
+    : '';
+
   return `Audit this page and return a JSON gap list.
 
 PAGE
@@ -331,7 +335,7 @@ PAGE
   route: ${ctx.page.route}
   purpose: ${ctx.page.purpose}
   userFunction: ${ctx.page.userFunction}
-  sourceFile: ${ctx.page.filePath}
+  sourceFile: ${ctx.page.filePath}${knownCoveredBlock}
 
 PINNED BRAND VOICE (compare every visible piece of copy against this — flag drift)
 ${brandBlock}
@@ -533,6 +537,42 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
       ],
     };
     writeOutputs(ctx, result);
+    return result;
+  }
+
+  // If health status is route-drift or auth-redirect, do not query Gemini. Return a placeholder result.
+  if (health && (health.status === 'route-drift' || health.status === 'auth-redirect')) {
+    const result: AuditResult = {
+      page: pageId,
+      health,
+      consoleErrors,
+      interactionsExercised: interactions,
+      gaps: [
+        {
+          id: 'g1',
+          category: 'functional',
+          severity: 'high',
+          description: health.status === 'route-drift'
+            ? `Route drift detected: expected "${routePath}", landed on "${health.finalUrl}".`
+            : `Authentication redirect detected: redirected to login/auth page "${health.finalUrl}".`,
+          recommendation: health.status === 'route-drift'
+            ? `Verify the application routing is correct or update sample parameters / auth state to avoid drifting away from the intended view.`
+            : `Ensure valid test credentials are configured and that the user session is preserved to prevent authentication bounces.`,
+          evidence: [`Landed URL: ${health.finalUrl}`],
+          plain: health.status === 'route-drift'
+            ? `Reframe landed on "${health.finalUrl}" instead of the expected route "${routePath}".`
+            : `Reframe was redirected to the login/auth page "${health.finalUrl}" while trying to view this page.`,
+          whyItMatters: `The automated audit could not inspect the intended page because the app drifted or bounced the user to a different view.`,
+          dimension: 'functional',
+          personas: ['arthur'],
+        },
+      ],
+      ...(authRole ? { authRole } : {}),
+      ...(Object.keys(breakpointFiles).length > 0
+        ? { breakpointScreenshots: breakpointFiles }
+        : {}),
+    };
+    writeOutputs(ctx, result, screenshot, html, breakpointShots);
     return result;
   }
 

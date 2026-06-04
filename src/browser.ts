@@ -250,12 +250,24 @@ export class PageDriver {
       }
     }
 
+    let routeDrift = false;
+    if (status === 'ok') {
+      const normFinal = finalPathname.replace(/\/$/, '').toLowerCase();
+      const normExpected = expectedRoute.split('?')[0].replace(/\/$/, '').toLowerCase();
+      if (normFinal !== normExpected) {
+        routeDrift = true;
+        status = 'route-drift';
+        detail = `Route drift detected: expected "${expectedRoute}", landed on "${finalPathname}".`;
+      }
+    }
+
     return {
       status,
       healthy: status === 'ok',
       finalUrl,
       httpStatus: this.lastNavStatus,
       detail,
+      routeDrift,
     };
   }
 
