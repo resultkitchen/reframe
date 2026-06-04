@@ -177,6 +177,12 @@ export interface PipelineConfig {
    * unsolicited automated comments.
    */
   postFindings: boolean;
+  /** Optional workflow brief detailing the developer's intent and specific constraints. */
+  brief?: string;
+  /** Optional directory of manual screenshots, logs, or other evidence. */
+  evidence?: string;
+  /** Optional custom database seeding command. */
+  seedCmd?: string;
 }
 
 /* ─────────────────────────── Approvals & Comments Ledger ─────────────────────────── */
@@ -321,7 +327,9 @@ export type PageHealthStatus =
   | 'error-overlay'       // a Next.js/Vite/React framework error overlay shows
   | 'http-error'          // the document responded 4xx/5xx
   | 'navigation-failed'  // the browser could not navigate to the route
-  | 'boot-failed';        // the app server failed to boot
+  | 'boot-failed'        // the app server failed to boot
+  | 'degraded-empty'     // empty page or missing backing data detected
+  | 'soft-lockout';      // page displays an expired auth connection / lockout state
 
 export interface PageHealth {
   status: PageHealthStatus;

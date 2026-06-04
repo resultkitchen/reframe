@@ -675,6 +675,94 @@ export async function runBootGate(
       });
     }
 
+    // (4.5) Database Pre-seeding / SQLite Emulation
+    try {
+      const mockDbCandidates = [
+        path.join(config.workDir, '.reframe', 'mock.db'),
+        path.join(config.workDir, '.reframe', 'mock.sqlite'),
+        path.join(config.workDir, '.reframe', 'mock.sqlite3'),
+      ];
+      let activeMockDb: string | undefined;
+      for (const candidate of mockDbCandidates) {
+        if (fs.existsSync(candidate)) {
+          activeMockDb = candidate;
+          break;
+        }
+      }
+
+      if (activeMockDb) {
+        console.log(`[stage0.5] SQLite emulation template found at ${activeMockDb}. Swapping in active DBs...`);
+        const scanDbFiles = (dir: string) => {
+          const entries = fs.readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            const absPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+              if (['node_modules', '.git', '.next', 'dist', 'build', 'runs'].includes(entry.name)) continue;
+              scanDbFiles(absPath);
+            } else if (entry.isFile()) {
+              const ext = path.extname(entry.name).toLowerCase();
+              if (['.db', '.sqlite', '.sqlite3'].includes(ext) && !absPath.includes('.reframe')) {
+                console.log(`[stage0.5] Overwriting active SQLite database: ${absPath}`);
+                fs.copyFileSync(activeMockDb, absPath);
+              }
+            }
+          }
+        };
+        scanDbFiles(config.workDir);
+      }
+    } catch (err) {
+      console.error(`[stage0.5] warning: SQLite emulation swap failed: ${String(err)}`);
+    }
+
+    // Database Seeder Execution
+    if (config.seedCmd) {
+      console.log(`[stage0.5] Executing database seeder command: ${config.seedCmd}`);
+      try {
+        const parts = config.seedCmd.split(/\s+/);
+        const cmd = parts[0];
+        const cmdArgs = parts.slice(1);
+        const result = spawnSync(cmd, cmdArgs, {
+          cwd: config.workDir,
+          encoding: 'utf8',
+          timeout: 45000,
+          shell: IS_WINDOWS,
+        });
+        if (result.status !== 0) {
+          console.error(`[stage0.5] Database seeder failed with exit code ${result.status}:\n${result.stderr}`);
+        } else {
+          console.log(`[stage0.5] Database seeder executed successfully:\n${result.stdout}`);
+        }
+      } catch (err) {
+        console.error(`[stage0.5] Database seeder execution failed: ${String(err)}`);
+      }
+    } else {
+      try {
+        const pkgRaw = safeRead(path.join(config.workDir, 'package.json'));
+        if (pkgRaw) {
+          const pkg = JSON.parse(pkgRaw) as { scripts?: Record<string, string> };
+          const scripts = pkg.scripts ?? {};
+          const seedScript = ['db:seed', 'seed'].find(s => typeof scripts[s] === 'string' && scripts[s].trim());
+          if (seedScript) {
+            console.log(`[stage0.5] Auto-detected seed script in package.json: ${seedScript}`);
+            const seedArgs = pm.runArgs(seedScript);
+            const result = spawnSync(pm.pm, seedArgs, {
+              cwd: config.workDir,
+              encoding: 'utf8',
+              timeout: 45000,
+              shell: IS_WINDOWS,
+            });
+            if (result.status !== 0) {
+              console.error(`[stage0.5] Auto-detected seed script failed with exit code ${result.status}:\n${result.stderr}`);
+            } else {
+              console.log(`[stage0.5] Auto-detected seed script executed successfully:\n${result.stdout}`);
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     // 5. Boot + poll.
     const server = await bootServer(config.workDir, pm, dev);
     if (server.baseUrl) {

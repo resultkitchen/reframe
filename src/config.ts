@@ -170,6 +170,9 @@ interface ParsedArgs {
   bootstrapOnly?: boolean;
   postFindings?: boolean;
   verifyOnly?: boolean;
+  brief?: string;
+  evidence?: string;
+  seedCmd?: string;
 }
 
 /**
@@ -255,6 +258,12 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.postFindings = true;
     } else if (tok === '--verify-only') {
       out.verifyOnly = true;
+    } else if (tok === '--brief') {
+      out.brief = next();
+    } else if (tok === '--evidence') {
+      out.evidence = next();
+    } else if (tok === '--seed-cmd') {
+      out.seedCmd = next();
     } else if (tok.startsWith('--')) {
       throw new Error(`Unknown flag "${tok}"`);
     } else if (target === undefined) {
@@ -402,6 +411,9 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     bootstrapOnly: args.bootstrapOnly ?? false,
     postFindings: args.postFindings ?? false,
     verifyOnly: args.verifyOnly ?? false,
+    brief: args.brief,
+    evidence: args.evidence,
+    seedCmd: args.seedCmd,
   };
 
   return config;

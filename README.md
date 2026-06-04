@@ -37,6 +37,37 @@ Reframe drives every screen in a real Chromium, audits it through 6 agents, and 
 
 ---
 
+## 🛑 Silent State Voids: The auth & empty-db trap
+
+Your AI developer generated 18 screens. All tests compile. Playwright runs, takes a screenshot of the login screen, and reports PASS.
+Or it drives to an empty dashboard displaying "No campaigns found. Please connect your account." and reports PASS.
+
+That is a **Silent State Void**. The app runs, but it's a hollow shell.
+And auditing empty templates burns expensive LLM tokens inspecting blank components.
+
+Reframe kills Silent State Voids with three integrated guardrails:
+
+### 1. Semantic Health Scanning
+Every page check runs a semantic scan on the body text. If it matches unauthenticated or degraded keyphrases:
+- **Soft Lockout:** (`session expired`, `please sign in`, `reconnect account`) -> Flags page as `soft-lockout`.
+- **Degraded/Empty:** (`no campaigns found`, `no data available`, `please connect`) -> Flags page as `degraded-empty`.
+A redirect or an empty dashboard can never report success. It fails the health check immediately.
+
+### 2. TTY Interactive Coaching
+When running locally, Reframe doesn't just crash on warnings. It pauses execution and drops an interactive TTY coaching prompt directly in your terminal:
+- Press `L` to spawn a headed browser, log in manually once, and let Reframe save the session cookies.
+- Press `S` to run a database seeder command immediately.
+- Press `E` to copy a pre-seeded SQLite mock template (`.reframe/mock.db`) directly over your active dev database.
+- Press `C` to ignore and continue.
+
+In CI or non-interactive environments, it logs coaching recommendations, writes alerts to the runs manifest, fails the page gate, and continues.
+
+### 3. Automated Boot Seeding & SQLite Swap
+No manual database setup needed. If Reframe detects `.reframe/mock.db` in your repo, it automatically overwrites empty local SQLite databases on boot.
+If you pass `--seed-cmd "npm run db:seed"` or define a seed script in `package.json`, Reframe runs the database seeder automatically during the boot gate before running Playwright.
+
+---
+
 ## Run it
 
 ```bash

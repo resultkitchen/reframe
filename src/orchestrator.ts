@@ -193,6 +193,8 @@ function deriveOutcome(boot: BootResult, audit: AuditResult | undefined): PageOu
       return 'redirected';
     case 'http-error':
     case 'error-overlay':
+    case 'degraded-empty':
+    case 'soft-lockout':
       return 'errored';
     case 'navigation-failed':
       return 'drive-failed';
@@ -650,6 +652,132 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
         // DAG: audit → (ux → design); compliance ∥ that chain; then code; then verify.
         const auditChain = (async () => {
           ctx.audit = (await runAgent('audit', () => runAudit(ctx))) ?? ctx.audit;
+
+          // Coaching & Auto-Remediation Check
+          while (ctx.audit && (ctx.audit.health?.status === 'soft-lockout' || ctx.audit.health?.status === 'degraded-empty')) {
+            console.log(`\n================================================================================`);
+            console.log(`⚠️  DEGRADED AUDIT DETECTED on page: ${page.slug} (${page.route})`);
+            console.log(`   Health status: ${ctx.audit.health.status}`);
+            console.log(`   Detail: ${ctx.audit.health.detail}`);
+            console.log(`================================================================================\n`);
+
+            if (process.stdin.isTTY && process.stdout.isTTY) {
+              console.log(`Reframe paused. Please select an option to resolve the missing state:`);
+              console.log(` [L] Launch headed browser to log in manually and reconnect/cache session`);
+              console.log(` [S] Execute database seed command`);
+              console.log(` [E] Overwrite SQLite file with .reframe/mock.db template`);
+              console.log(` [C] Continue anyway (LLM will audit the empty state)`);
+              console.log(` [K] Skip this page audit for now`);
+              console.log(``);
+
+              const choice = await promptCoachingChoice(`Select action [L/S/E/C/K]: `);
+              if (choice === 'l') {
+                console.log(`[reframe] Spawning headed browser for manual login...`);
+                try {
+                  const { chromium } = await import('playwright');
+                  const browser = await chromium.launch({ headless: false });
+                  const context = await browser.newContext();
+                  const loginPage = await context.newPage();
+                  const authConfig = ctx.config.auth;
+                  const loginUrl = authConfig ? `${ctx.boot.baseUrl}${authConfig.loginUrl.startsWith('/') ? authConfig.loginUrl : `/${authConfig.loginUrl}`}` : `${ctx.boot.baseUrl}/login`;
+                  console.log(`[reframe] Opening ${loginUrl} in headed browser...`);
+                  await loginPage.goto(loginUrl, { waitUntil: 'domcontentloaded' });
+                  console.log(`[reframe] Please log in manually. Close the browser window when finished.`);
+                  await new Promise<void>((res) => {
+                    browser.on('disconnected', () => res());
+                  });
+                  console.log(`[reframe] Headed browser closed. Re-running page health audit...`);
+                  pageState.agents.audit = 'pending';
+                  ctx.audit = await runAudit(ctx);
+                } catch (err) {
+                  console.error(`[reframe] Headed login failed: ${String(err)}`);
+                }
+              } else if (choice === 's') {
+                if (config.seedCmd) {
+                  console.log(`[reframe] Executing custom database seed command: ${config.seedCmd}`);
+                  try {
+                    const parts = config.seedCmd.split(/\s+/);
+                    const result = spawnSync(parts[0], parts.slice(1), {
+                      cwd: config.workDir,
+                      encoding: 'utf8',
+                      shell: IS_WINDOWS,
+                    });
+                    console.log(result.stdout || result.stderr || 'Seed finished.');
+                  } catch (err) {
+                    console.error(`[reframe] Seed failed: ${String(err)}`);
+                  }
+                } else {
+                  try {
+                    const pkgRaw = fs.readFileSync(path.join(config.workDir, 'package.json'), 'utf8');
+                    const pkg = JSON.parse(pkgRaw) as { scripts?: Record<string, string> };
+                    const scripts = pkg.scripts ?? {};
+                    const seedScript = ['db:seed', 'seed'].find(s => typeof scripts[s] === 'string' && scripts[s].trim());
+                    if (seedScript) {
+                      const pm = fs.existsSync(path.join(config.workDir, 'pnpm-lock.yaml')) ? 'pnpm'
+                               : fs.existsSync(path.join(config.workDir, 'yarn.lock')) ? 'yarn'
+                               : fs.existsSync(path.join(config.workDir, 'bun.lockb')) ? 'bun'
+                               : 'npm';
+                      console.log(`[reframe] Executing seed via package manager: ${pm} run ${seedScript}`);
+                      const result = spawnSync(pm, ['run', seedScript], {
+                        cwd: config.workDir,
+                        encoding: 'utf8',
+                        shell: IS_WINDOWS,
+                      });
+                      console.log(result.stdout || result.stderr || 'Seed finished.');
+                    } else {
+                      console.warn(`[reframe] No custom seedCmd provided and no db:seed/seed scripts found in package.json.`);
+                    }
+                  } catch (err) {
+                    console.error(`[reframe] Seeder auto-detection failed: ${String(err)}`);
+                  }
+                }
+                pageState.agents.audit = 'pending';
+                ctx.audit = await runAudit(ctx);
+              } else if (choice === 'e') {
+                console.log(`[reframe] Swapping in SQLite mock database template...`);
+                try {
+                  const mockDb = path.join(config.workDir, '.reframe', 'mock.db');
+                  if (fs.existsSync(mockDb)) {
+                    const scanAndOverwrite = (dir: string) => {
+                      const entries = fs.readdirSync(dir, { withFileTypes: true });
+                      for (const entry of entries) {
+                        const abs = path.join(dir, entry.name);
+                        if (entry.isDirectory()) {
+                          if (['node_modules', '.git', '.next', 'dist', 'build', 'runs'].includes(entry.name)) continue;
+                          scanAndOverwrite(abs);
+                        } else if (entry.isFile() && ['.db', '.sqlite', '.sqlite3'].includes(path.extname(entry.name).toLowerCase()) && !abs.includes('.reframe')) {
+                          console.log(`[reframe] Replacing database file: ${abs}`);
+                          fs.copyFileSync(mockDb, abs);
+                        }
+                      }
+                    };
+                    scanAndOverwrite(config.workDir);
+                  } else {
+                    console.warn(`[reframe] SQLite template not found at ${mockDb}.`);
+                  }
+                } catch (err) {
+                  console.error(`[reframe] SQLite swap failed: ${String(err)}`);
+                }
+                pageState.agents.audit = 'pending';
+                ctx.audit = await runAudit(ctx);
+              } else if (choice === 'k') {
+                console.log(`[reframe] Skipping this page audit.`);
+                const skipAgents: AgentName[] = ['ux', 'design', 'compliance', 'code', 'verify'];
+                for (const a of skipAgents) {
+                  pageState.agents[a] = 'skipped';
+                }
+                pageState.pass = false;
+                return;
+              } else if (choice === 'c') {
+                console.log(`[reframe] Continuing with empty/degraded state.`);
+                break;
+              }
+            } else {
+              extraAlerts.push(`Page "${page.slug}" loaded in a degraded/lockout state (${ctx.audit.health.status}). Non-TTY environment: continuing scan without coaching.`);
+              break;
+            }
+          }
+
           ctx.ux = (await runAgent('ux', () => runUx(ctx))) ?? ctx.ux;
           ctx.design = (await runAgent('design', () => runDesign(ctx))) ?? ctx.design;
         })();
@@ -1373,6 +1501,21 @@ function promptYesNo(question: string): Promise<boolean> {
       rl.close();
       const trimmed = answer.trim().toLowerCase();
       resolve(trimmed === 'y' || trimmed === 'yes');
+    });
+  });
+}
+
+const IS_WINDOWS = process.platform === 'win32';
+
+function promptCoachingChoice(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim().toLowerCase());
     });
   });
 }

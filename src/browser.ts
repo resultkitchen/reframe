@@ -193,6 +193,26 @@ export class PageDriver {
       // ignore
     }
 
+    let semanticLockoutDetected = false;
+    let semanticEmptyDetected = false;
+    let semanticDetail = '';
+
+    try {
+      const pageText = await this.page.evaluate(() => document.body?.innerText || '');
+      const lockoutRegex = /session expired|connection lost|please sign in|reconnect account|unauthorized|access denied/i;
+      const emptyRegex = /no accounts connected|no campaigns found|no data available|please connect/i;
+
+      if (lockoutRegex.test(pageText)) {
+        semanticLockoutDetected = true;
+        semanticDetail = `Soft lockout detected on page: "${pageText.slice(0, 100).replace(/\s+/g, ' ')}..."`;
+      } else if (emptyRegex.test(pageText)) {
+        semanticEmptyDetected = true;
+        semanticDetail = `Empty or degraded state detected on page: "${pageText.slice(0, 100).replace(/\s+/g, ' ')}..."`;
+      }
+    } catch {
+      // ignore
+    }
+
     const isLoginRegex = /(^|\/)(login|sign-?in|signin|auth)(\/|$)/i;
     const normLoginPath = loginPath
       ? loginPath.startsWith('/')
@@ -212,6 +232,12 @@ export class PageDriver {
     } else if (hasErrorOverlay) {
       status = 'error-overlay';
       detail = 'A framework error overlay or unhandled runtime exception was detected.';
+    } else if (semanticLockoutDetected) {
+      status = 'soft-lockout';
+      detail = semanticDetail;
+    } else if (semanticEmptyDetected) {
+      status = 'degraded-empty';
+      detail = semanticDetail;
     } else if (!isLoginRegex.test(expectedRoute)) {
       const looksLikeLogin =
         (normLoginPath &&
