@@ -178,6 +178,7 @@ interface ParsedArgs {
   evidence?: string;
   seedCmd?: string;
   scenario?: string;
+  focus?: string;
 }
 
 /**
@@ -271,6 +272,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.seedCmd = next();
     } else if (tok === '--scenario') {
       out.scenario = next();
+    } else if (tok === '--focus') {
+      out.focus = next();
     } else if (tok.startsWith('--')) {
       throw new Error(`Unknown flag "${tok}"`);
     } else if (target === undefined) {
@@ -422,6 +425,7 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     evidence: args.evidence,
     seedCmd: args.seedCmd,
     scenario: args.scenario,
+    focus: args.focus,
   };
 
   return config;

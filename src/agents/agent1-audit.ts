@@ -328,6 +328,10 @@ export function buildAuditPrompt(
     ? `\n  knownCoveredSurfaces: \n${ctx.constraints.knownCovered.map((s) => `    - ${s}`).join('\n')}`
     : '';
 
+  const focusBlock = ctx.config.focus
+    ? `\n  runFocusGoal: ${ctx.config.focus}`
+    : '';
+
   return `Audit this page and return a JSON gap list.
 
 PAGE
@@ -335,7 +339,7 @@ PAGE
   route: ${ctx.page.route}
   purpose: ${ctx.page.purpose}
   userFunction: ${ctx.page.userFunction}
-  sourceFile: ${ctx.page.filePath}${knownCoveredBlock}
+  sourceFile: ${ctx.page.filePath}${knownCoveredBlock}${focusBlock}
 
 PINNED BRAND VOICE (compare every visible piece of copy against this — flag drift)
 ${brandBlock}

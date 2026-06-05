@@ -185,6 +185,8 @@ export interface PipelineConfig {
   seedCmd?: string;
   /** Optional active workflow scenario key from scenarios.json config. */
   scenario?: string;
+  /** Optional run focus goal to target the audit and filter findings. */
+  focus?: string;
 }
 
 /* ─────────────────────────── Approvals & Comments Ledger ─────────────────────────── */
