@@ -187,6 +187,22 @@ export interface PipelineConfig {
   scenario?: string;
   /** Optional run focus goal to target the audit and filter findings. */
   focus?: string;
+  /**
+   * Raw query string appended to every route URL the browser navigates to
+   * (Agents 1 & 5, plus the login nav). No leading `?`/`&` — e.g.
+   * `"preview=1"`. Lets a target app branch into a non-persisting "preview"
+   * mode so full workflows can be exercised without writing real data.
+   * Set via `--url-query`.
+   */
+  urlQuery?: string;
+  /**
+   * Extra HTTP headers set on the Playwright browser context, so they ride
+   * on EVERY request — page navigations and in-page XHR/fetch alike. The
+   * robust companion to `urlQuery`: a query param only marks the SSR page
+   * load, but a header (e.g. `x-preview-mode: 1`) also tags the API calls a
+   * workflow fires, so server-side writes can no-op. Set via `--header`.
+   */
+  extraHeaders?: Record<string, string>;
 }
 
 /* ─────────────────────────── Approvals & Comments Ledger ─────────────────────────── */

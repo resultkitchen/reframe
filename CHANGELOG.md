@@ -2,6 +2,14 @@
 
 All notable changes to Reframe are recorded here. Format follows [Keep a Changelog](https://keepachangelog.com/), versions follow [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added — Preview-mode driving
+
+- **`--url-query <qs>`** — a raw query string (e.g. `preview=1`) appended to every route the browser navigates to (Agents 1 & 5, plus the login nav). Lets a target app branch into a non-persisting "preview" path so full workflows can be exercised without writing real data. A leading `?`/`&` is tolerated and stripped.
+- **`--header "Name: value"`** (repeatable) — extra HTTP headers set on the Playwright **browser context**, so they ride on every request the page makes — navigations *and* in-page fetch/XHR. The robust companion to `--url-query`: a query param only marks the SSR page load, but a header (e.g. `x-preview-mode: 1`) also tags the API calls a workflow fires, so the target's server-side writes can no-op. Implemented via `context.setExtraHTTPHeaders` in `PageDriver.launch`.
+- Together these enable "drive whole workflows against the live backend with zero mutations" — e.g. CasesDaily's `src/lib/preview.ts` honours both `?preview=1` and `x-preview-mode: 1`.
+
 ## [0.3.0] — 2026-05-28
 
 Theme: **the SPA earns its labels**. A founder-led critique of the review SPA (every button passes the 5-second "what does this do?" test, brand panel goes visual, broken connectors get wired, and the vibe-coder flow back to Claude Code is named.)

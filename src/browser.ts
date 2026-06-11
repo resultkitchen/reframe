@@ -46,6 +46,12 @@ export class PageDriver {
   /** When true, exercise() skips destructive clicks (see DESTRUCTIVE_LABEL). */
   private readonly readOnly: boolean;
 
+  /**
+   * Raw query string (no leading `?`/`&`) appended to every URL this driver
+   * navigates to — `open()` and the login nav. Empty/undefined = no-op.
+   */
+  private readonly urlQuery?: string;
+
   /** Console errors + uncaught page errors collected since launch. */
   private readonly consoleErrors: string[] = [];
 
@@ -53,10 +59,16 @@ export class PageDriver {
 
   private navFailed = false;
 
-  private constructor(browser: Browser, page: Page, readOnly: boolean) {
+  private constructor(
+    browser: Browser,
+    page: Page,
+    readOnly: boolean,
+    urlQuery?: string,
+  ) {
     this.browser = browser;
     this.page = page;
     this.readOnly = readOnly;
+    this.urlQuery = urlQuery && urlQuery.trim() ? urlQuery.trim() : undefined;
 
     // Capture console errors.
     this.page.on('console', (msg: ConsoleMessage) => {
@@ -92,10 +104,31 @@ export class PageDriver {
     });
   }
 
-  static async launch(opts?: { readOnly?: boolean; mocksPath?: string }): Promise<PageDriver> {
+  static async launch(opts?: {
+    readOnly?: boolean;
+    mocksPath?: string;
+    /** Query string appended to every navigation (no leading `?`), e.g. "preview=1". */
+    urlQuery?: string;
+    /** Extra HTTP headers set on the context — ride on navigations AND XHR/fetch. */
+    extraHeaders?: Record<string, string>;
+  }): Promise<PageDriver> {
     const { chromium } = await import('playwright');
     const browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();
+
+    // Extra headers on the CONTEXT apply to every request it makes — page
+    // loads and in-page fetch/XHR alike. This is what lets a header like
+    // `x-preview-mode: 1` tag the API calls a workflow fires, so the target's
+    // server-side writes can no-op even though the query param only marks the
+    // top-level page navigation.
+    if (opts?.extraHeaders && Object.keys(opts.extraHeaders).length > 0) {
+      try {
+        await context.setExtraHTTPHeaders(opts.extraHeaders);
+      } catch (err) {
+        console.error(`[reframe] failed to set extra HTTP headers: ${String(err)}`);
+      }
+    }
+
     const page = await context.newPage();
 
     // Register Network Mocks
@@ -127,11 +160,22 @@ export class PageDriver {
       }
     }
 
-    return new PageDriver(browser, page, opts?.readOnly ?? false);
+    return new PageDriver(browser, page, opts?.readOnly ?? false, opts?.urlQuery);
+  }
+
+  /**
+   * Append this driver's `urlQuery` to a URL, preserving any existing query
+   * string. No-op when `urlQuery` is unset or the URL can't be parsed.
+   */
+  private withQuery(url: string): string {
+    if (!this.urlQuery) return url;
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}${this.urlQuery}`;
   }
 
   /** Navigate to `url` and wait for the network to settle. */
   async open(url: string): Promise<void> {
+    url = this.withQuery(url);
     this.navFailed = false;
     this.lastNavStatus = undefined;
     try {
@@ -292,7 +336,7 @@ export class PageDriver {
     const loginPath = auth.loginUrl.startsWith('/')
       ? auth.loginUrl
       : `/${auth.loginUrl}`;
-    const loginUrl = baseUrl.replace(/\/+$/, '') + loginPath;
+    const loginUrl = this.withQuery(baseUrl.replace(/\/+$/, '') + loginPath);
 
     try {
       await this.page.goto(loginUrl, {
