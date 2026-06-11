@@ -179,6 +179,8 @@ interface ParsedArgs {
   seedCmd?: string;
   scenario?: string;
   focus?: string;
+  urlQuery?: string;
+  extraHeaders?: Record<string, string>;
 }
 
 /**
@@ -274,6 +276,22 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.scenario = next();
     } else if (tok === '--focus') {
       out.focus = next();
+    } else if (tok === '--url-query') {
+      // Raw query string appended to every navigated route, e.g. "preview=1".
+      // Tolerate a leading ? or & — strip it so callers can be sloppy.
+      out.urlQuery = next().replace(/^[?&]+/, '').trim() || undefined;
+    } else if (tok === '--header') {
+      // Repeatable. Each value is "Name: value" (or "Name=value"). Collected
+      // into a map set as extra HTTP headers on the browser context.
+      const raw = next();
+      const sep = raw.search(/[:=]/);
+      if (sep === -1) {
+        throw new Error(`--header must be "Name: value" (got "${raw}")`);
+      }
+      const name = raw.slice(0, sep).trim();
+      const value = raw.slice(sep + 1).trim();
+      if (!name) throw new Error(`--header has an empty name (got "${raw}")`);
+      out.extraHeaders = { ...(out.extraHeaders ?? {}), [name]: value };
     } else if (tok.startsWith('--')) {
       throw new Error(`Unknown flag "${tok}"`);
     } else if (target === undefined) {
@@ -426,6 +444,8 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     seedCmd: args.seedCmd,
     scenario: args.scenario,
     focus: args.focus,
+    urlQuery: args.urlQuery,
+    extraHeaders: args.extraHeaders,
   };
 
   return config;

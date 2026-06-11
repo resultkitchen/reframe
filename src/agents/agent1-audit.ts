@@ -437,6 +437,8 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
     driver = await PageDriver.launch({
       readOnly: ctx.config.readOnlyExercise,
       mocksPath: ctx.config.mocksPath,
+      urlQuery: ctx.config.urlQuery,
+      extraHeaders: ctx.config.extraHeaders,
     });
 
     // Auth-aware: if this route belongs to a role, log in FIRST so the page
