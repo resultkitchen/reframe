@@ -81,6 +81,11 @@ FLAGS
                               instead of the LLM mapper, so every run + shard
                               audits the identical correct routes. Use when
                               mapping varies run-to-run.
+  --no-exercise               Do NOT click anything: navigate, screenshot, and
+                              analyze only. The safest mode for a LIVE
+                              production site (a stray click could trigger a
+                              real action or wander off-route). Guarantees zero
+                              side effects + clean per-route screenshots.
   --real-env                  Preserve the target's real .env.local instead of
                               writing safe stubs — point at a live install.
                               Implies --read-only.

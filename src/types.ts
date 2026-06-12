@@ -228,6 +228,15 @@ export interface PipelineConfig {
    * Set via `--scope <path>`.
    */
   scopePath?: string;
+  /**
+   * Skip the exercise() click-loop entirely: just navigate, screenshot, and
+   * analyze — no clicks at all. The safest mode for auditing a LIVE production
+   * deployment, where even a non-destructive click (a "Sync", a filter, a nav
+   * link) could trigger a real action or navigate away. Loses interaction-level
+   * findings but guarantees zero side effects + clean per-route screenshots.
+   * Set via `--no-exercise`.
+   */
+  noExercise?: boolean;
 }
 
 /* ─────────────────────────── Approvals & Comments Ledger ─────────────────────────── */

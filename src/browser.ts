@@ -173,6 +173,20 @@ export class PageDriver {
     return `${url}${sep}${this.urlQuery}`;
   }
 
+  /** Console + page errors captured so far (without exercising). */
+  getConsoleErrors(): string[] {
+    return [...this.consoleErrors];
+  }
+
+  /** Current page pathname (e.g. after exercise() navigated away). */
+  currentPath(): string {
+    try {
+      return new URL(this.page.url()).pathname;
+    } catch {
+      return '';
+    }
+  }
+
   /** Navigate to `url` and wait for the network to settle. */
   async open(url: string): Promise<void> {
     url = this.withQuery(url);

@@ -184,6 +184,7 @@ interface ParsedArgs {
   baseUrl?: string;
   shard?: { index: number; total: number };
   scopePath?: string;
+  noExercise?: boolean;
 }
 
 /**
@@ -311,6 +312,8 @@ function parseArgs(argv: string[]): ParsedArgs {
       out.shard = { index, total };
     } else if (tok === '--scope') {
       out.scopePath = path.resolve(next());
+    } else if (tok === '--no-exercise') {
+      out.noExercise = true;
     } else if (tok.startsWith('--')) {
       throw new Error(`Unknown flag "${tok}"`);
     } else if (target === undefined) {
@@ -468,6 +471,7 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     baseUrl: args.baseUrl,
     shard: args.shard,
     scopePath: args.scopePath,
+    noExercise: args.noExercise,
   };
 
   return config;

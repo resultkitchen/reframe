@@ -459,11 +459,33 @@ export async function runAudit(ctx: AgentContext): Promise<AuditResult> {
 
     await driver.open(url);
 
+    if (ctx.config.noExercise) {
+      // Live/prod-safe: do not click anything. Capture only what the page
+      // load surfaced. No drift, no side effects.
+      const note = '(exercise skipped — --no-exercise: no clicks on the live app)';
+      interactions = loginNote ? [`login: ${loginNote}`, note] : [note];
+      consoleErrors = driver.getConsoleErrors();
+    } else {
     const exercised = await driver.exercise();
     interactions = loginNote
       ? [`login: ${loginNote}`, ...exercised.interactions]
       : exercised.interactions;
     consoleErrors = exercised.consoleErrors;
+
+    // exercise() clicks links and may navigate away from the intended route
+    // (e.g. a nav/footer link). Before capturing the snapshot/screenshot/health,
+    // return to the intended route so they reflect THIS page — not wherever a
+    // click wandered to. A genuine redirect (e.g. an un-onboarded account →
+    // /book) simply re-redirects, so it's still surfaced honestly.
+    try {
+      const expectedPath = routePath.split('?')[0].replace(/\/+$/, '') || '/';
+      const here = driver.currentPath().replace(/\/+$/, '') || '/';
+      if (here !== expectedPath) {
+        interactions.push(`re-settled to ${routePath} after exercise drifted to ${here}`);
+        await driver.open(url);
+      }
+    } catch { /* best-effort re-settle */ }
+    }
 
     try {
       snapshot = await driver.snapshot();
