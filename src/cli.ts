@@ -56,6 +56,17 @@ FLAGS
   --quick-scan                Route per-page review agents to the cheap model tier.
   --params <path>             JSON map of dynamic-route sample values, e.g.
                               { "id": "1", "slug": "demo" } — so /leads/[id] is driven.
+  --url-query <qs>            Raw query string appended to every navigated
+                              route (Agents 1 & 5 + login), e.g. "preview=1".
+                              Lets a target branch into a non-persisting
+                              preview path so full workflows can be exercised
+                              without writing real data. Leading ?/& tolerated.
+  --header <Name: value>      Extra HTTP header set on the browser context, so
+                              it rides on every request incl. in-page
+                              fetch/XHR. Repeatable. Pairs with --url-query: a
+                              header like "x-preview-mode: 1" also tags the API
+                              calls a workflow fires, so server-side writes
+                              can no-op.
   --real-env                  Preserve the target's real .env.local instead of
                               writing safe stubs — point at a live install.
                               Implies --read-only.
