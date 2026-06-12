@@ -203,6 +203,31 @@ export interface PipelineConfig {
    * workflow fires, so server-side writes can no-op. Set via `--header`.
    */
   extraHeaders?: Record<string, string>;
+  /**
+   * Audit an ALREADY-LIVE deployment at this URL instead of booting the
+   * target from source. Stage 0 still maps the repo (route list + source for
+   * findings context), but Stage 0.5 boot is skipped — agents drive
+   * `baseUrl` directly. Lets you audit production (real data, real rendering)
+   * or any running instance. Set via `--base-url`. Pairs with `--auth` for
+   * logged-in real-account audits and `--read-only`/preview for safety.
+   */
+  baseUrl?: string;
+  /**
+   * Shard the per-page fan-out across parallel workers/tasks: process only
+   * pages where `pageIndex % total === index`. Lets N independent runs (e.g.
+   * Cloud Run Job tasks) split one app and merge results. Set via
+   * `--shard <index>/<total>` (0-based index). Applied after role/route
+   * filters, before --max-pages.
+   */
+  shard?: { index: number; total: number };
+  /**
+   * Pin the route map: load a saved `scope.json` instead of running Stage 0's
+   * (non-deterministic, LLM-based) mapper. Guarantees every run — and every
+   * parallel shard — audits the exact same correct routes + source paths.
+   * The fix for "the mapper found different/hallucinated routes each run".
+   * Set via `--scope <path>`.
+   */
+  scopePath?: string;
 }
 
 /* ─────────────────────────── Approvals & Comments Ledger ─────────────────────────── */

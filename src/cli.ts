@@ -67,6 +67,20 @@ FLAGS
                               header like "x-preview-mode: 1" also tags the API
                               calls a workflow fires, so server-side writes
                               can no-op.
+  --base-url <url>            Audit an ALREADY-LIVE deployment at <url> instead
+                              of booting the target from source (Stage 0.5
+                              skipped). Stage 0 still maps the repo for routes +
+                              source context. Audit production with real data
+                              and real rendering. Pair with --auth (real
+                              accounts) + --read-only / preview headers.
+  --shard <index>/<total>     Process only pages where pageIndex % total ==
+                              index (0-based). Splits one app across N parallel
+                              runs/tasks whose union is full coverage. Applied
+                              after role/route filters, before --max-pages.
+  --scope <path>              Pin the route map: load a saved scope.json
+                              instead of the LLM mapper, so every run + shard
+                              audits the identical correct routes. Use when
+                              mapping varies run-to-run.
   --real-env                  Preserve the target's real .env.local instead of
                               writing safe stubs — point at a live install.
                               Implies --read-only.

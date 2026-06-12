@@ -279,7 +279,18 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
 
     /* (5) Stage 0 — map. */
     let scope: ScopeDoc;
-    if (resuming && state && state.stage0 === 'done') {
+    if (config.scopePath) {
+      // --scope: pin the route map (deterministic). Skips the LLM mapper so
+      // every run + every parallel shard audits the identical route set with
+      // correct source paths. Still persists it into the run dir.
+      console.log(`[reframe] Stage 0 — using PINNED scope from ${config.scopePath} (LLM mapping skipped).`);
+      scope = JSON.parse(fs.readFileSync(config.scopePath, 'utf8')) as ScopeDoc;
+      try {
+        fs.mkdirSync(config.runDir, { recursive: true });
+        fs.writeFileSync(path.join(config.runDir, 'scope.json'), JSON.stringify(scope, null, 2), 'utf8');
+      } catch { /* best-effort */ }
+      console.log(`[reframe] Stage 0 (pinned) — ${scope.pages.length} page(s).`);
+    } else if (resuming && state && state.stage0 === 'done') {
       console.log(`[reframe] Stage 0 already done — loading scope.json`);
       scope = JSON.parse(
         fs.readFileSync(path.join(config.runDir, 'scope.json'), 'utf8'),
@@ -354,6 +365,17 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
       if (scope.pages.length === 0) {
         extraAlerts.push(`${msg}. No mapped page matched the requested route filter.`);
       }
+    }
+
+    if (config.shard) {
+      const { index, total } = config.shard;
+      const originalLength = scope.pages.length;
+      // Stable round-robin split so N parallel tasks cover disjoint pages and
+      // their union is the whole app. Index is 0-based.
+      scope.pages = scope.pages.filter((_, i) => i % total === index);
+      console.log(
+        `[reframe] Shard ${index}/${total}: processing ${scope.pages.length} of ${originalLength} mapped pages.`,
+      );
     }
 
     if (config.maxPages !== undefined && scope.pages.length > config.maxPages) {
@@ -510,8 +532,36 @@ export async function runPipeline(config: PipelineConfig): Promise<RunManifest> 
        node_modules AND the running dev server) is deleted at the end of every
        run, so a cached boot.json baseUrl from a prior run points at a server
        that no longer exists. */
-    console.log(`[reframe] Stage 0.5 — boot gate...`);
-    const boot = await runBootGate(config);
+    let boot: BootResult;
+    if (config.baseUrl) {
+      // --base-url: skip boot entirely and audit an already-live deployment.
+      // Source was still copied/cloned above for route mapping + findings
+      // context; we just point the browser at the live URL instead of a
+      // freshly-booted dev server.
+      console.log(
+        `[reframe] Stage 0.5 — SKIPPED (--base-url ${config.baseUrl}); auditing the live deployment.`,
+      );
+      boot = {
+        status: 'running',
+        baseUrl: config.baseUrl,
+        installLog: '',
+        bootLog: `[--base-url] auditing live deployment at ${config.baseUrl} (no local boot/install)`,
+        stubbedIntegrations: [
+          `NONE — --base-url: auditing live deployment ${config.baseUrl} (real data, real rendering)`,
+        ],
+      };
+      try {
+        fs.mkdirSync(config.runDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(config.runDir, 'boot.json'),
+          JSON.stringify(boot, null, 2),
+          'utf8',
+        );
+      } catch { /* best-effort */ }
+    } else {
+      console.log(`[reframe] Stage 0.5 — boot gate...`);
+      boot = await runBootGate(config);
+    }
     console.log(
       `[reframe] boot status: ${boot.status}` +
         (boot.baseUrl ? ` @ ${boot.baseUrl}` : ''),

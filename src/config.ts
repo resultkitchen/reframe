@@ -181,6 +181,9 @@ interface ParsedArgs {
   focus?: string;
   urlQuery?: string;
   extraHeaders?: Record<string, string>;
+  baseUrl?: string;
+  shard?: { index: number; total: number };
+  scopePath?: string;
 }
 
 /**
@@ -292,6 +295,22 @@ function parseArgs(argv: string[]): ParsedArgs {
       const value = raw.slice(sep + 1).trim();
       if (!name) throw new Error(`--header has an empty name (got "${raw}")`);
       out.extraHeaders = { ...(out.extraHeaders ?? {}), [name]: value };
+    } else if (tok === '--base-url') {
+      const v = next().trim().replace(/\/+$/, '');
+      if (!/^https?:\/\//i.test(v)) throw new Error(`--base-url must be an http(s) URL (got "${v}")`);
+      out.baseUrl = v;
+    } else if (tok === '--shard') {
+      const v = next().trim();
+      const m = v.match(/^(\d+)\s*\/\s*(\d+)$/);
+      if (!m) throw new Error(`--shard must be "<index>/<total>" (0-based), got "${v}"`);
+      const index = Number.parseInt(m[1], 10);
+      const total = Number.parseInt(m[2], 10);
+      if (total < 1 || index < 0 || index >= total) {
+        throw new Error(`--shard index must be 0..total-1 and total>=1 (got ${index}/${total})`);
+      }
+      out.shard = { index, total };
+    } else if (tok === '--scope') {
+      out.scopePath = path.resolve(next());
     } else if (tok.startsWith('--')) {
       throw new Error(`Unknown flag "${tok}"`);
     } else if (target === undefined) {
@@ -446,6 +465,9 @@ export async function resolveConfig(argv: string[]): Promise<PipelineConfig> {
     focus: args.focus,
     urlQuery: args.urlQuery,
     extraHeaders: args.extraHeaders,
+    baseUrl: args.baseUrl,
+    shard: args.shard,
+    scopePath: args.scopePath,
   };
 
   return config;
